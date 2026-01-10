@@ -31,6 +31,7 @@ from app.schemas.product_overview import (
 from app.services.architecture_extractor import ArchitectureExtractor
 from app.services.content_generator import ContentGenerator, ContentResult
 from app.services.file_selector import FileSelector, FileSelectorInput
+from app.services.framework_detector import FrameworkDetector
 from app.services.github import GitHubService, RepoContext
 from app.services.stats_extractor import StatsExtractor
 
@@ -72,6 +73,7 @@ class AnalysisOrchestrator:
         self.arch_extractor = ArchitectureExtractor()
         self.content_generator = ContentGenerator()
         self.file_selector = FileSelector()
+        self.framework_detector = FrameworkDetector()
 
     async def analyze_product(self, user_id: uuid_pkg.UUID) -> ProductOverview:
         """
@@ -245,10 +247,12 @@ class AnalysisOrchestrator:
         Use AI to identify architecturally significant files and fetch them.
 
         For each repository:
-        1. Send file tree to FileSelector (Claude Haiku)
-        2. Get back list of significant files
-        3. Fetch those files via GitHub API
-        4. Update the RepoContext with the new files
+        1. Detect frameworks from key files (package.json, pyproject.toml, etc.)
+        2. Send file tree + framework hints to FileSelector (Claude Haiku)
+        3. Get back list of significant files
+        4. Fetch those files via GitHub API
+        5. Optionally perform second-pass refinement for related files
+        6. Update the RepoContext with the new files
 
         Args:
             repos: List of Repository models (for metadata)
@@ -280,20 +284,30 @@ class AnalysisOrchestrator:
                 # Get README content from existing files for context
                 readme_content = context.files.get("README.md") or context.files.get("readme.md")
 
-                # Use FileSelector to identify significant files
+                # Phase 4: Detect frameworks from key files
+                framework_hints = self.framework_detector.detect(context.files)
+                if framework_hints.frameworks:
+                    framework_names = [f.name for f in framework_hints.frameworks]
+                    logger.info(
+                        f"Detected frameworks for {context.full_name}: {', '.join(framework_names)}"
+                    )
+
+                # Use FileSelector to identify significant files (with framework hints)
                 selector_input = FileSelectorInput(
                     repo_name=context.full_name,
                     description=context.description,
                     readme_content=readme_content,
                     file_paths=context.tree.files,
+                    framework_hints=framework_hints,  # Phase 4: Pass framework hints
                 )
 
                 result = await self.file_selector.select_files(selector_input)
 
                 if result.selected_files:
+                    fallback_note = " (used fallback)" if result.used_fallback else ""
                     logger.info(
                         f"FileSelector identified {len(result.selected_files)} files for "
-                        f"{context.full_name} (truncated: {result.truncated})"
+                        f"{context.full_name} (truncated: {result.truncated}){fallback_note}"
                     )
 
                     # Fetch the selected files
@@ -311,6 +325,35 @@ class AnalysisOrchestrator:
                         f"Fetched {len(selected_file_contents)} files, "
                         f"total files now: {len(context.files)}"
                     )
+
+                    # Phase 4: Two-pass refinement (optional, for better coverage)
+                    # Only do second pass if first pass got less than 20 files and
+                    # there are more potential files to discover
+                    if (
+                        len(result.selected_files) < 20
+                        and len(context.tree.files) > 50
+                        and len(selected_file_contents) >= 5
+                    ):
+                        additional_files = await self.file_selector.refine_selection(
+                            repo_name=context.full_name,
+                            file_paths=context.tree.files,
+                            already_selected=list(context.files.keys()),
+                            file_contents=selected_file_contents,
+                            max_additional=15,
+                        )
+
+                        if additional_files:
+                            additional_contents = await self.github.fetch_files_by_paths(
+                                owner=owner,
+                                repo=repo_name,
+                                paths=additional_files,
+                                branch=context.default_branch,
+                            )
+                            context.files.update(additional_contents)
+                            logger.info(
+                                f"Second pass added {len(additional_contents)} files, "
+                                f"total now: {len(context.files)}"
+                            )
                 else:
                     logger.warning(f"FileSelector returned no files for {context.full_name}")
 
