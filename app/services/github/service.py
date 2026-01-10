@@ -643,9 +643,7 @@ class GitHubService:
             return {}
 
         # Filter tree files to only architecture-relevant ones
-        architecture_files = [
-            path for path in tree.files if self._is_architecture_file(path)
-        ]
+        architecture_files = [path for path in tree.files if self._is_architecture_file(path)]
 
         if not architecture_files:
             return {}
@@ -674,12 +672,63 @@ class GitHubService:
             if isinstance(result, tuple) and (path := result[0]) and (content := result[1])
         }
 
+    async def fetch_files_by_paths(
+        self,
+        owner: str,
+        repo: str,
+        paths: list[str],
+        branch: str = "main",
+        max_concurrent: int = 5,
+        max_size: int = 100_000,
+    ) -> dict[str, str]:
+        """
+        Fetch contents of specific files by their paths.
+
+        This method is used by the dynamic file selector to fetch files
+        that Claude identified as architecturally significant.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            paths: List of file paths to fetch
+            branch: Branch name (default: "main")
+            max_concurrent: Maximum concurrent requests (default: 5)
+            max_size: Maximum file size in bytes (default: 100KB)
+
+        Returns:
+            Dict mapping file paths to their contents (excludes missing/binary files)
+        """
+        if not paths:
+            return {}
+
+        # Use semaphore for concurrency control
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def fetch_with_limit(file_path: str) -> tuple[str, str | None]:
+            async with semaphore:
+                content = await self.get_file_content(
+                    owner, repo, file_path, branch, max_size=max_size
+                )
+                return (file_path, content.content if content else None)
+
+        # Fetch all files concurrently
+        tasks = [fetch_with_limit(fp) for fp in paths]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter successful results, skip exceptions and None values
+        return {
+            path: content
+            for result in results
+            if isinstance(result, tuple) and (path := result[0]) and (content := result[1])
+        }
+
     async def get_repo_context(
         self,
         owner: str,
         repo: str,
         branch: str | None = None,
         description: str | None = None,
+        skip_architecture_files: bool = False,
     ) -> RepoContext:
         """
         Fetch complete context for a repository for AI analysis.
@@ -698,6 +747,8 @@ class GitHubService:
             repo: Repository name
             branch: Branch name (if None, fetches repo details to get default branch)
             description: Repository description (if known, avoids extra API call)
+            skip_architecture_files: If True, skip pattern-based architecture file fetching.
+                Use this when using dynamic file selection instead.
 
         Returns:
             RepoContext with all gathered information
@@ -756,11 +807,13 @@ class GitHubService:
             errors.append(f"Failed to get key files: {e.message}")
 
         # Fetch architecture files (routes, models, services, pages)
-        try:
-            arch_files = await self.get_architecture_files(owner, repo, branch, tree)
-            files.update(arch_files)  # Merge with key files
-        except GitHubAPIError as e:
-            errors.append(f"Failed to get architecture files: {e.message}")
+        # Skip if using dynamic file selection
+        if not skip_architecture_files:
+            try:
+                arch_files = await self.get_architecture_files(owner, repo, branch, tree)
+                files.update(arch_files)  # Merge with key files
+            except GitHubAPIError as e:
+                errors.append(f"Failed to get architecture files: {e.message}")
 
         # Fetch languages
         try:
@@ -901,12 +954,14 @@ class GitHubService:
                     )
 
                 blob_data = blob_response.json()
-                tree_items.append({
-                    "path": file["path"],
-                    "mode": "100644",  # Regular file
-                    "type": "blob",
-                    "sha": blob_data["sha"],
-                })
+                tree_items.append(
+                    {
+                        "path": file["path"],
+                        "mode": "100644",  # Regular file
+                        "type": "blob",
+                        "sha": blob_data["sha"],
+                    }
+                )
 
             # 4. Create a new tree
             tree_response = await client.post(

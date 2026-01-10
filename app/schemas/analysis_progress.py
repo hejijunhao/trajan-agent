@@ -23,12 +23,13 @@ class AnalysisProgress(BaseModel):
     stage: Literal[
         "fetching_repos",
         "scanning_files",
+        "identifying_files",
         "analyzing_code",
         "generating_content",
     ] = Field(description="Current stage of the analysis workflow")
 
-    stage_number: int = Field(ge=1, le=4, description="Current stage (1-4)")
-    total_stages: int = Field(default=4, description="Total number of stages")
+    stage_number: int = Field(ge=1, le=5, description="Current stage (1-5)")
+    total_stages: int = Field(default=5, description="Total number of stages")
 
     # Current activity detail
     current_repo: str | None = Field(

@@ -30,6 +30,7 @@ from app.schemas.product_overview import (
 )
 from app.services.architecture_extractor import ArchitectureExtractor
 from app.services.content_generator import ContentGenerator, ContentResult
+from app.services.file_selector import FileSelector, FileSelectorInput
 from app.services.github import GitHubService, RepoContext
 from app.services.stats_extractor import StatsExtractor
 
@@ -70,16 +71,18 @@ class AnalysisOrchestrator:
         self.stats_extractor = StatsExtractor()
         self.arch_extractor = ArchitectureExtractor()
         self.content_generator = ContentGenerator()
+        self.file_selector = FileSelector()
 
     async def analyze_product(self, user_id: uuid_pkg.UUID) -> ProductOverview:
         """
         Full analysis workflow with parallel execution.
 
         Workflow:
-        1. Fetch repository contexts from GitHub (parallel per repo)
-        2. Run stats extraction + architecture extraction in parallel
-        3. Generate content (depends on stats + architecture)
-        4. Merge everything into ProductOverview
+        1. Fetch repository contexts from GitHub (tree + key files)
+        2. Identify architecturally significant files using AI
+        3. Fetch selected files and update contexts
+        4. Run stats extraction + architecture extraction in parallel
+        5. Generate content (depends on stats + architecture)
 
         Args:
             user_id: The user's ID (for data isolation)
@@ -106,7 +109,7 @@ class AnalysisOrchestrator:
 
         logger.info(f"Found {len(repos)} GitHub repositories to analyze")
 
-        # Stage 2: Scanning file structure (fetch all repo contexts)
+        # Stage 2: Scanning file structure (fetch repo contexts without architecture files)
         await self._update_progress(
             AnalysisProgress(
                 stage="scanning_files",
@@ -121,11 +124,22 @@ class AnalysisOrchestrator:
             logger.error("Failed to fetch context from any repositories")
             return self._create_empty_overview(product)
 
-        # Stage 3: Analyzing code structure (stats + architecture in parallel)
+        # Stage 3: Identify key files using AI
+        await self._update_progress(
+            AnalysisProgress(
+                stage="identifying_files",
+                stage_number=3,
+                message="Identifying key architecture files...",
+            )
+        )
+
+        repo_contexts = await self._identify_and_fetch_files(repos, repo_contexts)
+
+        # Stage 4: Analyzing code structure (stats + architecture in parallel)
         await self._update_progress(
             AnalysisProgress(
                 stage="analyzing_code",
-                stage_number=3,
+                stage_number=4,
                 message="Extracting statistics and architecture...",
             )
         )
@@ -139,11 +153,11 @@ class AnalysisOrchestrator:
             f"{len(architecture.database_models)} models"
         )
 
-        # Stage 4: Generating content (depends on stats + architecture)
+        # Stage 5: Generating content (depends on stats + architecture)
         await self._update_progress(
             AnalysisProgress(
                 stage="generating_content",
-                stage_number=4,
+                stage_number=5,
                 message="Writing project documentation...",
             )
         )
@@ -206,7 +220,10 @@ class AnalysisOrchestrator:
         return repo_contexts
 
     async def _fetch_repo_context(self, repo: Repository) -> RepoContext:
-        """Fetch complete context for a single repository."""
+        """Fetch context for a single repository (without architecture files).
+
+        Architecture files are fetched separately after AI-based file selection.
+        """
         if not repo.full_name:
             raise ValueError(f"Repository {repo.name} has no full_name")
 
@@ -217,7 +234,94 @@ class AnalysisOrchestrator:
             repo=repo_name,
             branch=repo.default_branch,
             description=repo.description,
+            skip_architecture_files=True,  # Files selected dynamically
         )
+
+    async def _identify_and_fetch_files(
+        self,
+        repos: list[Repository],
+        repo_contexts: list[RepoContext],
+    ) -> list[RepoContext]:
+        """
+        Use AI to identify architecturally significant files and fetch them.
+
+        For each repository:
+        1. Send file tree to FileSelector (Claude Haiku)
+        2. Get back list of significant files
+        3. Fetch those files via GitHub API
+        4. Update the RepoContext with the new files
+
+        Args:
+            repos: List of Repository models (for metadata)
+            repo_contexts: List of RepoContext with tree but minimal files
+
+        Returns:
+            Updated list of RepoContext with architecture files added
+        """
+        updated_contexts: list[RepoContext] = []
+
+        for repo, context in zip(repos, repo_contexts, strict=True):
+            # Update progress with current repo
+            await self._update_progress(
+                AnalysisProgress(
+                    stage="identifying_files",
+                    stage_number=3,
+                    current_repo=repo.full_name,
+                    message=f"Identifying key files in {repo.full_name}...",
+                )
+            )
+
+            # Skip if no tree available
+            if not context.tree or not context.tree.files:
+                logger.warning(f"No file tree for {context.full_name}, skipping file selection")
+                updated_contexts.append(context)
+                continue
+
+            try:
+                # Get README content from existing files for context
+                readme_content = context.files.get("README.md") or context.files.get("readme.md")
+
+                # Use FileSelector to identify significant files
+                selector_input = FileSelectorInput(
+                    repo_name=context.full_name,
+                    description=context.description,
+                    readme_content=readme_content,
+                    file_paths=context.tree.files,
+                )
+
+                result = await self.file_selector.select_files(selector_input)
+
+                if result.selected_files:
+                    logger.info(
+                        f"FileSelector identified {len(result.selected_files)} files for "
+                        f"{context.full_name} (truncated: {result.truncated})"
+                    )
+
+                    # Fetch the selected files
+                    owner, repo_name = context.full_name.split("/", 1)
+                    selected_file_contents = await self.github.fetch_files_by_paths(
+                        owner=owner,
+                        repo=repo_name,
+                        paths=result.selected_files,
+                        branch=context.default_branch,
+                    )
+
+                    # Merge with existing files (key files + selected architecture files)
+                    context.files.update(selected_file_contents)
+                    logger.info(
+                        f"Fetched {len(selected_file_contents)} files, "
+                        f"total files now: {len(context.files)}"
+                    )
+                else:
+                    logger.warning(f"FileSelector returned no files for {context.full_name}")
+
+            except Exception as e:
+                logger.error(f"Failed to select/fetch files for {context.full_name}: {e}")
+                context.errors.append(f"Failed to identify architecture files: {e}")
+
+            updated_contexts.append(context)
+
+        return updated_contexts
 
     async def _extract_in_parallel(
         self,
@@ -236,9 +340,7 @@ class AnalysisOrchestrator:
         stats_task = asyncio.create_task(
             asyncio.to_thread(self.stats_extractor.extract_stats, repo_contexts)
         )
-        arch_task = asyncio.create_task(
-            self.arch_extractor.extract_architecture(repo_contexts)
-        )
+        arch_task = asyncio.create_task(self.arch_extractor.extract_architecture(repo_contexts))
 
         # Wait for both to complete
         stats, architecture = await asyncio.gather(stats_task, arch_task)
