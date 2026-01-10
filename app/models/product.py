@@ -1,4 +1,5 @@
 import uuid as uuid_pkg
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Column
@@ -81,6 +82,30 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
         sa_column=Column(
             JSONB, comment="AI-generated project overview (ProductOverview schema)"
         ),
+    )
+
+    # Documentation generation fields
+    docs_generation_status: str | None = Field(
+        default=None,
+        max_length=20,
+        sa_column_kwargs={
+            "comment": "Doc generation state: 'generating' | 'completed' | 'failed' | NULL"
+        },
+    )
+    docs_generation_error: str | None = Field(
+        default=None,
+        max_length=500,
+        sa_column_kwargs={"comment": "Error message if doc generation failed"},
+    )
+    docs_generation_progress: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(
+            JSONB, comment="Real-time progress updates during doc generation (ephemeral)"
+        ),
+    )
+    last_docs_generated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={"comment": "Timestamp of last successful doc generation"},
     )
 
     # Relationships

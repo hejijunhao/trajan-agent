@@ -1,6 +1,8 @@
 import uuid as uuid_pkg
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
+from sqlalchemy import Column
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.base import TimestampMixin, UserOwnedMixin, UUIDMixin
@@ -14,7 +16,7 @@ class DocumentBase(SQLModel):
 
     title: str | None = Field(default=None, max_length=500, index=True)
     content: str | None = Field(default=None)
-    type: str | None = Field(default=None, max_length=50)  # e.g. blueprint, architecture, note, plan
+    type: str | None = Field(default=None, max_length=50)  # e.g. blueprint, architecture, note, plan, changelog
     is_pinned: bool | None = Field(default=False)
 
 
@@ -27,6 +29,7 @@ class DocumentCreate(SQLModel):
     type: str | None = None
     is_pinned: bool = False
     repository_id: uuid_pkg.UUID | None = None
+    folder: dict[str, Any] | None = None  # e.g. {"path": "blueprints"}
 
 
 class DocumentUpdate(SQLModel):
@@ -36,6 +39,7 @@ class DocumentUpdate(SQLModel):
     content: str | None = None
     type: str | None = None
     is_pinned: bool | None = None
+    folder: dict[str, Any] | None = None
 
 
 class Document(DocumentBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True):
@@ -53,6 +57,15 @@ class Document(DocumentBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=Tr
         default=None,
         foreign_key="repositories.id",
         index=True,
+    )
+
+    # Folder path for organizing documents (e.g. {"path": "blueprints"})
+    folder: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(
+            JSONB,
+            comment="Folder path for document organization (e.g. blueprints, plans, completions)",
+        ),
     )
 
     # Relationships

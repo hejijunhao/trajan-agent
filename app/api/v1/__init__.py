@@ -2,6 +2,7 @@ from app.api.v1 import (
     app_info,
     documents,
     github,
+    organizations,
     preferences,
     products,
     repositories,
@@ -18,4 +19,5 @@ __all__ = [
     "users",
     "preferences",
     "github",
+    "organizations",
 ]

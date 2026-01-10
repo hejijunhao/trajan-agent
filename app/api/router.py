@@ -5,6 +5,7 @@ from app.api.v1 import (
     app_info,
     documents,
     github,
+    organizations,
     preferences,
     products,
     repositories,
@@ -22,4 +23,5 @@ api_router.include_router(app_info.router)
 api_router.include_router(users.router)
 api_router.include_router(preferences.router)
 api_router.include_router(github.router)
+api_router.include_router(organizations.router)
 api_router.include_router(admin.router)
