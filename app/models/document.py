@@ -2,7 +2,7 @@ import uuid as uuid_pkg
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column
+from sqlalchemy import Column, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -47,6 +47,10 @@ class Document(DocumentBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=Tr
     """Documentation entry within a Product."""
 
     __tablename__ = "documents"
+    __table_args__ = (
+        # Functional index for folder path queries (grouping, filtering by folder)
+        Index("ix_documents_folder_path", text("(folder->>'path')")),
+    )
 
     product_id: uuid_pkg.UUID | None = Field(
         default=None,

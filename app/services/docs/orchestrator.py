@@ -21,6 +21,7 @@ from app.services.docs.blueprint_agent import BlueprintAgent
 from app.services.docs.changelog_agent import ChangelogAgent
 from app.services.docs.plans_agent import PlansAgent
 from app.services.docs.types import DocsInfo, OrchestratorResult
+from app.services.docs.utils import extract_title, infer_doc_type, map_path_to_folder
 from app.services.github import GitHubService
 from app.services.github.types import RepoTreeItem
 
@@ -192,13 +193,13 @@ class DocumentOrchestrator:
                 content = file_content.content
 
                 # Map to our folder structure
-                folder_path = self._map_path_to_folder(item.path)
-                doc_type = self._infer_doc_type(item.path, content)
+                folder_path = map_path_to_folder(item.path)
+                doc_type = infer_doc_type(item.path, content)
 
                 doc = Document(
                     product_id=self.product.id,
                     user_id=self.product.user_id,
-                    title=self._extract_title(content, item.path),
+                    title=extract_title(content, item.path),
                     content=content,
                     type=doc_type,
                     folder={"path": folder_path} if folder_path else None,
@@ -220,60 +221,6 @@ class DocumentOrchestrator:
                 await self.db.refresh(doc)
 
         return imported
-
-    def _map_path_to_folder(self, path: str) -> str | None:
-        """Map source path to our folder structure."""
-        path_lower = path.lower()
-
-        # Changelog stays at root
-        if "changelog" in path_lower or "changes" in path_lower or "history" in path_lower:
-            return None
-
-        # Map known patterns
-        if any(p in path_lower for p in ["/plans/", "/roadmap/", "/planning/"]):
-            return "plans"
-        if any(p in path_lower for p in ["/completed/", "/done/", "/finished/"]):
-            return "completions"
-        if any(p in path_lower for p in ["/archive/", "/old/", "/deprecated/"]):
-            return "archive"
-        if any(p in path_lower for p in ["/executing/", "/in-progress/", "/wip/"]):
-            return "executing"
-
-        # Everything else goes to blueprints
-        return "blueprints"
-
-    def _infer_doc_type(self, path: str, _content: str) -> str:
-        """Infer doc_type from path and content."""
-        path_lower = path.lower()
-
-        if "changelog" in path_lower or "changes" in path_lower:
-            return "changelog"
-        if "architecture" in path_lower:
-            return "architecture"
-        if any(p in path_lower for p in ["plan", "roadmap", "proposal"]):
-            return "plan"
-        if "readme" in path_lower:
-            return "blueprint"
-        if "api" in path_lower:
-            return "architecture"
-        if "guide" in path_lower or "tutorial" in path_lower:
-            return "note"
-
-        return "blueprint"
-
-    def _extract_title(self, content: str, path: str) -> str:
-        """Extract title from markdown content or filename."""
-        # Try to get first H1
-        for line in content.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("# "):
-                return stripped[2:].strip()
-
-        # Fallback to filename
-        filename = path.split("/")[-1]
-        # Remove .md extension and clean up
-        title = filename.replace(".md", "").replace("-", " ").replace("_", " ")
-        return title.title()
 
     async def _update_progress(self, stage: str, message: str) -> None:
         """Update product's docs_generation_progress for frontend polling."""

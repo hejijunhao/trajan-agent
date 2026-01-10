@@ -1,5 +1,4 @@
 import uuid as uuid_pkg
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -168,11 +167,8 @@ async def move_to_executing(
             detail="Only plans can be moved to executing",
         )
 
-    doc.folder = {"path": "executing"}
-    doc.updated_at = datetime.now(UTC)
-    await db.commit()
-    await db.refresh(doc)
-    return _serialize_document(doc)
+    updated = await document_ops.move_to_executing(db, document_id, current_user.id)
+    return _serialize_document(updated)
 
 
 @router.post("/{document_id}/move-to-completed")
@@ -195,13 +191,8 @@ async def move_to_completed(
             detail="Only plans can be moved to completions",
         )
 
-    # Include date in folder path
-    date_prefix = datetime.now(UTC).strftime("%Y-%m-%d")
-    doc.folder = {"path": f"completions/{date_prefix}"}
-    doc.updated_at = datetime.now(UTC)
-    await db.commit()
-    await db.refresh(doc)
-    return _serialize_document(doc)
+    updated = await document_ops.move_to_completed(db, document_id, current_user.id)
+    return _serialize_document(updated)
 
 
 @router.post("/{document_id}/archive")
@@ -218,11 +209,8 @@ async def archive_document(
             detail="Document not found",
         )
 
-    doc.folder = {"path": "archive"}
-    doc.updated_at = datetime.now(UTC)
-    await db.commit()
-    await db.refresh(doc)
-    return _serialize_document(doc)
+    updated = await document_ops.archive(db, document_id, current_user.id)
+    return _serialize_document(updated)
 
 
 # =============================================================================

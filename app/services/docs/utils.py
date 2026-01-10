@@ -75,7 +75,7 @@ def map_path_to_folder(path: str) -> str | None:
     return None
 
 
-def infer_doc_type(path: str, content: str | None = None) -> str:
+def infer_doc_type(path: str, _content: str | None = None) -> str:
     """
     Infer document type from path and optionally content.
 

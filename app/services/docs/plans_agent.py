@@ -18,7 +18,7 @@ Tier 2 (Maintenance):
 
 import logging
 import uuid as uuid_pkg
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -188,17 +188,11 @@ class PlansAgent:
         Returns:
             Updated document, or None if not found
         """
-        doc = await document_ops.get_by_user(self.db, self.product.user_id, document_id)
-        if not doc:
+        doc = await document_ops.move_to_executing(self.db, document_id, self.product.user_id)
+        if doc:
+            logger.info(f"Moved plan '{doc.title}' to executing/")
+        else:
             logger.warning(f"Document {document_id} not found")
-            return None
-
-        doc.folder = {"path": "executing"}
-        doc.updated_at = datetime.now(UTC)
-        await self.db.commit()
-        await self.db.refresh(doc)
-
-        logger.info(f"Moved plan '{doc.title}' to executing/")
         return doc
 
     async def move_to_completed(
@@ -216,19 +210,12 @@ class PlansAgent:
         Returns:
             Updated document, or None if not found
         """
-        doc = await document_ops.get_by_user(self.db, self.product.user_id, document_id)
-        if not doc:
+        doc = await document_ops.move_to_completed(self.db, document_id, self.product.user_id)
+        if doc:
+            folder_path = doc.folder.get("path") if doc.folder else "completions"
+            logger.info(f"Moved plan '{doc.title}' to {folder_path}/")
+        else:
             logger.warning(f"Document {document_id} not found")
-            return None
-
-        # Include date in folder path
-        date_prefix = date.today().strftime("%Y-%m-%d")
-        doc.folder = {"path": f"completions/{date_prefix}"}
-        doc.updated_at = datetime.now(UTC)
-        await self.db.commit()
-        await self.db.refresh(doc)
-
-        logger.info(f"Moved plan '{doc.title}' to completions/{date_prefix}/")
         return doc
 
     async def archive(
@@ -244,15 +231,9 @@ class PlansAgent:
         Returns:
             Updated document, or None if not found
         """
-        doc = await document_ops.get_by_user(self.db, self.product.user_id, document_id)
-        if not doc:
+        doc = await document_ops.archive(self.db, document_id, self.product.user_id)
+        if doc:
+            logger.info(f"Archived document '{doc.title}'")
+        else:
             logger.warning(f"Document {document_id} not found")
-            return None
-
-        doc.folder = {"path": "archive"}
-        doc.updated_at = datetime.now(UTC)
-        await self.db.commit()
-        await self.db.refresh(doc)
-
-        logger.info(f"Archived document '{doc.title}'")
         return doc

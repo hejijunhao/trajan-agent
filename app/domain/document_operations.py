@@ -177,5 +177,33 @@ class DocumentOperations(BaseOperations[Document]):
             await db.refresh(doc)
         return doc
 
+    async def move_to_executing(
+        self,
+        db: AsyncSession,
+        document_id: uuid_pkg.UUID,
+        user_id: uuid_pkg.UUID,
+    ) -> Document | None:
+        """Move a plan document to the executing/ folder."""
+        return await self.move_to_folder(db, document_id, "executing", user_id)
+
+    async def move_to_completed(
+        self,
+        db: AsyncSession,
+        document_id: uuid_pkg.UUID,
+        user_id: uuid_pkg.UUID,
+    ) -> Document | None:
+        """Move a plan document to completions/ folder with date prefix."""
+        date_prefix = datetime.now(UTC).strftime("%Y-%m-%d")
+        return await self.move_to_folder(db, document_id, f"completions/{date_prefix}", user_id)
+
+    async def archive(
+        self,
+        db: AsyncSession,
+        document_id: uuid_pkg.UUID,
+        user_id: uuid_pkg.UUID,
+    ) -> Document | None:
+        """Move a document to the archive/ folder."""
+        return await self.move_to_folder(db, document_id, "archive", user_id)
+
 
 document_ops = DocumentOperations()

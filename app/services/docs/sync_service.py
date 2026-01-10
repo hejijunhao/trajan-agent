@@ -9,7 +9,6 @@ Handles:
 """
 
 import logging
-import re
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
@@ -19,6 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document
 from app.models.repository import Repository
 from app.services.docs.types import DocumentSyncStatus, ImportResult, SyncResult
+from app.services.docs.utils import (
+    extract_title,
+    generate_github_path,
+    infer_doc_type,
+    map_path_to_folder,
+)
 from app.services.github import GitHubService
 from app.services.github.exceptions import GitHubAPIError
 from app.services.github.types import RepoTreeItem
@@ -159,7 +164,10 @@ class DocsSyncService:
                     continue
 
                 # Generate path if not already set
-                path = doc.github_path or self._generate_github_path(doc)
+                folder_path = doc.folder.get("path") if doc.folder else None
+                path = doc.github_path or generate_github_path(
+                    doc.title or "untitled", folder_path, doc.type or "blueprint"
+                )
                 files_to_commit.append({
                     "path": path,
                     "content": doc.content,
@@ -176,7 +184,10 @@ class DocsSyncService:
             # Update sync tracking for all documents
             for doc in documents:
                 # Get the new SHA for the file
-                path = doc.github_path or self._generate_github_path(doc)
+                folder_path = doc.folder.get("path") if doc.folder else None
+                path = doc.github_path or generate_github_path(
+                    doc.title or "untitled", folder_path, doc.type or "blueprint"
+                )
                 new_sha = await self.github_service.get_file_sha(
                     owner, repo_name, path, branch
                 )
@@ -367,7 +378,7 @@ class DocsSyncService:
             doc.github_sha = file_content.sha
             doc.last_synced_at = datetime.now(UTC)
             doc.sync_status = "synced"
-            doc.title = self._extract_title(file_content.content, doc.github_path)
+            doc.title = extract_title(file_content.content, doc.github_path)
 
             await self.db.commit()
             await self.db.refresh(doc)
@@ -427,13 +438,13 @@ class DocsSyncService:
             raise ValueError(f"Could not fetch content for {item.path}")
 
         content = file_content.content
-        folder_path = self._map_path_to_folder(item.path)
-        doc_type = self._infer_doc_type(item.path, content)
+        folder_path = map_path_to_folder(item.path)
+        doc_type = infer_doc_type(item.path, content)
 
         doc = Document(
             product_id=repository.product_id,
             user_id=repository.user_id,
-            title=self._extract_title(content, item.path),
+            title=extract_title(content, item.path),
             content=content,
             type=doc_type,
             folder={"path": folder_path} if folder_path else None,
@@ -470,83 +481,4 @@ class DocsSyncService:
         document.github_sha = item.sha
         document.last_synced_at = datetime.now(UTC)
         document.sync_status = "synced"
-        document.title = self._extract_title(file_content.content, item.path)
-
-    def _map_path_to_folder(self, path: str) -> str | None:
-        """Map GitHub path to our folder structure."""
-        path_lower = path.lower()
-
-        # Changelog stays at root
-        if any(p in path_lower for p in ["changelog", "changes", "history"]):
-            return None
-
-        # Map known patterns to folders
-        if any(p in path_lower for p in ["/blueprints/", "/overview/", "/architecture/"]):
-            return "blueprints"
-        if any(p in path_lower for p in ["/plans/", "/roadmap/", "/planning/"]):
-            return "plans"
-        if any(p in path_lower for p in ["/executing/", "/in-progress/", "/wip/"]):
-            return "executing"
-        if any(p in path_lower for p in ["/completions/", "/completed/", "/done/"]):
-            # Try to extract date from path
-            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", path)
-            if date_match:
-                return f"completions/{date_match.group(1)}"
-            return "completions"
-        if any(p in path_lower for p in ["/archive/", "/old/", "/deprecated/"]):
-            return "archive"
-
-        # Default for docs/ folder
-        if path.startswith("docs/"):
-            return "blueprints"
-
-        return None
-
-    def _infer_doc_type(self, path: str, _content: str) -> str:
-        """Infer document type from path and content."""
-        path_lower = path.lower()
-
-        if any(p in path_lower for p in ["changelog", "changes", "history"]):
-            return "changelog"
-        if "architecture" in path_lower:
-            return "architecture"
-        if any(p in path_lower for p in ["plan", "roadmap", "proposal"]):
-            return "plan"
-        if "readme" in path_lower:
-            return "blueprint"
-        if "api" in path_lower:
-            return "architecture"
-        if any(p in path_lower for p in ["guide", "tutorial"]):
-            return "note"
-
-        return "blueprint"
-
-    def _extract_title(self, content: str, path: str) -> str:
-        """Extract title from markdown content or filename."""
-        # Try to get first H1
-        for line in content.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("# "):
-                return stripped[2:].strip()
-
-        # Fallback to filename
-        filename = path.split("/")[-1]
-        title = filename.replace(".md", "").replace("-", " ").replace("_", " ")
-        return title.title()
-
-    def _generate_github_path(self, doc: Document) -> str:
-        """Generate file path for document based on folder."""
-        # Slugify title
-        title = doc.title or "untitled"
-        slug = re.sub(r"[^\w\s-]", "", title.lower())
-        slug = re.sub(r"[-\s]+", "-", slug).strip("-")
-
-        folder_path = doc.folder.get("path") if doc.folder else None
-
-        if doc.type == "changelog":
-            return "docs/changelog.md"
-
-        if not folder_path:
-            return f"docs/{slug}.md"
-
-        return f"docs/{folder_path}/{slug}.md"
+        document.title = extract_title(file_content.content, item.path)
