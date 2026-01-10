@@ -12,6 +12,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
     from app.models.product import Product
+    from app.models.subscription import Subscription
     from app.models.user import User
 
 
@@ -61,6 +62,10 @@ class Organization(SQLModel, table=True):
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
     products: list["Product"] = Relationship(back_populates="organization")
+    subscription: Optional["Subscription"] = Relationship(
+        back_populates="organization",
+        sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"},
+    )
 
 
 class MemberRole(str, Enum):

@@ -5,6 +5,7 @@ from app.domain.organization_operations import organization_ops
 from app.domain.preferences_operations import preferences_ops
 from app.domain.product_operations import product_ops
 from app.domain.repository_operations import repository_ops
+from app.domain.subscription_operations import subscription_ops
 from app.domain.user_operations import user_ops
 from app.domain.work_item_operations import work_item_ops
 
@@ -18,4 +19,5 @@ __all__ = [
     "preferences_ops",
     "organization_ops",
     "org_member_ops",
+    "subscription_ops",
 ]

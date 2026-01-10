@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    admin,
     app_info,
     documents,
     github,
@@ -21,3 +22,4 @@ api_router.include_router(app_info.router)
 api_router.include_router(users.router)
 api_router.include_router(preferences.router)
 api_router.include_router(github.router)
+api_router.include_router(admin.router)

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.organization import MemberRole, Organization, OrganizationMember
+from app.models.subscription import PlanTier, Subscription, SubscriptionStatus
 
 
 def generate_slug(name: str) -> str:
@@ -119,11 +120,14 @@ class OrganizationOperations:
         name: str,
         owner_id: uuid_pkg.UUID,
         slug: str | None = None,
+        plan_tier: str = PlanTier.OBSERVER.value,
     ) -> Organization:
         """
         Create a new organization.
 
-        Also creates an owner membership for the creator.
+        Also creates:
+        - An owner membership for the creator
+        - A subscription (defaults to free Observer tier)
         """
         if not slug:
             slug = generate_slug(name)
@@ -148,6 +152,20 @@ class OrganizationOperations:
             role=MemberRole.OWNER.value,
         )
         db.add(member)
+
+        # Create subscription (defaults to free tier)
+        # Import get_plan here to avoid circular imports
+        from app.config.plans import get_plan
+
+        plan = get_plan(plan_tier)
+        subscription = Subscription(
+            organization_id=org.id,
+            plan_tier=plan_tier,
+            status=SubscriptionStatus.ACTIVE.value,
+            base_repo_limit=plan.base_repo_limit,
+        )
+        db.add(subscription)
+
         await db.flush()
         await db.refresh(org)
 
