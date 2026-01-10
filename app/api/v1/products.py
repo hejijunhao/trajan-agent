@@ -1,9 +1,10 @@
 import uuid as uuid_pkg
+from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import SubscriptionContext, get_current_user, require_agent_enabled
 from app.core.database import get_db
 from app.domain import product_ops
 from app.domain.preferences_operations import preferences_ops
@@ -13,6 +14,14 @@ from app.schemas.product_overview import AnalyzeProductResponse
 from app.services.analysis import run_analysis_task
 
 router = APIRouter(prefix="/products", tags=["products"])
+
+
+# Analysis frequency limits in hours
+ANALYSIS_FREQUENCY_LIMITS = {
+    "weekly": 7 * 24,  # 168 hours
+    "daily": 24,  # 24 hours
+    "realtime": 0,  # No limit
+}
 
 
 @router.get("", response_model=list[dict])
@@ -152,10 +161,15 @@ async def analyze_product(
     product_id: uuid_pkg.UUID,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
+    sub_ctx: SubscriptionContext = Depends(require_agent_enabled),
     db: AsyncSession = Depends(get_db),
 ) -> AnalyzeProductResponse:
     """
     Trigger AI analysis of the product's repositories.
+
+    Requires:
+    - Agent to be enabled for the organization (free tier must be within repo limit)
+    - Analysis frequency must be respected (weekly for Observer, daily for Foundations)
 
     Analysis runs in the background. Poll GET /products/{id} for status updates.
     The `analysis_status` field will be:
@@ -177,6 +191,25 @@ async def analyze_product(
             status="already_analyzing",
             message="Analysis already in progress. Poll GET /products/{id} for status.",
         )
+
+    # Check analysis frequency limit
+    frequency_limit_hours = ANALYSIS_FREQUENCY_LIMITS.get(sub_ctx.plan.analysis_frequency, 0)
+    if frequency_limit_hours > 0 and product.analysis_status == "completed":
+        # Use updated_at as a proxy for when analysis was completed
+        # (set when status changes to "completed")
+        last_analysis_time = product.updated_at
+        if last_analysis_time:
+            hours_since_last = (datetime.utcnow() - last_analysis_time).total_seconds() / 3600
+            if hours_since_last < frequency_limit_hours:
+                hours_remaining = int(frequency_limit_hours - hours_since_last)
+                frequency_display = (
+                    "once per week" if sub_ctx.plan.analysis_frequency == "weekly" else "once per day"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Analysis limited to {frequency_display} on {sub_ctx.plan.display_name} plan. "
+                    f"Next analysis available in {hours_remaining} hours.",
+                )
 
     # Get user's GitHub token from preferences
     prefs = await preferences_ops.get_by_user_id(db, user_id=current_user.id)

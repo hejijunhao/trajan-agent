@@ -1,9 +1,10 @@
 import uuid as uuid_pkg
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.base_operations import BaseOperations
+from app.models.product import Product
 from app.models.repository import Repository
 
 
@@ -12,6 +13,39 @@ class RepositoryOperations(BaseOperations[Repository]):
 
     def __init__(self):
         super().__init__(Repository)
+
+    async def count_by_org(
+        self,
+        db: AsyncSession,
+        organization_id: uuid_pkg.UUID,
+    ) -> int:
+        """Count all repositories belonging to an organization (via products)."""
+        statement = (
+            select(func.count(Repository.id))
+            .join(Product, Repository.product_id == Product.id)
+            .where(Product.organization_id == organization_id)
+        )
+        result = await db.execute(statement)
+        return result.scalar() or 0
+
+    async def get_by_org(
+        self,
+        db: AsyncSession,
+        organization_id: uuid_pkg.UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Repository]:
+        """Get all repositories belonging to an organization (via products)."""
+        statement = (
+            select(Repository)
+            .join(Product, Repository.product_id == Product.id)
+            .where(Product.organization_id == organization_id)
+            .order_by(Repository.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await db.execute(statement)
+        return list(result.scalars().all())
 
     async def get_by_product(
         self,

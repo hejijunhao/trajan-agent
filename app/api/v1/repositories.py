@@ -3,9 +3,14 @@ import uuid as uuid_pkg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import (
+    SubscriptionContext,
+    get_current_user,
+    get_subscription_context,
+)
 from app.core.database import get_db
 from app.domain import repository_ops
+from app.domain.subscription_operations import subscription_ops
 from app.models.repository import RepositoryCreate, RepositoryUpdate
 from app.models.user import User
 
@@ -84,9 +89,35 @@ async def get_repository(
 async def create_repository(
     data: RepositoryCreate,
     current_user: User = Depends(get_current_user),
+    sub_ctx: SubscriptionContext = Depends(get_subscription_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new repository."""
+    """
+    Create a new repository.
+
+    Repository limits are enforced based on subscription plan:
+    - Free tier (Observer): Cannot exceed base limit
+    - Paid tiers: Allowed to exceed with overage charges
+    """
+    # Check repo limit before creation
+    current_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)
+    limit_status = await subscription_ops.check_repo_limit(
+        db,
+        organization_id=sub_ctx.organization.id,
+        current_repo_count=current_count,
+        additional_count=1,
+    )
+
+    if not limit_status.can_add:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Repository limit reached ({limit_status.base_limit}). "
+            f"Upgrade your plan to add more repositories.",
+        )
+
+    # Warn about overage for paid plans (but still allow)
+    # This is informational - actual billing happens via Stripe metered usage
+
     obj_data = data.model_dump()
     if obj_data.get("full_name") is None:
         obj_data["full_name"] = obj_data["name"]

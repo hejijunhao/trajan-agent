@@ -9,10 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import SubscriptionContext, get_current_user, get_subscription_context
 from app.core.database import get_db
 from app.domain import product_ops, repository_ops
 from app.domain.preferences_operations import preferences_ops
+from app.domain.subscription_operations import subscription_ops
 from app.models.user import User
 from app.services.github import GitHubAPIError, GitHubService
 
@@ -187,6 +188,7 @@ async def list_github_repos(
 async def import_github_repos(
     data: ImportRequest,
     current_user: User = Depends(get_current_user),
+    sub_ctx: SubscriptionContext = Depends(get_subscription_context),
     db: AsyncSession = Depends(get_db),
 ) -> ImportResponse:
     """
@@ -194,6 +196,10 @@ async def import_github_repos(
 
     Fetches fresh metadata from GitHub and creates Repository records.
     Skips repos already imported to the same product.
+
+    Repository limits are enforced based on subscription plan:
+    - Free tier (Observer): Cannot exceed base limit
+    - Paid tiers: Allowed to exceed with overage charges
     """
     # Verify product exists and belongs to user
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=data.product_id)
@@ -202,6 +208,34 @@ async def import_github_repos(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
         )
+
+    # Check repo limit before import
+    current_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)
+
+    # Pre-filter: count how many are actually new (not already imported)
+    new_repo_count = 0
+    for github_id in data.github_ids:
+        existing = await repository_ops.get_by_github_id(db, current_user.id, github_id)
+        if not existing:
+            new_repo_count += 1
+
+    # Check if we can add all the new repos
+    if new_repo_count > 0:
+        limit_status = await subscription_ops.check_repo_limit(
+            db,
+            organization_id=sub_ctx.organization.id,
+            current_repo_count=current_count,
+            additional_count=new_repo_count,
+        )
+
+        if not limit_status.can_add:
+            available = max(0, limit_status.base_limit - current_count)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Cannot import {new_repo_count} repositories. "
+                f"You have {current_count} repositories and a limit of {limit_status.base_limit}. "
+                f"You can import {available} more. Upgrade your plan to add more.",
+            )
 
     token = await get_github_token(db, current_user.id)
     github = GitHubService(token)
