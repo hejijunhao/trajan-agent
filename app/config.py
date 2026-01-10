@@ -1,0 +1,31 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
+
+    # Database - transaction pooled connection for app operations (port 6543)
+    database_url: str = "postgresql+asyncpg://postgres:password@localhost:6543/postgres"
+    # Database - direct connection for migrations (port 5432)
+    database_url_direct: str = "postgresql+asyncpg://postgres:password@localhost:5432/postgres"
+
+    # Supabase
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_jwks_url: str = ""  # JWKS endpoint for ES256 JWT verification
+
+    # Application
+    debug: bool = False
+    cors_origins: list[str] = ["http://localhost:3000"]
+
+    # AI / Anthropic
+    anthropic_api_key: str = ""
+
+
+settings = Settings()

@@ -1,0 +1,104 @@
+import uuid as uuid_pkg
+from typing import TYPE_CHECKING, Any, Optional
+
+from sqlalchemy import Column
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlmodel import Field, Relationship, SQLModel
+
+from app.models.base import TimestampMixin, UserOwnedMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from app.models.app_info import AppInfo
+    from app.models.document import Document
+    from app.models.organization import Organization
+    from app.models.repository import Repository
+    from app.models.user import User
+    from app.models.work_item import WorkItem
+
+
+class ProductBase(SQLModel):
+    """Base fields shared across Product schemas."""
+
+    name: str | None = Field(default=None, max_length=255, index=True)
+    description: str | None = Field(default=None, max_length=2000)
+    icon: str | None = Field(default=None, max_length=100)
+    color: str | None = Field(default=None, max_length=50)
+
+
+class ProductCreate(SQLModel):
+    """Schema for creating a product."""
+
+    name: str
+    description: str | None = None
+    icon: str | None = None
+    color: str | None = None
+
+
+class ProductUpdate(SQLModel):
+    """Schema for updating a product."""
+
+    name: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    color: str | None = None
+
+
+class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True):
+    """Product/App container - main organizing entity."""
+
+    __tablename__ = "products"
+
+    # Organization ownership (nullable during migration, required after)
+    organization_id: uuid_pkg.UUID | None = Field(
+        default=None,
+        foreign_key="organizations.id",
+        index=True,
+        sa_column_kwargs={
+            "comment": "Organization that owns this product (nullable during migration)"
+        },
+    )
+
+    # Analysis fields
+    analysis_status: str | None = Field(
+        default=None,
+        max_length=20,
+        index=True,
+        sa_column_kwargs={"comment": "Analysis state: 'analyzing' | 'completed' | 'failed' | NULL"},
+    )
+    analysis_error: str | None = Field(
+        default=None,
+        max_length=500,
+        sa_column_kwargs={"comment": "Error message if analysis failed"},
+    )
+    analysis_progress: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(
+            JSONB, comment="Real-time progress updates during analysis (ephemeral)"
+        ),
+    )
+    product_overview: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(
+            JSONB, comment="AI-generated project overview (ProductOverview schema)"
+        ),
+    )
+
+    # Relationships
+    user: Optional["User"] = Relationship(back_populates="products")
+    organization: Optional["Organization"] = Relationship(back_populates="products")
+    repositories: list["Repository"] = Relationship(
+        back_populates="product",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    work_items: list["WorkItem"] = Relationship(
+        back_populates="product",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    documents: list["Document"] = Relationship(
+        back_populates="product",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    app_info_entries: list["AppInfo"] = Relationship(
+        back_populates="product",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )

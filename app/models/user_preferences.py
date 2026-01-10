@@ -1,0 +1,55 @@
+import uuid as uuid_pkg
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional
+
+from sqlalchemy import Column, ForeignKey, text
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    from app.models.user import User
+
+
+class UserPreferences(SQLModel, table=True):
+    """
+    User preferences for notifications, integrations, and UI defaults.
+
+    One-to-one relationship with User. Created on first access if not exists.
+    """
+
+    __tablename__ = "user_preferences"
+
+    user_id: uuid_pkg.UUID = Field(
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+
+    # Notifications
+    email_digest: str = Field(default="none", max_length=20)  # 'none', 'daily', 'weekly'
+    notify_work_items: bool = Field(default=True)
+    notify_documents: bool = Field(default=True)
+
+    # Integrations
+    github_token: str | None = Field(default=None, max_length=500)
+
+    # UI Defaults
+    default_view: str = Field(default="grid", max_length=20)  # 'grid', 'list'
+    sidebar_default: str = Field(default="expanded", max_length=20)  # 'expanded', 'collapsed'
+
+    # Timestamps
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        nullable=False,
+        sa_column_kwargs={"server_default": text("now()")},
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={"onupdate": text("now()")},
+    )
+
+    # Relationships
+    user: Optional["User"] = Relationship(back_populates="preferences")
