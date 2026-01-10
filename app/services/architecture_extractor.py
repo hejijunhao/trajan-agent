@@ -24,10 +24,6 @@ from app.schemas.product_overview import (
     ServiceInfo,
 )
 from app.services.github import RepoContext
-from app.services.github.constants import (
-    ALWAYS_INCLUDE_ARCHITECTURE_FILES,
-    ARCHITECTURE_FILE_PATTERNS,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -37,24 +33,6 @@ ARCHITECTURE_MODEL = "claude-sonnet-4-20250514"
 # Retry configuration
 MAX_RETRIES = 3
 RETRY_DELAYS = [2, 4, 8]
-
-
-def _is_architecture_file(path: str) -> bool:
-    """Check if a file path matches architecture-relevant patterns."""
-    # Check always-include files
-    if path in ALWAYS_INCLUDE_ARCHITECTURE_FILES:
-        return True
-
-    # Normalize path for pattern matching
-    normalized = "/" + path.lstrip("/")
-
-    # Check patterns
-    return any(pattern.match(normalized) for pattern in ARCHITECTURE_FILE_PATTERNS)
-
-
-def _filter_architecture_files(files: dict[str, str]) -> dict[str, str]:
-    """Filter files to only include architecture-relevant ones."""
-    return {path: content for path, content in files.items() if _is_architecture_file(path)}
 
 
 class ArchitectureExtractor:
@@ -82,8 +60,11 @@ class ArchitectureExtractor:
         """
         Extract architecture components from repository code.
 
+        Files are expected to be pre-selected by the FileSelector service,
+        which uses AI to identify architecturally significant files.
+
         Args:
-            repo_contexts: List of RepoContext objects with fetched files
+            repo_contexts: List of RepoContext objects with pre-selected files
 
         Returns:
             OverviewArchitecture with extracted components
@@ -91,17 +72,16 @@ class ArchitectureExtractor:
         if not repo_contexts:
             return OverviewArchitecture()
 
-        # Filter to architecture-relevant files only
+        # Collect all files from contexts (already filtered by FileSelector)
         architecture_files: dict[str, str] = {}
         for ctx in repo_contexts:
-            filtered = _filter_architecture_files(ctx.files)
             # Prefix with repo name for multi-repo clarity
-            for path, content in filtered.items():
+            for path, content in ctx.files.items():
                 key = f"{ctx.full_name}/{path}" if len(repo_contexts) > 1 else path
                 architecture_files[key] = content
 
         if not architecture_files:
-            logger.info("No architecture-relevant files found")
+            logger.info("No architecture files provided")
             return OverviewArchitecture()
 
         logger.info(f"Extracting architecture from {len(architecture_files)} files")

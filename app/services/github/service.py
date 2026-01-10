@@ -17,12 +17,8 @@ from typing import Any
 import httpx
 
 from app.services.github.constants import (
-    ALWAYS_INCLUDE_ARCHITECTURE_FILES,
-    ARCHITECTURE_FILE_PATTERNS,
     GITHUB_LANGUAGE_COLORS,
     KEY_FILES,
-    MAX_ARCHITECTURE_FILE_SIZE,
-    MAX_ARCHITECTURE_FILES,
 )
 from app.services.github.exceptions import GitHubAPIError
 from app.services.github.types import (
@@ -600,78 +596,6 @@ class GitHubService:
             if isinstance(result, tuple) and (path := result[0]) and (content := result[1])
         }
 
-    def _is_architecture_file(self, path: str) -> bool:
-        """Check if a file path matches architecture-relevant patterns."""
-        # Check always-include files first
-        if path in ALWAYS_INCLUDE_ARCHITECTURE_FILES:
-            return True
-
-        # Normalize path for pattern matching (add leading slash)
-        normalized = "/" + path.lstrip("/")
-
-        # Check patterns
-        return any(pattern.match(normalized) for pattern in ARCHITECTURE_FILE_PATTERNS)
-
-    async def get_architecture_files(
-        self,
-        owner: str,
-        repo: str,
-        branch: str = "main",
-        tree: RepoTree | None = None,
-        max_concurrent: int = 5,
-    ) -> dict[str, str]:
-        """
-        Fetch contents of architecture-relevant files for code analysis.
-
-        This method identifies and fetches files that contain:
-        - API endpoints (routes, controllers, handlers)
-        - Database models (models, entities, schemas)
-        - Services (services, domain, business logic)
-        - Frontend pages (pages, views, routes)
-
-        Args:
-            owner: Repository owner
-            repo: Repository name
-            branch: Branch name (default: "main")
-            tree: Optional pre-fetched RepoTree (required for file filtering)
-            max_concurrent: Maximum concurrent requests (default: 5)
-
-        Returns:
-            Dict mapping file paths to their contents
-        """
-        if not tree:
-            return {}
-
-        # Filter tree files to only architecture-relevant ones
-        architecture_files = [path for path in tree.files if self._is_architecture_file(path)]
-
-        if not architecture_files:
-            return {}
-
-        # Limit to avoid excessive API calls
-        files_to_fetch = architecture_files[:MAX_ARCHITECTURE_FILES]
-
-        # Use semaphore for concurrency control
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def fetch_with_limit(file_path: str) -> tuple[str, str | None]:
-            async with semaphore:
-                content = await self.get_file_content(
-                    owner, repo, file_path, branch, max_size=MAX_ARCHITECTURE_FILE_SIZE
-                )
-                return (file_path, content.content if content else None)
-
-        # Fetch all files concurrently
-        tasks = [fetch_with_limit(fp) for fp in files_to_fetch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Filter successful results, skip exceptions
-        return {
-            path: content
-            for result in results
-            if isinstance(result, tuple) and (path := result[0]) and (content := result[1])
-        }
-
     async def fetch_files_by_paths(
         self,
         owner: str,
@@ -728,7 +652,6 @@ class GitHubService:
         repo: str,
         branch: str | None = None,
         description: str | None = None,
-        skip_architecture_files: bool = False,
     ) -> RepoContext:
         """
         Fetch complete context for a repository for AI analysis.
@@ -737,18 +660,19 @@ class GitHubService:
         to analyze a repository. It aggregates:
         - Repository metadata (stars, forks, dates, license)
         - File tree structure
-        - Key file contents
+        - Key file contents (README, config files)
         - Language statistics
         - Top contributors
         - Commit statistics
+
+        Note: Architecture-relevant files (routes, models, services) are now
+        selected dynamically by the FileSelector service and fetched separately.
 
         Args:
             owner: Repository owner
             repo: Repository name
             branch: Branch name (if None, fetches repo details to get default branch)
             description: Repository description (if known, avoids extra API call)
-            skip_architecture_files: If True, skip pattern-based architecture file fetching.
-                Use this when using dynamic file selection instead.
 
         Returns:
             RepoContext with all gathered information
@@ -805,15 +729,6 @@ class GitHubService:
             files = await self.get_key_files(owner, repo, branch, tree)
         except GitHubAPIError as e:
             errors.append(f"Failed to get key files: {e.message}")
-
-        # Fetch architecture files (routes, models, services, pages)
-        # Skip if using dynamic file selection
-        if not skip_architecture_files:
-            try:
-                arch_files = await self.get_architecture_files(owner, repo, branch, tree)
-                files.update(arch_files)  # Merge with key files
-            except GitHubAPIError as e:
-                errors.append(f"Failed to get architecture files: {e.message}")
 
         # Fetch languages
         try:

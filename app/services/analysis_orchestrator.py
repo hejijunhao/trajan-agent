@@ -234,7 +234,6 @@ class AnalysisOrchestrator:
             repo=repo_name,
             branch=repo.default_branch,
             description=repo.description,
-            skip_architecture_files=True,  # Files selected dynamically
         )
 
     async def _identify_and_fetch_files(
