@@ -7,6 +7,14 @@ from app.models.billing import (
     UsageSnapshot,
 )
 from app.models.document import Document, DocumentCreate, DocumentUpdate
+from app.models.feedback import (
+    Feedback,
+    FeedbackCreate,
+    FeedbackRead,
+    FeedbackSeverity,
+    FeedbackStatus,
+    FeedbackType,
+)
 from app.models.organization import (
     MemberRole,
     Organization,
@@ -62,4 +70,10 @@ __all__ = [
     "AppInfo",
     "AppInfoCreate",
     "AppInfoUpdate",
+    "Feedback",
+    "FeedbackCreate",
+    "FeedbackRead",
+    "FeedbackType",
+    "FeedbackStatus",
+    "FeedbackSeverity",
 ]

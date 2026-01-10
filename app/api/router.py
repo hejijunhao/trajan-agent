@@ -4,6 +4,7 @@ from app.api.v1 import (
     admin,
     app_info,
     documents,
+    feedback,
     github,
     organizations,
     preferences,
@@ -25,3 +26,4 @@ api_router.include_router(preferences.router)
 api_router.include_router(github.router)
 api_router.include_router(organizations.router)
 api_router.include_router(admin.router)
+api_router.include_router(feedback.router)

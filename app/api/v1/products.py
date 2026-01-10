@@ -10,6 +10,7 @@ from app.domain import product_ops
 from app.domain.preferences_operations import preferences_ops
 from app.models.product import ProductCreate, ProductUpdate
 from app.models.user import User
+from app.schemas.docs import DocsStatusResponse, GenerateDocsResponse
 from app.schemas.product_overview import AnalyzeProductResponse
 from app.services.analysis import run_analysis_task
 
@@ -238,3 +239,130 @@ async def analyze_product(
         status="analyzing",
         message="Analysis started. Poll GET /products/{id} for status updates.",
     )
+
+
+@router.post("/{product_id}/generate-docs", response_model=GenerateDocsResponse)
+async def generate_documentation(
+    product_id: uuid_pkg.UUID,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GenerateDocsResponse:
+    """
+    Trigger DocumentOrchestrator to analyze and generate documentation.
+
+    Runs as a background task with progress updates. Poll GET /products/{id}/docs-status
+    for real-time progress.
+    """
+    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Check if already running
+    if product.docs_generation_status == "generating":
+        return GenerateDocsResponse(
+            status="already_running",
+            message="Documentation generation already in progress",
+        )
+
+    # Get user's GitHub token from preferences
+    prefs = await preferences_ops.get_by_user_id(db, user_id=current_user.id)
+    if not prefs or not prefs.github_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub token required for documentation generation. Configure it in Settings → General.",
+        )
+
+    # Update status
+    product.docs_generation_status = "generating"
+    product.docs_generation_error = None
+    product.docs_generation_progress = None
+    db.add(product)
+    await db.commit()
+
+    # Start background task
+    background_tasks.add_task(
+        run_document_orchestrator,
+        product_id=str(product.id),
+        user_id=str(current_user.id),
+    )
+
+    return GenerateDocsResponse(
+        status="started",
+        message="Documentation generation started. Poll for progress.",
+    )
+
+
+@router.get("/{product_id}/docs-status", response_model=DocsStatusResponse)
+async def get_docs_generation_status(
+    product_id: uuid_pkg.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DocsStatusResponse:
+    """Get current documentation generation status."""
+    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    return DocsStatusResponse(
+        status=product.docs_generation_status or "idle",
+        progress=product.docs_generation_progress,
+        error=product.docs_generation_error,
+        last_generated_at=product.last_docs_generated_at,
+    )
+
+
+async def run_document_orchestrator(
+    product_id: str,
+    user_id: str,
+) -> None:
+    """Background task to run documentation generation."""
+    from app.core.database import async_session_maker
+    from app.services.docs import DocumentOrchestrator
+    from app.services.github import GitHubService
+
+    async with async_session_maker() as db:
+        try:
+            product_uuid = uuid_pkg.UUID(product_id)
+            user_uuid = uuid_pkg.UUID(user_id)
+
+            product = await product_ops.get_by_user(db, user_id=user_uuid, id=product_uuid)
+            if not product:
+                return
+
+            # Get GitHub token from user preferences
+            prefs = await preferences_ops.get_by_user_id(db, user_id=user_uuid)
+            if not prefs or not prefs.github_token:
+                product.docs_generation_status = "failed"
+                product.docs_generation_error = "GitHub token not found"
+                await db.commit()
+                return
+
+            github_service = GitHubService(prefs.github_token)
+
+            # Run orchestrator
+            orchestrator = DocumentOrchestrator(db, product, github_service)
+            await orchestrator.run()
+
+            # Update status
+            product.docs_generation_status = "completed"
+            product.last_docs_generated_at = datetime.utcnow()
+            product.docs_generation_error = None
+            product.docs_generation_progress = None
+            await db.commit()
+
+        except Exception as e:
+            # Update status on failure
+            product = await product_ops.get_by_user(db, user_id=user_uuid, id=product_uuid)
+            if product:
+                product.docs_generation_status = "failed"
+                product.docs_generation_error = str(e)[:500]
+                product.docs_generation_progress = None
+                await db.commit()
+            raise
