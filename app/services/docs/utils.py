@@ -40,6 +40,11 @@ def map_path_to_folder(path: str) -> str | None:
     Analyzes the path to determine which folder the document should
     be organized into (blueprints, plans, executing, completions, archive).
 
+    Classification priority:
+    1. Folder structure patterns (e.g., /plans/, /blueprints/)
+    2. Filename patterns (e.g., "implementation-plan.md")
+    3. Default to blueprints for docs/ folder
+
     Args:
         path: Source file path
 
@@ -52,7 +57,7 @@ def map_path_to_folder(path: str) -> str | None:
     if any(p in path_lower for p in ["changelog", "changes", "history"]):
         return None
 
-    # Map known patterns to folders
+    # 1. Map known folder patterns first (explicit structure takes precedence)
     if any(p in path_lower for p in ["/blueprints/", "/overview/", "/architecture/"]):
         return "blueprints"
     if any(p in path_lower for p in ["/plans/", "/roadmap/", "/planning/"]):
@@ -68,7 +73,49 @@ def map_path_to_folder(path: str) -> str | None:
     if any(p in path_lower for p in ["/archive/", "/old/", "/deprecated/"]):
         return "archive"
 
-    # Default for docs/ folder
+    # 2. Check filename patterns before defaulting
+    # Extract filename from path
+    filename_lower = path_lower.split("/")[-1]
+
+    # Plan indicators in filename (more specific patterns first)
+    plan_patterns = [
+        "-plan",
+        "_plan",
+        "-plan.",
+        "_plan.",  # Suffix patterns
+        "plan-",
+        "plan_",  # Prefix patterns
+        "-roadmap",
+        "_roadmap",
+        "roadmap-",
+        "roadmap_",
+        "-proposal",
+        "_proposal",
+        "proposal-",
+        "proposal_",
+        "-implementation",
+        "_implementation",
+        "phase-",
+        "phase_",  # Phase documents are typically plans
+    ]
+    if any(p in filename_lower for p in plan_patterns):
+        return "plans"
+
+    # Completion indicators in filename
+    completion_patterns = [
+        "-completion",
+        "_completion",
+        "completion-",
+        "completion_",
+        "-report",
+        "_report",  # Reports are typically completions
+        "-completed",
+        "_completed",
+    ]
+    if any(p in filename_lower for p in completion_patterns):
+        return "completions"
+
+    # 3. Default for docs/ folder
     if path.startswith("docs/"):
         return "blueprints"
 

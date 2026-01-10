@@ -130,6 +130,36 @@ class TestMapPathToFolder:
         assert map_path_to_folder("src/readme.md") is None
         assert map_path_to_folder("random.md") is None
 
+    # Filename-based classification tests
+    def test_plan_filename_patterns(self) -> None:
+        """Files with plan indicators in filename should map to plans."""
+        # Suffix patterns
+        assert map_path_to_folder("docs/feature-plan.md") == "plans"
+        assert map_path_to_folder("docs/auth_plan.md") == "plans"
+        # Prefix patterns
+        assert map_path_to_folder("docs/plan-feature.md") == "plans"
+        # Implementation plans
+        assert map_path_to_folder("docs/auth-implementation.md") == "plans"
+        # Phase documents
+        assert map_path_to_folder("docs/phase-6-ui-controls.md") == "plans"
+        assert map_path_to_folder("docs/phase_1_setup.md") == "plans"
+        # Roadmap/proposal patterns
+        assert map_path_to_folder("docs/q1-roadmap.md") == "plans"
+        assert map_path_to_folder("docs/feature-proposal.md") == "plans"
+
+    def test_completion_filename_patterns(self) -> None:
+        """Files with completion indicators in filename should map to completions."""
+        assert map_path_to_folder("docs/feature-completion.md") == "completions"
+        assert map_path_to_folder("docs/auth-report.md") == "completions"
+        assert map_path_to_folder("docs/task_completed.md") == "completions"
+
+    def test_folder_patterns_take_precedence(self) -> None:
+        """Explicit folder structure should override filename patterns."""
+        # A plan file in blueprints folder stays in blueprints
+        assert map_path_to_folder("docs/blueprints/implementation-plan.md") == "blueprints"
+        # A file with "plan" in name but in archive folder stays in archive
+        assert map_path_to_folder("docs/archive/old-plan.md") == "archive"
+
 
 class TestInferDocType:
     """Tests for document type inference."""
