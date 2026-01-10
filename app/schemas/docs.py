@@ -57,3 +57,56 @@ class AddChangelogEntryRequest(BaseModel):
 
     version: str | None = None
     changes: list[ChangeEntryRequest]
+
+
+# =============================================================================
+# Phase 2: GitHub Sync Schemas
+# =============================================================================
+
+
+class ImportDocsResponse(BaseModel):
+    """Response for POST /products/{id}/import-docs."""
+
+    imported: int  # New documents created
+    updated: int  # Existing documents updated
+    skipped: int  # Unchanged documents skipped
+
+
+class SyncDocsRequest(BaseModel):
+    """Request body for POST /products/{id}/sync-docs."""
+
+    document_ids: list[str] | None = None  # Specific docs to sync, or all with local changes
+    message: str = "Sync documentation from Trajan"  # Commit message
+
+
+class SyncDocsResponse(BaseModel):
+    """Response for POST /products/{id}/sync-docs."""
+
+    success: bool
+    files_synced: int
+    commit_sha: str | None = None
+    errors: list[str] = []
+
+
+class DocumentSyncStatusResponse(BaseModel):
+    """Sync status for a single document."""
+
+    document_id: str
+    status: str  # "synced", "local_changes", "remote_changes", "conflict", "error"
+    local_sha: str | None = None
+    remote_sha: str | None = None
+    error: str | None = None
+
+
+class DocsSyncStatusResponse(BaseModel):
+    """Response for GET /products/{id}/docs-sync-status."""
+
+    documents: list[DocumentSyncStatusResponse]
+    has_local_changes: bool
+    has_remote_changes: bool
+
+
+class PullRemoteRequest(BaseModel):
+    """Request body for POST /documents/{id}/pull-remote."""
+
+    pass  # No body needed, but keeping for future expansion

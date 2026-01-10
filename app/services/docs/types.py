@@ -76,3 +76,38 @@ class OrchestratorResult:
     changelog: ChangelogResult | None = None
     blueprints: list[Document] = field(default_factory=list)
     plans_structured: PlansResult | None = None
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase 2: GitHub Synchronization Types
+# ─────────────────────────────────────────────────────────────
+
+
+@dataclass
+class ImportResult:
+    """Result of importing documents from GitHub."""
+
+    imported: int = 0  # New documents created
+    updated: int = 0  # Existing documents updated
+    skipped: int = 0  # Unchanged documents skipped
+
+
+@dataclass
+class SyncResult:
+    """Result of syncing documents to GitHub."""
+
+    success: bool
+    files_synced: int = 0
+    errors: list[str] = field(default_factory=list)
+    commit_sha: str | None = None
+
+
+@dataclass
+class DocumentSyncStatus:
+    """Sync status for a single document."""
+
+    document_id: str
+    status: str  # "synced", "local_changes", "remote_changes", "conflict", "error"
+    local_sha: str | None = None
+    remote_sha: str | None = None
+    error: str | None = None

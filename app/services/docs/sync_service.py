@@ -1,0 +1,552 @@
+"""
+DocsSyncService - Two-way synchronization between Trajan and GitHub.
+
+Handles:
+- Importing documentation from repository docs/ folder
+- Tracking sync state (SHA, timestamps)
+- Detecting local vs remote changes
+- Pushing documentation back to GitHub (Phase 2B)
+"""
+
+import logging
+import re
+import uuid as uuid_pkg
+from datetime import UTC, datetime
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.document import Document
+from app.models.repository import Repository
+from app.services.docs.types import DocumentSyncStatus, ImportResult, SyncResult
+from app.services.github import GitHubService
+from app.services.github.exceptions import GitHubAPIError
+from app.services.github.types import RepoTreeItem
+
+logger = logging.getLogger(__name__)
+
+
+class DocsSyncService:
+    """
+    Synchronize documentation between Trajan and GitHub repositories.
+
+    This service manages:
+    1. Import: Pull existing docs from repo's docs/ folder
+    2. Track: Maintain SHA hashes for change detection
+    3. Check: Detect when local or remote has changed
+    4. Sync: Push local changes back to GitHub (Phase 2B)
+    """
+
+    def __init__(
+        self,
+        db: AsyncSession,
+        github_service: GitHubService,
+    ) -> None:
+        self.db = db
+        self.github_service = github_service
+
+    async def import_from_repo(
+        self,
+        repository: Repository,
+    ) -> ImportResult:
+        """
+        Import documentation from repository's docs/ folder.
+
+        Creates or updates Document records in database with sync tracking:
+        - github_sha: Content hash for change detection
+        - github_path: File path in repo
+        - last_synced_at: Timestamp
+        - sync_status: "synced"
+
+        Args:
+            repository: Repository to import from
+
+        Returns:
+            ImportResult with counts of imported/updated/skipped docs
+        """
+        if not repository.full_name:
+            return ImportResult(imported=0, updated=0, skipped=0)
+
+        owner, repo_name = repository.full_name.split("/", 1)
+        branch = repository.default_branch or "main"
+
+        # Get repo tree to find docs
+        try:
+            tree = await self.github_service.get_repo_tree(owner, repo_name, branch)
+        except GitHubAPIError as e:
+            logger.error(f"Failed to get repo tree for {repository.full_name}: {e}")
+            return ImportResult(imported=0, updated=0, skipped=0)
+
+        # Find markdown files in docs/ folder or root changelog
+        docs_items = [
+            item for item in tree.all_items
+            if self._is_doc_file(item)
+        ]
+
+        if not docs_items:
+            logger.info(f"No documentation files found in {repository.full_name}")
+            return ImportResult(imported=0, updated=0, skipped=0)
+
+        result = ImportResult()
+
+        for item in docs_items:
+            try:
+                # Check if already imported
+                existing = await self._find_by_github_path(
+                    repository.product_id,
+                    item.path,
+                )
+
+                if existing:
+                    if existing.github_sha == item.sha:
+                        # No changes - skip
+                        result.skipped += 1
+                        continue
+                    else:
+                        # Content changed - update
+                        await self._update_from_github(existing, repository, item, branch)
+                        result.updated += 1
+                        logger.info(f"Updated doc: {item.path}")
+                else:
+                    # New file - import
+                    await self._create_from_github(repository, item, branch)
+                    result.imported += 1
+                    logger.info(f"Imported doc: {item.path}")
+
+            except Exception as e:
+                logger.error(f"Failed to process {item.path}: {e}")
+                continue
+
+        await self.db.commit()
+        return result
+
+    async def sync_to_repo(
+        self,
+        documents: list[Document],
+        repository: Repository,
+        commit_message: str,
+    ) -> SyncResult:
+        """
+        Push documents to repository's docs/ folder.
+
+        Creates/updates files and commits to default branch.
+
+        Args:
+            documents: Documents to sync
+            repository: Target repository
+            commit_message: Commit message
+
+        Returns:
+            SyncResult with success status and commit SHA
+        """
+        if not documents:
+            return SyncResult(success=True, files_synced=0)
+
+        if not repository or not repository.full_name:
+            return SyncResult(
+                success=False,
+                files_synced=0,
+                errors=["No GitHub repository linked"],
+            )
+
+        owner, repo_name = repository.full_name.split("/", 1)
+        branch = repository.default_branch or "main"
+
+        try:
+            files_to_commit = []
+            for doc in documents:
+                if not doc.content:
+                    continue
+
+                # Generate path if not already set
+                path = doc.github_path or self._generate_github_path(doc)
+                files_to_commit.append({
+                    "path": path,
+                    "content": doc.content,
+                })
+
+            if not files_to_commit:
+                return SyncResult(success=True, files_synced=0)
+
+            # Create commit via GitHub API
+            commit_sha = await self.github_service.create_commit(
+                owner, repo_name, files_to_commit, commit_message, branch
+            )
+
+            # Update sync tracking for all documents
+            for doc in documents:
+                # Get the new SHA for the file
+                path = doc.github_path or self._generate_github_path(doc)
+                new_sha = await self.github_service.get_file_sha(
+                    owner, repo_name, path, branch
+                )
+
+                doc.github_sha = new_sha
+                doc.github_path = path
+                doc.last_synced_at = datetime.now(UTC)
+                doc.sync_status = "synced"
+
+            await self.db.commit()
+
+            logger.info(f"Synced {len(files_to_commit)} files to {repository.full_name}")
+
+            return SyncResult(
+                success=True,
+                files_synced=len(files_to_commit),
+                commit_sha=commit_sha,
+            )
+
+        except GitHubAPIError as e:
+            logger.error(f"Failed to sync to repo: {e}")
+            return SyncResult(
+                success=False,
+                files_synced=0,
+                errors=[f"Failed to sync: {e.message}"],
+            )
+
+    async def check_for_updates(
+        self,
+        product_id: str,
+        user_id: str,
+    ) -> list[DocumentSyncStatus]:
+        """
+        Check which documents have remote changes.
+
+        Compares local github_sha with current SHA in repository.
+
+        Args:
+            product_id: Product to check documents for
+            user_id: Owner user ID
+
+        Returns:
+            List of DocumentSyncStatus for each synced document
+        """
+        # Get all documents with github_path (synced docs)
+        result = await self.db.execute(
+            select(Document)
+            .where(Document.product_id == uuid_pkg.UUID(product_id))
+            .where(Document.user_id == uuid_pkg.UUID(user_id))
+            .where(Document.github_path != None)  # noqa: E711
+        )
+        docs = list(result.scalars().all())
+
+        if not docs:
+            return []
+
+        statuses: list[DocumentSyncStatus] = []
+
+        # Group by repository to minimize API calls
+        docs_by_repo: dict[str, list[Document]] = {}
+        for doc in docs:
+            if doc.repository_id:
+                repo_id = str(doc.repository_id)
+                if repo_id not in docs_by_repo:
+                    docs_by_repo[repo_id] = []
+                docs_by_repo[repo_id].append(doc)
+
+        for repo_id, repo_docs in docs_by_repo.items():
+            # Get repository
+            repo_result = await self.db.execute(
+                select(Repository).where(Repository.id == repo_id)
+            )
+            repo = repo_result.scalar_one_or_none()
+
+            if not repo or not repo.full_name:
+                for doc in repo_docs:
+                    statuses.append(DocumentSyncStatus(
+                        document_id=str(doc.id),
+                        status="error",
+                        error="Repository not found",
+                    ))
+                continue
+
+            owner, repo_name = repo.full_name.split("/", 1)
+            branch = repo.default_branch or "main"
+
+            try:
+                tree = await self.github_service.get_repo_tree(owner, repo_name, branch)
+                sha_by_path = {item.path: item.sha for item in tree.all_items}
+
+                for doc in repo_docs:
+                    if not doc.github_path:
+                        continue
+
+                    remote_sha = sha_by_path.get(doc.github_path)
+
+                    if remote_sha is None:
+                        # File deleted from remote
+                        statuses.append(DocumentSyncStatus(
+                            document_id=str(doc.id),
+                            status="remote_changes",
+                            local_sha=doc.github_sha,
+                            remote_sha=None,
+                        ))
+                    elif remote_sha != doc.github_sha:
+                        # File changed on remote
+                        statuses.append(DocumentSyncStatus(
+                            document_id=str(doc.id),
+                            status="remote_changes",
+                            local_sha=doc.github_sha,
+                            remote_sha=remote_sha,
+                        ))
+                    else:
+                        # Check for local changes (updated_at > last_synced_at)
+                        if doc.last_synced_at and doc.updated_at > doc.last_synced_at:
+                            statuses.append(DocumentSyncStatus(
+                                document_id=str(doc.id),
+                                status="local_changes",
+                                local_sha=doc.github_sha,
+                                remote_sha=remote_sha,
+                            ))
+                        else:
+                            statuses.append(DocumentSyncStatus(
+                                document_id=str(doc.id),
+                                status="synced",
+                                local_sha=doc.github_sha,
+                                remote_sha=remote_sha,
+                            ))
+
+            except GitHubAPIError as e:
+                for doc in repo_docs:
+                    statuses.append(DocumentSyncStatus(
+                        document_id=str(doc.id),
+                        status="error",
+                        error=str(e),
+                    ))
+
+        return statuses
+
+    async def pull_remote_changes(
+        self,
+        document_id: str,
+        user_id: str,
+    ) -> Document | None:
+        """
+        Pull latest content from GitHub for a document.
+
+        Updates the document with remote content and resets sync status.
+
+        Args:
+            document_id: Document to update
+            user_id: Owner user ID
+
+        Returns:
+            Updated Document or None if not found
+        """
+        result = await self.db.execute(
+            select(Document)
+            .where(Document.id == uuid_pkg.UUID(document_id))
+            .where(Document.user_id == uuid_pkg.UUID(user_id))
+        )
+        doc = result.scalar_one_or_none()
+
+        if not doc or not doc.github_path or not doc.repository_id:
+            return None
+
+        # Get repository
+        repo_result = await self.db.execute(
+            select(Repository).where(Repository.id == uuid_pkg.UUID(str(doc.repository_id)))
+        )
+        repo = repo_result.scalar_one_or_none()
+
+        if not repo or not repo.full_name:
+            return None
+
+        owner, repo_name = repo.full_name.split("/", 1)
+        branch = repo.default_branch or "main"
+
+        try:
+            file_content = await self.github_service.get_file_content(
+                owner, repo_name, doc.github_path, branch
+            )
+            if not file_content:
+                return None
+
+            # Update document
+            doc.content = file_content.content
+            doc.github_sha = file_content.sha
+            doc.last_synced_at = datetime.now(UTC)
+            doc.sync_status = "synced"
+            doc.title = self._extract_title(file_content.content, doc.github_path)
+
+            await self.db.commit()
+            await self.db.refresh(doc)
+            return doc
+
+        except GitHubAPIError as e:
+            logger.error(f"Failed to pull remote changes: {e}")
+            return None
+
+    def _is_doc_file(self, item: RepoTreeItem) -> bool:
+        """Check if tree item is a documentation file we should import."""
+        if item.type != "blob":
+            return False
+        if not item.path.endswith(".md"):
+            return False
+
+        path_lower = item.path.lower()
+
+        # Include docs/ folder
+        if item.path.startswith("docs/"):
+            return True
+
+        # Include root-level changelog files
+        return path_lower in ("changelog.md", "changes.md", "history.md")
+
+    async def _find_by_github_path(
+        self,
+        product_id: uuid_pkg.UUID | None,
+        github_path: str,
+    ) -> Document | None:
+        """Find document by GitHub path."""
+        if product_id is None:
+            return None
+        result = await self.db.execute(
+            select(Document)
+            .where(Document.product_id == product_id)
+            .where(Document.github_path == github_path)
+        )
+        return result.scalar_one_or_none()
+
+    async def _create_from_github(
+        self,
+        repository: Repository,
+        item: RepoTreeItem,
+        branch: str,
+    ) -> Document:
+        """Create a new document from GitHub file."""
+        if not repository.full_name:
+            raise ValueError("Repository has no full_name")
+
+        owner, repo_name = repository.full_name.split("/", 1)
+
+        file_content = await self.github_service.get_file_content(
+            owner, repo_name, item.path, branch
+        )
+        if not file_content:
+            raise ValueError(f"Could not fetch content for {item.path}")
+
+        content = file_content.content
+        folder_path = self._map_path_to_folder(item.path)
+        doc_type = self._infer_doc_type(item.path, content)
+
+        doc = Document(
+            product_id=repository.product_id,
+            user_id=repository.user_id,
+            title=self._extract_title(content, item.path),
+            content=content,
+            type=doc_type,
+            folder={"path": folder_path} if folder_path else None,
+            repository_id=repository.id,
+            # Sync tracking
+            github_sha=item.sha,
+            github_path=item.path,
+            last_synced_at=datetime.now(UTC),
+            sync_status="synced",
+        )
+        self.db.add(doc)
+        return doc
+
+    async def _update_from_github(
+        self,
+        document: Document,
+        repository: Repository,
+        item: RepoTreeItem,
+        branch: str,
+    ) -> None:
+        """Update existing document from GitHub."""
+        if not repository.full_name:
+            return
+
+        owner, repo_name = repository.full_name.split("/", 1)
+
+        file_content = await self.github_service.get_file_content(
+            owner, repo_name, item.path, branch
+        )
+        if not file_content:
+            return
+
+        document.content = file_content.content
+        document.github_sha = item.sha
+        document.last_synced_at = datetime.now(UTC)
+        document.sync_status = "synced"
+        document.title = self._extract_title(file_content.content, item.path)
+
+    def _map_path_to_folder(self, path: str) -> str | None:
+        """Map GitHub path to our folder structure."""
+        path_lower = path.lower()
+
+        # Changelog stays at root
+        if any(p in path_lower for p in ["changelog", "changes", "history"]):
+            return None
+
+        # Map known patterns to folders
+        if any(p in path_lower for p in ["/blueprints/", "/overview/", "/architecture/"]):
+            return "blueprints"
+        if any(p in path_lower for p in ["/plans/", "/roadmap/", "/planning/"]):
+            return "plans"
+        if any(p in path_lower for p in ["/executing/", "/in-progress/", "/wip/"]):
+            return "executing"
+        if any(p in path_lower for p in ["/completions/", "/completed/", "/done/"]):
+            # Try to extract date from path
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", path)
+            if date_match:
+                return f"completions/{date_match.group(1)}"
+            return "completions"
+        if any(p in path_lower for p in ["/archive/", "/old/", "/deprecated/"]):
+            return "archive"
+
+        # Default for docs/ folder
+        if path.startswith("docs/"):
+            return "blueprints"
+
+        return None
+
+    def _infer_doc_type(self, path: str, _content: str) -> str:
+        """Infer document type from path and content."""
+        path_lower = path.lower()
+
+        if any(p in path_lower for p in ["changelog", "changes", "history"]):
+            return "changelog"
+        if "architecture" in path_lower:
+            return "architecture"
+        if any(p in path_lower for p in ["plan", "roadmap", "proposal"]):
+            return "plan"
+        if "readme" in path_lower:
+            return "blueprint"
+        if "api" in path_lower:
+            return "architecture"
+        if any(p in path_lower for p in ["guide", "tutorial"]):
+            return "note"
+
+        return "blueprint"
+
+    def _extract_title(self, content: str, path: str) -> str:
+        """Extract title from markdown content or filename."""
+        # Try to get first H1
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("# "):
+                return stripped[2:].strip()
+
+        # Fallback to filename
+        filename = path.split("/")[-1]
+        title = filename.replace(".md", "").replace("-", " ").replace("_", " ")
+        return title.title()
+
+    def _generate_github_path(self, doc: Document) -> str:
+        """Generate file path for document based on folder."""
+        # Slugify title
+        title = doc.title or "untitled"
+        slug = re.sub(r"[^\w\s-]", "", title.lower())
+        slug = re.sub(r"[-\s]+", "-", slug).strip("-")
+
+        folder_path = doc.folder.get("path") if doc.folder else None
+
+        if doc.type == "changelog":
+            return "docs/changelog.md"
+
+        if not folder_path:
+            return f"docs/{slug}.md"
+
+        return f"docs/{folder_path}/{slug}.md"

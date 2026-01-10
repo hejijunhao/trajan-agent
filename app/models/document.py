@@ -1,4 +1,5 @@
 import uuid as uuid_pkg
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Column
@@ -66,6 +67,29 @@ class Document(DocumentBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=Tr
             JSONB,
             comment="Folder path for document organization (e.g. blueprints, plans, completions)",
         ),
+    )
+
+    # GitHub sync tracking fields
+    github_sha: str | None = Field(
+        default=None,
+        max_length=40,
+        description="Git blob SHA of the file content for change detection",
+    )
+    github_path: str | None = Field(
+        default=None,
+        max_length=500,
+        index=True,
+        description="Path to the file in the GitHub repository",
+    )
+    last_synced_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of last successful sync with GitHub",
+    )
+    sync_status: str | None = Field(
+        default=None,
+        max_length=20,
+        index=True,
+        description="Sync state: synced | local_changes | remote_changes | conflict",
     )
 
     # Relationships

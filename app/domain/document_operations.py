@@ -121,8 +121,60 @@ class DocumentOperations(BaseOperations[Document]):
 
         doc.folder = {"path": new_folder}
         doc.updated_at = datetime.now(UTC)
+        # Mark as having local changes if it was synced
+        if doc.sync_status == "synced":
+            doc.sync_status = "local_changes"
         await db.commit()
         await db.refresh(doc)
+        return doc
+
+    async def get_synced_documents(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        user_id: uuid_pkg.UUID,
+    ) -> list[Document]:
+        """Get documents that have been synced with GitHub."""
+        result = await db.execute(
+            select(Document)
+            .where(Document.product_id == product_id)
+            .where(Document.user_id == user_id)
+            .where(Document.github_path.isnot(None))
+            .order_by(Document.updated_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_with_local_changes(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        user_id: uuid_pkg.UUID,
+    ) -> list[Document]:
+        """Get documents with unsynchronized local changes."""
+        result = await db.execute(
+            select(Document)
+            .where(Document.product_id == product_id)
+            .where(Document.user_id == user_id)
+            .where(Document.sync_status == "local_changes")
+            .order_by(Document.updated_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def mark_local_changes(
+        self,
+        db: AsyncSession,
+        document_id: uuid_pkg.UUID,
+        user_id: uuid_pkg.UUID,
+    ) -> Document | None:
+        """Mark a document as having local changes (for sync tracking)."""
+        doc = await self.get_by_user(db, user_id, document_id)
+        if not doc:
+            return None
+
+        if doc.github_path:  # Only track if it's a synced document
+            doc.sync_status = "local_changes"
+            await db.commit()
+            await db.refresh(doc)
         return doc
 
 
