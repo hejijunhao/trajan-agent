@@ -1,5 +1,7 @@
 """Constants for GitHub service."""
 
+import re
+
 # Standard GitHub language colors (subset of most common)
 # Used for visualization in the frontend language breakdown
 GITHUB_LANGUAGE_COLORS: dict[str, str] = {
@@ -72,3 +74,47 @@ KEY_FILES: list[str] = [
     ".github/workflows/main.yml",
     ".github/workflows/main.yaml",
 ]
+
+# Architecture-relevant file patterns for extracting API endpoints, models, services, and pages
+# These patterns are matched against file paths in the repository tree
+ARCHITECTURE_FILE_PATTERNS: list[re.Pattern[str]] = [
+    # API/Route files
+    re.compile(r".*/(routes|api|endpoints|controllers|handlers)/.*\.(py|ts|js|go|java|rs)$"),
+    re.compile(r".*/app\.(py|ts|js)$"),
+    re.compile(r".*/main\.(py|ts|js|go)$"),
+    re.compile(r".*/server\.(py|ts|js|go)$"),
+    re.compile(r".*/router\.(py|ts|js)$"),
+    # Model/Schema files
+    re.compile(r".*/(models|entities|schemas|types)/.*\.(py|ts|js|go|java|rs)$"),
+    re.compile(r".*/models\.(py|ts|js)$"),
+    re.compile(r".*/schema\.(py|ts|js)$"),
+    re.compile(r".*/types\.(ts|js)$"),
+    # Service/Domain files
+    re.compile(r".*/(services|domain|usecases|business)/.*\.(py|ts|js|go|java|rs)$"),
+    # Frontend page files (Next.js, Nuxt, SvelteKit, etc.)
+    re.compile(r".*/pages/.*\.(tsx|jsx|vue|svelte)$"),
+    re.compile(r".*/app/.*page\.(tsx|jsx)$"),  # Next.js App Router
+    re.compile(r".*/views/.*\.(tsx|jsx|vue|svelte)$"),
+    re.compile(r".*/routes/.*\.(tsx|jsx|svelte)$"),  # SvelteKit, Remix
+]
+
+# Files to always include if they exist (entry points, configs with routes)
+ALWAYS_INCLUDE_ARCHITECTURE_FILES: set[str] = {
+    "app/main.py",
+    "src/main.py",
+    "main.py",
+    "app.py",
+    "server.py",
+    "src/app.ts",
+    "src/index.ts",
+    "src/server.ts",
+    "index.ts",
+    "app.ts",
+    "server.ts",
+}
+
+# Maximum number of architecture files to fetch (to avoid excessive API calls)
+MAX_ARCHITECTURE_FILES = 50
+
+# Maximum size per architecture file (100KB)
+MAX_ARCHITECTURE_FILE_SIZE = 100_000

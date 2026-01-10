@@ -16,7 +16,14 @@ from typing import Any
 
 import httpx
 
-from app.services.github.constants import GITHUB_LANGUAGE_COLORS, KEY_FILES
+from app.services.github.constants import (
+    ALWAYS_INCLUDE_ARCHITECTURE_FILES,
+    ARCHITECTURE_FILE_PATTERNS,
+    GITHUB_LANGUAGE_COLORS,
+    KEY_FILES,
+    MAX_ARCHITECTURE_FILE_SIZE,
+    MAX_ARCHITECTURE_FILES,
+)
 from app.services.github.exceptions import GitHubAPIError
 from app.services.github.types import (
     CommitStats,
@@ -593,6 +600,80 @@ class GitHubService:
             if isinstance(result, tuple) and (path := result[0]) and (content := result[1])
         }
 
+    def _is_architecture_file(self, path: str) -> bool:
+        """Check if a file path matches architecture-relevant patterns."""
+        # Check always-include files first
+        if path in ALWAYS_INCLUDE_ARCHITECTURE_FILES:
+            return True
+
+        # Normalize path for pattern matching (add leading slash)
+        normalized = "/" + path.lstrip("/")
+
+        # Check patterns
+        return any(pattern.match(normalized) for pattern in ARCHITECTURE_FILE_PATTERNS)
+
+    async def get_architecture_files(
+        self,
+        owner: str,
+        repo: str,
+        branch: str = "main",
+        tree: RepoTree | None = None,
+        max_concurrent: int = 5,
+    ) -> dict[str, str]:
+        """
+        Fetch contents of architecture-relevant files for code analysis.
+
+        This method identifies and fetches files that contain:
+        - API endpoints (routes, controllers, handlers)
+        - Database models (models, entities, schemas)
+        - Services (services, domain, business logic)
+        - Frontend pages (pages, views, routes)
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            branch: Branch name (default: "main")
+            tree: Optional pre-fetched RepoTree (required for file filtering)
+            max_concurrent: Maximum concurrent requests (default: 5)
+
+        Returns:
+            Dict mapping file paths to their contents
+        """
+        if not tree:
+            return {}
+
+        # Filter tree files to only architecture-relevant ones
+        architecture_files = [
+            path for path in tree.files if self._is_architecture_file(path)
+        ]
+
+        if not architecture_files:
+            return {}
+
+        # Limit to avoid excessive API calls
+        files_to_fetch = architecture_files[:MAX_ARCHITECTURE_FILES]
+
+        # Use semaphore for concurrency control
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def fetch_with_limit(file_path: str) -> tuple[str, str | None]:
+            async with semaphore:
+                content = await self.get_file_content(
+                    owner, repo, file_path, branch, max_size=MAX_ARCHITECTURE_FILE_SIZE
+                )
+                return (file_path, content.content if content else None)
+
+        # Fetch all files concurrently
+        tasks = [fetch_with_limit(fp) for fp in files_to_fetch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter successful results, skip exceptions
+        return {
+            path: content
+            for result in results
+            if isinstance(result, tuple) and (path := result[0]) and (content := result[1])
+        }
+
     async def get_repo_context(
         self,
         owner: str,
@@ -668,11 +749,18 @@ class GitHubService:
         except GitHubAPIError as e:
             errors.append(f"Failed to get repo tree: {e.message}")
 
-        # Fetch key files
+        # Fetch key files (README, config, etc.)
         try:
             files = await self.get_key_files(owner, repo, branch, tree)
         except GitHubAPIError as e:
             errors.append(f"Failed to get key files: {e.message}")
+
+        # Fetch architecture files (routes, models, services, pages)
+        try:
+            arch_files = await self.get_architecture_files(owner, repo, branch, tree)
+            files.update(arch_files)  # Merge with key files
+        except GitHubAPIError as e:
+            errors.append(f"Failed to get architecture files: {e.message}")
 
         # Fetch languages
         try:

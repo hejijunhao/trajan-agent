@@ -10,7 +10,6 @@ Part of the Analysis Agent refactoring (Phase 3).
 
 import asyncio
 import logging
-import re
 from typing import Any, cast
 
 import anthropic
@@ -25,6 +24,10 @@ from app.schemas.product_overview import (
     ServiceInfo,
 )
 from app.services.github import RepoContext
+from app.services.github.constants import (
+    ALWAYS_INCLUDE_ARCHITECTURE_FILES,
+    ARCHITECTURE_FILE_PATTERNS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,49 +38,11 @@ ARCHITECTURE_MODEL = "claude-sonnet-4-20250514"
 MAX_RETRIES = 3
 RETRY_DELAYS = [2, 4, 8]
 
-# File patterns for architecture-relevant files
-# These patterns are matched against file paths in the repository tree
-ARCHITECTURE_FILE_PATTERNS: list[re.Pattern[str]] = [
-    # API/Route files
-    re.compile(r".*/(routes|api|endpoints|controllers|handlers)/.*\.(py|ts|js|go|java|rs)$"),
-    re.compile(r".*/app\.(py|ts|js)$"),
-    re.compile(r".*/main\.(py|ts|js|go)$"),
-    re.compile(r".*/server\.(py|ts|js|go)$"),
-    re.compile(r".*/router\.(py|ts|js)$"),
-    # Model/Schema files
-    re.compile(r".*/(models|entities|schemas|types)/.*\.(py|ts|js|go|java|rs)$"),
-    re.compile(r".*/models\.(py|ts|js)$"),
-    re.compile(r".*/schema\.(py|ts|js)$"),
-    re.compile(r".*/types\.(ts|js)$"),
-    # Service/Domain files
-    re.compile(r".*/(services|domain|usecases|business)/.*\.(py|ts|js|go|java|rs)$"),
-    # Frontend page files (Next.js, Nuxt, SvelteKit, etc.)
-    re.compile(r".*/pages/.*\.(tsx|jsx|vue|svelte)$"),
-    re.compile(r".*/app/.*page\.(tsx|jsx)$"),  # Next.js App Router
-    re.compile(r".*/views/.*\.(tsx|jsx|vue|svelte)$"),
-    re.compile(r".*/routes/.*\.(tsx|jsx|svelte)$"),  # SvelteKit, Remix
-]
-
-# Files to always include if they exist (entry points, configs with routes)
-ALWAYS_INCLUDE_FILES: set[str] = {
-    "app/main.py",
-    "src/main.py",
-    "main.py",
-    "app.py",
-    "server.py",
-    "src/app.ts",
-    "src/index.ts",
-    "src/server.ts",
-    "index.ts",
-    "app.ts",
-    "server.ts",
-}
-
 
 def _is_architecture_file(path: str) -> bool:
     """Check if a file path matches architecture-relevant patterns."""
     # Check always-include files
-    if path in ALWAYS_INCLUDE_FILES:
+    if path in ALWAYS_INCLUDE_ARCHITECTURE_FILES:
         return True
 
     # Normalize path for pattern matching
