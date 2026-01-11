@@ -111,3 +111,86 @@ class DocumentSyncStatus:
     local_sha: str | None = None
     remote_sha: str | None = None
     error: str | None = None
+
+
+# ─────────────────────────────────────────────────────────────
+# Documentation Agent v2: Codebase Analysis Types
+# ─────────────────────────────────────────────────────────────
+
+
+@dataclass
+class FileContent:
+    """Content of a file with metadata."""
+
+    path: str
+    content: str
+    size: int
+    tier: int  # Priority tier (1=highest, 3=lowest)
+    token_estimate: int  # Estimated token count
+
+
+@dataclass
+class TechStack:
+    """Detected technology stack for a codebase."""
+
+    languages: list[str]  # Primary languages (e.g., ["Python", "TypeScript"])
+    frameworks: list[str]  # Detected frameworks (e.g., ["FastAPI", "Next.js"])
+    databases: list[str]  # Detected databases (e.g., ["PostgreSQL", "Redis"])
+    infrastructure: list[str]  # Infra tools (e.g., ["Docker", "Fly.io"])
+    package_managers: list[str]  # Package managers (e.g., ["pip", "npm"])
+
+
+@dataclass
+class ModelInfo:
+    """Information about a detected data model/schema."""
+
+    name: str
+    file_path: str
+    model_type: str  # "sqlmodel", "pydantic", "typescript", "prisma", etc.
+    fields: list[str]  # Field names (summary)
+
+
+@dataclass
+class EndpointInfo:
+    """Information about a detected API endpoint."""
+
+    method: str  # GET, POST, PUT, DELETE, etc.
+    path: str  # Route path
+    file_path: str  # Source file
+    handler_name: str | None  # Function/method name
+
+
+@dataclass
+class RepoAnalysis:
+    """Analysis results for a single repository."""
+
+    full_name: str
+    default_branch: str
+    description: str | None
+    tech_stack: TechStack
+    key_files: list[FileContent]
+    models: list[ModelInfo]
+    endpoints: list[EndpointInfo]
+    detected_patterns: list[str]  # "REST API", "monorepo", "microservices", etc.
+    total_files: int
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CodebaseContext:
+    """
+    Complete codebase context for documentation planning.
+
+    This is the output of CodebaseAnalyzer and input to DocumentationPlanner.
+    Contains deep analysis of all repositories linked to a product.
+    """
+
+    repositories: list[RepoAnalysis]
+    combined_tech_stack: TechStack  # Merged across all repos
+    all_key_files: list[FileContent]  # Files from all repos
+    all_models: list[ModelInfo]  # Models from all repos
+    all_endpoints: list[EndpointInfo]  # Endpoints from all repos
+    detected_patterns: list[str]  # Overall patterns
+    total_files: int
+    total_tokens: int  # Token count of all file contents
+    errors: list[str] = field(default_factory=list)

@@ -7,10 +7,12 @@ Provides agents for generating and maintaining documentation:
 - BlueprintAgent: Generates overview and architecture docs
 - PlansAgent: Manages plan lifecycle (plans → executing → completions → archive)
 - DocsSyncService: Two-way GitHub synchronization
+- CodebaseAnalyzer: Deep codebase analysis for v2 documentation planning
 """
 
 from app.services.docs.blueprint_agent import BlueprintAgent
 from app.services.docs.changelog_agent import ChangelogAgent
+from app.services.docs.codebase_analyzer import CodebaseAnalyzer
 from app.services.docs.orchestrator import DocumentOrchestrator
 from app.services.docs.plans_agent import PlansAgent
 from app.services.docs.sync_service import DocsSyncService
@@ -19,13 +21,19 @@ from app.services.docs.types import (
     BlueprintResult,
     ChangeEntry,
     ChangelogResult,
+    CodebaseContext,
     DocsInfo,
     DocumentSpec,
     DocumentSyncStatus,
+    EndpointInfo,
+    FileContent,
     ImportResult,
+    ModelInfo,
     OrchestratorResult,
     PlansResult,
+    RepoAnalysis,
     SyncResult,
+    TechStack,
 )
 
 __all__ = [
@@ -35,9 +43,10 @@ __all__ = [
     "ChangelogAgent",
     "BlueprintAgent",
     "PlansAgent",
-    # Sync Service
+    # Services
     "DocsSyncService",
-    # Types
+    "CodebaseAnalyzer",
+    # Types - v1
     "BlueprintPlan",
     "BlueprintResult",
     "ChangeEntry",
@@ -49,4 +58,11 @@ __all__ = [
     "OrchestratorResult",
     "PlansResult",
     "SyncResult",
+    # Types - v2 (CodebaseAnalyzer)
+    "CodebaseContext",
+    "EndpointInfo",
+    "FileContent",
+    "ModelInfo",
+    "RepoAnalysis",
+    "TechStack",
 ]
