@@ -36,7 +36,7 @@ class ChangelogAgent:
         self,
         db: AsyncSession,
         product: Product,
-        github_service: GitHubService,
+        github_service: GitHubService | None = None,
     ) -> None:
         self.db = db
         self.product = product

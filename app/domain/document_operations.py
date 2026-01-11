@@ -19,7 +19,7 @@ class DocumentOperations(BaseOperations[Document]):
         db: AsyncSession,
         user_id: uuid_pkg.UUID,
         product_id: uuid_pkg.UUID | None = None,
-        type: str | None = None,
+        doc_type: str | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> list[Document]:
@@ -28,8 +28,8 @@ class DocumentOperations(BaseOperations[Document]):
 
         if product_id:
             statement = statement.where(Document.product_id == product_id)
-        if type:
-            statement = statement.where(Document.type == type)
+        if doc_type:
+            statement = statement.where(Document.type == doc_type)
 
         statement = (
             statement.order_by(Document.created_at.desc())
