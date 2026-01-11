@@ -10,6 +10,10 @@ Tests cover:
 """
 
 from app.services.docs.codebase_analyzer import CodebaseAnalyzer
+from app.services.docs.codebase_analyzer.endpoints import extract_endpoints
+from app.services.docs.codebase_analyzer.models import extract_models
+from app.services.docs.codebase_analyzer.patterns import detect_patterns
+from app.services.docs.codebase_analyzer.tech_stack import detect_tech_stack
 from app.services.docs.types import FileContent, TechStack
 from app.services.github.types import RepoTree, RepoTreeItem
 
@@ -130,7 +134,7 @@ class TestTechStackDetection:
         files = [FileContent("app.py", "print('hello')", 100, 1, 25)]
         tree = self._make_tree(["app.py", "utils.py"])
 
-        result = self.analyzer._detect_tech_stack(files, tree)
+        result = detect_tech_stack(files, tree)
 
         assert "Python" in result.languages
         assert "pip" in result.package_managers
@@ -140,7 +144,7 @@ class TestTechStackDetection:
         files = [FileContent("index.ts", "const x = 1", 100, 1, 25)]
         tree = self._make_tree(["index.ts", "component.tsx"])
 
-        result = self.analyzer._detect_tech_stack(files, tree)
+        result = detect_tech_stack(files, tree)
 
         assert "TypeScript" in result.languages
 
@@ -154,7 +158,7 @@ app = FastAPI()
         files = [FileContent("main.py", content, len(content), 1, 100)]
         tree = self._make_tree(["main.py"])
 
-        result = self.analyzer._detect_tech_stack(files, tree)
+        result = detect_tech_stack(files, tree)
 
         assert "FastAPI" in result.frameworks
 
@@ -171,7 +175,7 @@ app = FastAPI()
         files = [FileContent("package.json", content, len(content), 1, 100)]
         tree = self._make_tree(["package.json"])
 
-        result = self.analyzer._detect_tech_stack(files, tree)
+        result = detect_tech_stack(files, tree)
 
         assert "Next.js" in result.frameworks
         assert "React" in result.frameworks
@@ -182,7 +186,7 @@ app = FastAPI()
         files = [FileContent(".env.example", content, len(content), 1, 50)]
         tree = self._make_tree([".env.example"])
 
-        result = self.analyzer._detect_tech_stack(files, tree)
+        result = detect_tech_stack(files, tree)
 
         assert "PostgreSQL" in result.databases
 
@@ -191,7 +195,7 @@ app = FastAPI()
         files = [FileContent("Dockerfile", "FROM python:3.11", 16, 1, 10)]
         tree = self._make_tree(["Dockerfile"])
 
-        result = self.analyzer._detect_tech_stack(files, tree)
+        result = detect_tech_stack(files, tree)
 
         assert "Docker" in result.infrastructure
 
@@ -200,7 +204,7 @@ app = FastAPI()
         files = [FileContent("package.json", "{}", 2, 1, 1)]
         tree = self._make_tree(["package.json"])
 
-        result = self.analyzer._detect_tech_stack(files, tree)
+        result = detect_tech_stack(files, tree)
 
         assert "npm" in result.package_managers
 
@@ -222,7 +226,7 @@ class User(SQLModel, table=True):
 """
         files = [FileContent("models.py", content, len(content), 2, 100)]
 
-        result = self.analyzer._extract_models(files)
+        result = extract_models(files)
 
         assert len(result) == 1
         assert result[0].name == "User"
@@ -239,7 +243,7 @@ class UserCreate(BaseModel):
 """
         files = [FileContent("schemas.py", content, len(content), 2, 100)]
 
-        result = self.analyzer._extract_models(files)
+        result = extract_models(files)
 
         assert len(result) == 1
         assert result[0].name == "UserCreate"
@@ -255,7 +259,7 @@ interface User {
 """
         files = [FileContent("types.ts", content, len(content), 2, 100)]
 
-        result = self.analyzer._extract_models(files)
+        result = extract_models(files)
 
         assert len(result) == 1
         assert result[0].name == "User"
@@ -273,7 +277,7 @@ class Post(SQLModel, table=True):
 """
         files = [FileContent("models.py", content, len(content), 2, 100)]
 
-        result = self.analyzer._extract_models(files)
+        result = extract_models(files)
 
         assert len(result) == 2
         model_names = [m.name for m in result]
@@ -301,7 +305,7 @@ async def create_user():
 """
         files = [FileContent("routes.py", content, len(content), 2, 100)]
 
-        result = self.analyzer._extract_endpoints(files)
+        result = extract_endpoints(files)
 
         assert len(result) == 2
         methods = [e.method for e in result]
@@ -319,7 +323,7 @@ def health_check():
 """
         files = [FileContent("main.py", content, len(content), 2, 100)]
 
-        result = self.analyzer._extract_endpoints(files)
+        result = extract_endpoints(files)
 
         assert len(result) == 1
         assert result[0].handler_name == "health_check"
@@ -347,7 +351,7 @@ class TestPatternDetection:
         tree = self._make_tree(["packages", "apps", "libs"])
         tech_stack = TechStack([], [], [], [], [])
 
-        result = self.analyzer._detect_patterns(tree, [], tech_stack)
+        result = detect_patterns(tree, tech_stack)
 
         assert "Monorepo" in result
 
@@ -356,7 +360,7 @@ class TestPatternDetection:
         tree = self._make_tree(["frontend", "backend"])
         tech_stack = TechStack([], [], [], [], [])
 
-        result = self.analyzer._detect_patterns(tree, [], tech_stack)
+        result = detect_patterns(tree, tech_stack)
 
         assert "Frontend/Backend Split" in result
 
@@ -365,7 +369,7 @@ class TestPatternDetection:
         tree = self._make_tree([])
         tech_stack = TechStack([], ["FastAPI"], [], [], [])
 
-        result = self.analyzer._detect_patterns(tree, [], tech_stack)
+        result = detect_patterns(tree, tech_stack)
 
         assert "REST API" in result
 
@@ -374,7 +378,7 @@ class TestPatternDetection:
         tree = self._make_tree(["models", "views", "controllers"])
         tech_stack = TechStack([], [], [], [], [])
 
-        result = self.analyzer._detect_patterns(tree, [], tech_stack)
+        result = detect_patterns(tree, tech_stack)
 
         assert "MVC/Layered Architecture" in result
 
@@ -383,6 +387,6 @@ class TestPatternDetection:
         tree = self._make_tree(["domain", "infrastructure", "application"])
         tech_stack = TechStack([], [], [], [], [])
 
-        result = self.analyzer._detect_patterns(tree, [], tech_stack)
+        result = detect_patterns(tree, tech_stack)
 
         assert "Domain-Driven Design" in result

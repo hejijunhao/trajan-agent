@@ -22,7 +22,15 @@ from app.services.file_selector import (
     MAX_FILES_TO_SELECT,
     MAX_TREE_FILES,
     MIN_FILES_TO_SELECT,
+    extract_references,
+    heuristic_fallback,
+    parse_response,
+    truncate_tree,
 )
+from app.services.file_selector.constants import SOURCE_EXTENSIONS, TEST_INDICATORS
+from app.services.file_selector.fallback import is_source_file, is_test_file
+from app.services.file_selector.parser import _resolve_import
+from app.services.file_selector.prompts import build_selection_prompt
 from app.services.framework_detector import DetectionResult, FrameworkInfo
 
 
@@ -69,7 +77,7 @@ class TestFileSelectorParsing:
     def test_parse_valid_json_array(self) -> None:
         """Parse a valid JSON array response."""
         response = '["src/routes/api.ts", "src/models/user.ts"]'
-        result = self.selector._parse_response(response, self.valid_files)
+        result = parse_response(response, self.valid_files)
 
         assert result == ["src/routes/api.ts", "src/models/user.ts"]
 
@@ -78,7 +86,7 @@ class TestFileSelectorParsing:
         response = """```json
 ["src/routes/api.ts", "src/models/user.ts"]
 ```"""
-        result = self.selector._parse_response(response, self.valid_files)
+        result = parse_response(response, self.valid_files)
 
         assert result == ["src/routes/api.ts", "src/models/user.ts"]
 
@@ -89,14 +97,14 @@ class TestFileSelectorParsing:
 ["src/routes/api.ts", "src/models/user.ts"]
 
 These files are important."""
-        result = self.selector._parse_response(response, self.valid_files)
+        result = parse_response(response, self.valid_files)
 
         assert result == ["src/routes/api.ts", "src/models/user.ts"]
 
     def test_parse_filters_invalid_paths(self) -> None:
         """Parsing should filter out paths not in the valid set."""
         response = '["src/routes/api.ts", "nonexistent/file.ts", "src/models/user.ts"]'
-        result = self.selector._parse_response(response, self.valid_files)
+        result = parse_response(response, self.valid_files)
 
         assert result == ["src/routes/api.ts", "src/models/user.ts"]
         assert "nonexistent/file.ts" not in result
@@ -109,28 +117,28 @@ These files are important."""
         response = "[" + ", ".join(quoted_files) + "]"
         valid_set = set(many_files)
 
-        result = self.selector._parse_response(response, valid_set)
+        result = parse_response(response, valid_set)
 
         assert len(result) <= MAX_FILES_TO_SELECT
 
     def test_parse_invalid_json_returns_empty(self) -> None:
         """Invalid JSON should return empty list."""
         response = "This is not JSON at all"
-        result = self.selector._parse_response(response, self.valid_files)
+        result = parse_response(response, self.valid_files)
 
         assert result == []
 
     def test_parse_non_array_returns_empty(self) -> None:
         """Non-array JSON should return empty list."""
         response = '{"files": ["src/main.py"]}'
-        result = self.selector._parse_response(response, self.valid_files)
+        result = parse_response(response, self.valid_files)
 
         assert result == []
 
     def test_parse_filters_non_string_items(self) -> None:
         """Non-string items in array should be filtered."""
         response = '["src/routes/api.ts", 123, null, "src/models/user.ts"]'
-        result = self.selector._parse_response(response, self.valid_files)
+        result = parse_response(response, self.valid_files)
 
         assert result == ["src/routes/api.ts", "src/models/user.ts"]
 
@@ -151,7 +159,7 @@ class TestFileSelectorTruncation:
             "random/file.txt",
         ]
         # Since we have fewer than MAX_TREE_FILES, simulate by checking order
-        result = self.selector._truncate_tree(files)
+        result = truncate_tree(files)
 
         # All files should be present since under limit
         assert set(result) == set(files)
@@ -163,7 +171,7 @@ class TestFileSelectorTruncation:
             "app/routes.py",
             "other/stuff.py",
         ]
-        result = self.selector._truncate_tree(files)
+        result = truncate_tree(files)
 
         assert set(result) == set(files)
 
@@ -172,7 +180,7 @@ class TestFileSelectorTruncation:
         # Generate more files than limit
         large_file_list = [f"file_{i}.py" for i in range(MAX_TREE_FILES + 100)]
 
-        result = self.selector._truncate_tree(large_file_list)
+        result = truncate_tree(large_file_list)
 
         assert len(result) == MAX_TREE_FILES
 
@@ -184,7 +192,7 @@ class TestFileSelectorTruncation:
             "src/routes/api.py",
         ]
 
-        result = self.selector._truncate_tree(files)
+        result = truncate_tree(files)
 
         # Check that shallower files come first within priority category
         src_main_idx = result.index("src/main.py")
@@ -229,7 +237,7 @@ class TestFileSelectorSelect:
         assert result.selected_files == small_files
         assert result.truncated is False
 
-    @patch("app.services.file_selector.FileSelector._call_with_retry")
+    @patch("app.services.file_selector.selector.FileSelector._call_with_retry")
     async def test_medium_repo_calls_api(self, mock_call: AsyncMock) -> None:
         """Medium repos should call the API for file selection."""
         # Return enough files to avoid triggering fallback (>= MIN_FILES_TO_SELECT // 2 = 5)
@@ -258,7 +266,7 @@ class TestFileSelectorSelect:
         assert result.truncated is False
         assert result.used_fallback is False
 
-    @patch("app.services.file_selector.FileSelector._call_with_retry")
+    @patch("app.services.file_selector.selector.FileSelector._call_with_retry")
     async def test_large_repo_truncates(self, mock_call: AsyncMock) -> None:
         """Large repos should be truncated before API call."""
         mock_call.return_value = ["file_0.py", "file_1.py"]
@@ -288,7 +296,7 @@ class TestFileSelectorPrompt:
 
     def test_prompt_includes_repo_name(self) -> None:
         """Prompt should include repository name."""
-        prompt = self.selector._build_prompt(
+        prompt = build_selection_prompt(
             repo_name="owner/repo",
             description=None,
             readme_content=None,
@@ -299,7 +307,7 @@ class TestFileSelectorPrompt:
 
     def test_prompt_includes_description(self) -> None:
         """Prompt should include description when provided."""
-        prompt = self.selector._build_prompt(
+        prompt = build_selection_prompt(
             repo_name="test/repo",
             description="A cool project",
             readme_content=None,
@@ -310,7 +318,7 @@ class TestFileSelectorPrompt:
 
     def test_prompt_includes_readme(self) -> None:
         """Prompt should include README content when provided."""
-        prompt = self.selector._build_prompt(
+        prompt = build_selection_prompt(
             repo_name="test/repo",
             description=None,
             readme_content="# My Project\n\nThis does cool stuff.",
@@ -324,7 +332,7 @@ class TestFileSelectorPrompt:
         """Long README should be truncated."""
         long_readme = "A" * 5000
 
-        prompt = self.selector._build_prompt(
+        prompt = build_selection_prompt(
             repo_name="test/repo",
             description=None,
             readme_content=long_readme,
@@ -338,7 +346,7 @@ class TestFileSelectorPrompt:
         """Prompt should show total file count."""
         files = ["a.py", "b.py", "c.py"]
 
-        prompt = self.selector._build_prompt(
+        prompt = build_selection_prompt(
             repo_name="test/repo",
             description=None,
             readme_content=None,
@@ -351,7 +359,7 @@ class TestFileSelectorPrompt:
         """Prompt should list all file paths."""
         files = ["src/main.py", "src/utils.py"]
 
-        prompt = self.selector._build_prompt(
+        prompt = build_selection_prompt(
             repo_name="test/repo",
             description=None,
             readme_content=None,
@@ -363,7 +371,7 @@ class TestFileSelectorPrompt:
 
     def test_prompt_includes_selection_guidance(self) -> None:
         """Prompt should include guidance for file selection."""
-        prompt = self.selector._build_prompt(
+        prompt = build_selection_prompt(
             repo_name="test/repo",
             description=None,
             readme_content=None,
@@ -390,7 +398,7 @@ class TestFileSelectorPrompt:
             suggested_directories=["app/", "app/api/"],
         )
 
-        prompt = self.selector._build_prompt(
+        prompt = build_selection_prompt(
             repo_name="test/repo",
             description=None,
             readme_content=None,
@@ -418,7 +426,7 @@ class TestFileSelectorFallback:
             "tests/test_api.ts",
         ]
 
-        result = self.selector._heuristic_fallback(files)
+        result = heuristic_fallback(files)
 
         assert "src/routes/api.ts" in result
         assert "src/routes/auth.ts" in result
@@ -433,7 +441,7 @@ class TestFileSelectorFallback:
             "docs/readme.md",
         ]
 
-        result = self.selector._heuristic_fallback(files)
+        result = heuristic_fallback(files)
 
         assert "src/models/user.py" in result
         assert "src/models/product.py" in result
@@ -447,7 +455,7 @@ class TestFileSelectorFallback:
             "utils.py",
         ]
 
-        result = self.selector._heuristic_fallback(files)
+        result = heuristic_fallback(files)
 
         assert "main.py" in result
         assert "app.py" in result
@@ -457,7 +465,7 @@ class TestFileSelectorFallback:
         # Create many matching files
         files = [f"src/routes/route_{i}.py" for i in range(100)]
 
-        result = self.selector._heuristic_fallback(files)
+        result = heuristic_fallback(files)
 
         assert len(result) <= MAX_FILES_TO_SELECT
 
@@ -482,7 +490,7 @@ class TestFileSelectorFallback:
             "random.py",
         ]
 
-        result = self.selector._heuristic_fallback(files, framework_hints)
+        result = heuristic_fallback(files, framework_hints)
 
         # Framework directories should be prioritized
         assert "app/api/routes.py" in result
@@ -498,31 +506,31 @@ class TestFileSelectorSourceFileDetection:
 
     def test_is_source_file_python(self) -> None:
         """Python files should be detected as source."""
-        assert self.selector._is_source_file("main.py") is True
-        assert self.selector._is_source_file("src/utils.py") is True
+        assert is_source_file("main.py") is True
+        assert is_source_file("src/utils.py") is True
 
     def test_is_source_file_typescript(self) -> None:
         """TypeScript files should be detected as source."""
-        assert self.selector._is_source_file("app.ts") is True
-        assert self.selector._is_source_file("component.tsx") is True
+        assert is_source_file("app.ts") is True
+        assert is_source_file("component.tsx") is True
 
     def test_is_source_file_not_source(self) -> None:
         """Non-source files should not be detected."""
-        assert self.selector._is_source_file("readme.md") is False
-        assert self.selector._is_source_file("data.json") is False
-        assert self.selector._is_source_file("image.png") is False
+        assert is_source_file("readme.md") is False
+        assert is_source_file("data.json") is False
+        assert is_source_file("image.png") is False
 
     def test_is_test_file(self) -> None:
         """Test files should be detected."""
-        assert self.selector._is_test_file("tests/test_main.py") is True
-        assert self.selector._is_test_file("src/__tests__/app.test.ts") is True
-        assert self.selector._is_test_file("test_utils.py") is True
-        assert self.selector._is_test_file("app.spec.ts") is True
+        assert is_test_file("tests/test_main.py") is True
+        assert is_test_file("src/__tests__/app.test.ts") is True
+        assert is_test_file("test_utils.py") is True
+        assert is_test_file("app.spec.ts") is True
 
     def test_is_not_test_file(self) -> None:
         """Non-test files should not be detected as tests."""
-        assert self.selector._is_test_file("src/main.py") is False
-        assert self.selector._is_test_file("app/routes.ts") is False
+        assert is_test_file("src/main.py") is False
+        assert is_test_file("app/routes.ts") is False
 
 
 class TestFileSelectorWithFallback:
@@ -532,7 +540,7 @@ class TestFileSelectorWithFallback:
         """Set up test fixtures."""
         self.selector = FileSelector()
 
-    @patch("app.services.file_selector.FileSelector._call_with_retry")
+    @patch("app.services.file_selector.selector.FileSelector._call_with_retry")
     async def test_fallback_on_empty_result(self, mock_call: AsyncMock) -> None:
         """Should use fallback when API returns empty."""
         mock_call.return_value = []  # Empty result triggers fallback
@@ -577,7 +585,7 @@ class TestFileSelectorRefinement:
             "other/file.py",
         }
 
-        refs = self.selector._extract_references(file_contents, valid_paths)
+        refs = extract_references(file_contents, valid_paths)
 
         # Should find resolved imports
         assert len(refs) >= 0  # May or may not resolve depending on path structure
@@ -589,7 +597,7 @@ class TestFileSelectorRefinement:
         }
         valid_paths = {"src/models/user.ts", "src/api.ts", "src/api/index.ts"}
 
-        refs = self.selector._extract_references(file_contents, valid_paths)
+        refs = extract_references(file_contents, valid_paths)
 
         # Should attempt to resolve imports
         assert isinstance(refs, list)
@@ -598,7 +606,7 @@ class TestFileSelectorRefinement:
         """Should resolve relative imports."""
         valid_paths = {"src/models/user.ts", "src/utils/helpers.ts"}
 
-        resolved = self.selector._resolve_import(
+        resolved = _resolve_import(
             import_path="models/user",
             current_dir="src",
             valid_paths=valid_paths,
@@ -610,7 +618,7 @@ class TestFileSelectorRefinement:
         """Should resolve absolute imports."""
         valid_paths = {"src/main.py", "app/main.py"}
 
-        resolved = self.selector._resolve_import(
+        resolved = _resolve_import(
             import_path="main",
             current_dir="",
             valid_paths=valid_paths,
@@ -619,7 +627,7 @@ class TestFileSelectorRefinement:
         # Should find files with various prefixes
         assert any("main" in f for f in resolved)
 
-    @patch("app.services.file_selector.FileSelector._call_with_retry")
+    @patch("app.services.file_selector.selector.FileSelector._call_with_retry")
     async def test_refine_selection_adds_files(self, mock_call: AsyncMock) -> None:
         """Refinement should identify additional files."""
         mock_call.return_value = ["src/types/user.ts"]
