@@ -110,3 +110,36 @@ class PullRemoteRequest(BaseModel):
     """Request body for POST /documents/{id}/pull-remote."""
 
     pass  # No body needed, but keeping for future expansion
+
+
+# =============================================================================
+# Phase 7: Document Refresh Schemas
+# =============================================================================
+
+
+class RefreshDocumentResponse(BaseModel):
+    """Response for POST /documents/{id}/refresh."""
+
+    document_id: str
+    status: str  # "updated", "unchanged", "error"
+    changes_summary: str | None = None
+    error: str | None = None
+
+
+class RefreshDocumentDetailResponse(BaseModel):
+    """Detail for a single document in bulk refresh."""
+
+    document_id: str
+    status: str  # "updated", "unchanged", "error"
+    changes_summary: str | None = None
+    error: str | None = None
+
+
+class BulkRefreshResponse(BaseModel):
+    """Response for POST /products/{id}/refresh-all-docs."""
+
+    checked: int
+    updated: int
+    unchanged: int
+    errors: int
+    details: list[RefreshDocumentDetailResponse] = []
