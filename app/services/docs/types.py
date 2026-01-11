@@ -194,3 +194,75 @@ class CodebaseContext:
     total_files: int
     total_tokens: int  # Token count of all file contents
     errors: list[str] = field(default_factory=list)
+
+
+# ─────────────────────────────────────────────────────────────
+# Documentation Agent v2: Planning Types
+# ─────────────────────────────────────────────────────────────
+
+
+@dataclass
+class PlannedDocument:
+    """
+    A document that the planner has decided should be created.
+
+    This is the output of DocumentationPlanner, describing what documentation
+    should exist and providing guidance for the generator.
+    """
+
+    title: str
+    doc_type: str  # "overview", "architecture", "guide", "reference", "concept"
+    purpose: str  # Why this doc is valuable, who it serves
+    key_topics: list[str]  # What should be covered
+    source_files: list[str]  # File paths to reference when generating
+    priority: int  # 1-5 (1 = most important)
+    folder: str = "blueprints"  # Target folder
+
+
+@dataclass
+class DocumentationPlan:
+    """
+    Complete documentation plan created by DocumentationPlanner.
+
+    Contains the planner's assessment of the codebase and an ordered list
+    of documents to generate. Also tracks which existing docs already cover
+    certain areas (to avoid duplication).
+    """
+
+    summary: str  # High-level assessment of the codebase
+    planned_documents: list[PlannedDocument]  # Ordered by priority
+    skipped_existing: list[str]  # Titles of existing docs that already cover areas
+    codebase_summary: str  # Brief summary of tech stack and architecture
+
+
+@dataclass
+class PlannerResult:
+    """Result of DocumentationPlanner processing."""
+
+    plan: DocumentationPlan
+    success: bool = True
+    error: str | None = None
+
+
+# ─────────────────────────────────────────────────────────────
+# Documentation Agent v2: Generation Types
+# ─────────────────────────────────────────────────────────────
+
+
+@dataclass
+class GeneratorResult:
+    """Result of DocumentGenerator processing a single document."""
+
+    document: Document | None
+    success: bool = True
+    error: str | None = None
+
+
+@dataclass
+class BatchGeneratorResult:
+    """Result of generating multiple documents from a plan."""
+
+    documents: list[Document] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)  # Titles of docs that failed
+    total_planned: int = 0
+    total_generated: int = 0
