@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.config.plans import PLANS, get_plan
 from app.core.database import get_db
+from app.core.roles import ROLE_HIERARCHY
 from app.domain import org_member_ops, organization_ops, subscription_ops
 from app.models.organization import (
     MemberRole,
@@ -115,18 +116,11 @@ async def _require_org_access(
             detail="You are not a member of this organization",
         )
 
-    if min_role:
-        role_hierarchy = {
-            MemberRole.VIEWER.value: 0,
-            MemberRole.MEMBER.value: 1,
-            MemberRole.ADMIN.value: 2,
-            MemberRole.OWNER.value: 3,
-        }
-        if role_hierarchy.get(role, 0) < role_hierarchy.get(min_role.value, 0):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires {min_role.value} role or higher",
-            )
+    if min_role and ROLE_HIERARCHY.get(role, 0) < ROLE_HIERARCHY.get(min_role.value, 0):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Requires {min_role.value} role or higher",
+        )
 
     return role
 
@@ -380,18 +374,10 @@ async def add_member(
 
     caller_role = await _require_org_access(db, org_id, user, min_role=MemberRole.ADMIN)
 
-    # Validate role assignment
-    role_hierarchy = {
-        MemberRole.VIEWER.value: 0,
-        MemberRole.MEMBER.value: 1,
-        MemberRole.ADMIN.value: 2,
-        MemberRole.OWNER.value: 3,
-    }
-
     # Admins can only assign member/viewer roles
     if (
         caller_role == MemberRole.ADMIN.value
-        and role_hierarchy.get(data.role, 0) >= role_hierarchy.get(MemberRole.ADMIN.value, 0)
+        and ROLE_HIERARCHY.get(data.role, 0) >= ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0)
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -468,14 +454,6 @@ async def update_member_role(
             detail="Member not found",
         )
 
-    # Role hierarchy
-    role_hierarchy = {
-        MemberRole.VIEWER.value: 0,
-        MemberRole.MEMBER.value: 1,
-        MemberRole.ADMIN.value: 2,
-        MemberRole.OWNER.value: 3,
-    }
-
     # Can't change own role
     if member.user_id == user.id:
         raise HTTPException(
@@ -485,12 +463,12 @@ async def update_member_role(
 
     # Admins can only change member/viewer roles
     if caller_role == MemberRole.ADMIN.value:
-        if role_hierarchy.get(member.role, 0) >= role_hierarchy.get(MemberRole.ADMIN.value, 0):
+        if ROLE_HIERARCHY.get(member.role, 0) >= ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only owners can change admin or owner roles",
             )
-        if role_hierarchy.get(data.role, 0) >= role_hierarchy.get(MemberRole.ADMIN.value, 0):
+        if ROLE_HIERARCHY.get(data.role, 0) >= ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Admins can only assign member or viewer roles",
@@ -564,19 +542,12 @@ async def remove_member(
             detail="Member not found",
         )
 
-    role_hierarchy = {
-        MemberRole.VIEWER.value: 0,
-        MemberRole.MEMBER.value: 1,
-        MemberRole.ADMIN.value: 2,
-        MemberRole.OWNER.value: 3,
-    }
-
     # Self-removal is always allowed
     is_self = member.user_id == user.id
 
     if not is_self:
         # Require at least admin to remove others
-        if role_hierarchy.get(caller_role, 0) < role_hierarchy.get(MemberRole.ADMIN.value, 0):
+        if ROLE_HIERARCHY.get(caller_role, 0) < ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins and owners can remove other members",
@@ -585,7 +556,7 @@ async def remove_member(
         # Admins can only remove member/viewer
         if (
             caller_role == MemberRole.ADMIN.value
-            and role_hierarchy.get(member.role, 0) >= role_hierarchy.get(MemberRole.ADMIN.value, 0)
+            and ROLE_HIERARCHY.get(member.role, 0) >= ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0)
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
