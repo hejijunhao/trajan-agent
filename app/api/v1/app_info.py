@@ -151,3 +151,19 @@ async def delete_app_info(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="App info not found",
         )
+
+
+@router.get("/{app_info_id}/reveal")
+async def reveal_app_info_value(
+    app_info_id: uuid_pkg.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reveal the actual value of a secret app info entry for copying."""
+    entry = await app_info_ops.get_by_user(db, user_id=current_user.id, id=app_info_id)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="App info not found",
+        )
+    return {"value": entry.value}
