@@ -37,9 +37,7 @@ class User(SQLModel, table=True):
     is_admin: bool = Field(
         default=False,
         nullable=False,
-        sa_column_kwargs={
-            "comment": "Admin flag for manual plan assignment and admin operations"
-        },
+        sa_column_kwargs={"comment": "Admin flag for manual plan assignment and admin operations"},
     )
 
     created_at: datetime = Field(
@@ -53,7 +51,10 @@ class User(SQLModel, table=True):
     )
 
     # Relationships
-    products: list["Product"] = Relationship(back_populates="user")
+    products: list["Product"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"foreign_keys": "[Product.user_id]"},
+    )
     preferences: Optional["UserPreferences"] = Relationship(back_populates="user")
 
     # Organization relationships

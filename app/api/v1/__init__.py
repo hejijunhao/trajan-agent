@@ -5,7 +5,9 @@ from app.api.v1 import (
     organizations,
     preferences,
     products,
+    quick_access,
     repositories,
+    timeline,
     users,
     work_items,
 )
@@ -20,4 +22,6 @@ __all__ = [
     "preferences",
     "github",
     "organizations",
+    "timeline",
+    "quick_access",
 ]

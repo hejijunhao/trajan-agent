@@ -9,7 +9,9 @@ from app.api.v1 import (
     organizations,
     preferences,
     products,
+    quick_access,
     repositories,
+    timeline,
     users,
     work_items,
 )
@@ -27,3 +29,5 @@ api_router.include_router(github.router)
 api_router.include_router(organizations.router)
 api_router.include_router(admin.router)
 api_router.include_router(feedback.router)
+api_router.include_router(timeline.router)
+api_router.include_router(quick_access.router)

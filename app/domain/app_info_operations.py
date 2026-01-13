@@ -10,8 +10,49 @@ from app.models.app_info import AppInfo, AppInfoBulkEntry
 class AppInfoOperations(BaseOperations[AppInfo]):
     """CRUD operations for AppInfo model."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(AppInfo)
+
+    async def get_by_product_for_org(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[AppInfo]:
+        """
+        Get app info entries for a product (org-level access).
+
+        Does NOT filter by user_id - used for quick access where any org member
+        can view entries created by any other org member.
+        """
+        statement = (
+            select(AppInfo)
+            .where(AppInfo.product_id == product_id)  # type: ignore[arg-type]
+            .order_by(AppInfo.created_at.desc())  # type: ignore[attr-defined]
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await db.execute(statement)
+        return list(result.scalars().all())
+
+    async def get_by_id_for_product(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        entry_id: uuid_pkg.UUID,
+    ) -> AppInfo | None:
+        """
+        Get a single app info entry by ID within a product (org-level access).
+
+        Does NOT filter by user_id - used for quick access reveal.
+        """
+        statement = select(AppInfo).where(
+            AppInfo.id == entry_id,  # type: ignore[arg-type]
+            AppInfo.product_id == product_id,  # type: ignore[arg-type]
+        )
+        result = await db.execute(statement)
+        return result.scalar_one_or_none()
 
     async def get_by_product(
         self,
@@ -24,14 +65,18 @@ class AppInfoOperations(BaseOperations[AppInfo]):
     ) -> list[AppInfo]:
         """Get app info entries for a product."""
         statement = select(AppInfo).where(
-            AppInfo.user_id == user_id,
-            AppInfo.product_id == product_id,
+            AppInfo.user_id == user_id,  # type: ignore[arg-type]
+            AppInfo.product_id == product_id,  # type: ignore[arg-type]
         )
 
         if category:
-            statement = statement.where(AppInfo.category == category)
+            statement = statement.where(AppInfo.category == category)  # type: ignore[arg-type]
 
-        statement = statement.order_by(AppInfo.created_at.desc()).offset(skip).limit(limit)
+        statement = (
+            statement.order_by(AppInfo.created_at.desc())  # type: ignore[attr-defined]
+            .offset(skip)
+            .limit(limit)
+        )
 
         result = await db.execute(statement)
         return list(result.scalars().all())
@@ -45,9 +90,9 @@ class AppInfoOperations(BaseOperations[AppInfo]):
     ) -> AppInfo | None:
         """Get a specific app info entry by key."""
         statement = select(AppInfo).where(
-            AppInfo.user_id == user_id,
-            AppInfo.product_id == product_id,
-            AppInfo.key == key,
+            AppInfo.user_id == user_id,  # type: ignore[arg-type]
+            AppInfo.product_id == product_id,  # type: ignore[arg-type]
+            AppInfo.key == key,  # type: ignore[arg-type]
         )
         result = await db.execute(statement)
         return result.scalar_one_or_none()
@@ -60,10 +105,10 @@ class AppInfoOperations(BaseOperations[AppInfo]):
         keys: list[str],
     ) -> set[str]:
         """Get set of keys that already exist for a product."""
-        statement = select(AppInfo.key).where(
+        statement = select(AppInfo.key).where(  # type: ignore[call-overload]
             AppInfo.user_id == user_id,
             AppInfo.product_id == product_id,
-            AppInfo.key.in_(keys),
+            AppInfo.key.in_(keys),  # type: ignore[union-attr]
         )
         result = await db.execute(statement)
         return set(result.scalars().all())

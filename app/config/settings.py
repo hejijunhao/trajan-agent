@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Application
     debug: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]
+    frontend_url: str = "http://localhost:3000"  # For constructing shareable URLs
 
     # AI / Anthropic
     anthropic_api_key: str = ""

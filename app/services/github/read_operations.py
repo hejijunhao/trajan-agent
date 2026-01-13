@@ -481,6 +481,47 @@ class GitHubReadOperations:
                 last_commit_date=last_commit_date,
             )
 
+    async def get_commits_for_timeline(
+        self,
+        owner: str,
+        repo: str,
+        branch: str | None = None,
+        per_page: int = 50,
+        sha_cursor: str | None = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """
+        Fetch commits for timeline display.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            branch: Branch name (default: repo's default branch)
+            per_page: Number of commits per page
+            sha_cursor: SHA to start from (for pagination)
+
+        Returns:
+            Tuple of (commits list, has_more flag)
+        """
+        params: dict[str, str | int] = {"per_page": per_page + 1}  # Fetch one extra for has_more
+        if branch:
+            params["sha"] = branch
+        if sha_cursor:
+            params["sha"] = sha_cursor
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/commits",
+                headers=self._headers,
+                params=params,
+                timeout=30.0,
+            )
+
+            handle_error_response(response, f"{owner}/{repo}")
+
+            commits: list[dict[str, Any]] = response.json()
+            has_more = len(commits) > per_page
+            return commits[:per_page], has_more
+
     async def get_key_files(
         self,
         owner: str,

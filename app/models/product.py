@@ -73,15 +73,11 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     )
     analysis_progress: dict[str, Any] | None = Field(
         default=None,
-        sa_column=Column(
-            JSONB, comment="Real-time progress updates during analysis (ephemeral)"
-        ),
+        sa_column=Column(JSONB, comment="Real-time progress updates during analysis (ephemeral)"),
     )
     product_overview: dict[str, Any] | None = Field(
         default=None,
-        sa_column=Column(
-            JSONB, comment="AI-generated project overview (ProductOverview schema)"
-        ),
+        sa_column=Column(JSONB, comment="AI-generated project overview (ProductOverview schema)"),
     )
 
     # Documentation generation fields
@@ -108,8 +104,33 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
         sa_column_kwargs={"comment": "Timestamp of last successful doc generation"},
     )
 
+    # Quick Access fields - allows password-protected shareable link to App Info
+    quick_access_enabled: bool = Field(
+        default=False,
+        sa_column_kwargs={"comment": "Whether quick access link is active"},
+    )
+    quick_access_token: str | None = Field(
+        default=None,
+        max_length=64,
+        unique=True,
+        index=True,
+        sa_column_kwargs={"comment": "URL-safe token for quick access link"},
+    )
+    quick_access_created_at: datetime | None = Field(
+        default=None,
+        sa_column_kwargs={"comment": "When quick access was enabled"},
+    )
+    quick_access_created_by: uuid_pkg.UUID | None = Field(
+        default=None,
+        foreign_key="users.id",
+        sa_column_kwargs={"comment": "User who enabled quick access"},
+    )
+
     # Relationships
-    user: Optional["User"] = Relationship(back_populates="products")
+    user: Optional["User"] = Relationship(
+        back_populates="products",
+        sa_relationship_kwargs={"foreign_keys": "[Product.user_id]"},
+    )
     organization: Optional["Organization"] = Relationship(back_populates="products")
     repositories: list["Repository"] = Relationship(
         back_populates="product",
