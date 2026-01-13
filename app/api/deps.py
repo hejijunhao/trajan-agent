@@ -95,12 +95,13 @@ async def get_current_user(
     result = await db.execute(statement)
     user = result.scalar_one_or_none()
 
+    # Extract metadata for potential user/org creation
+    app_metadata = payload.get("app_metadata", {})
+    user_metadata = payload.get("user_metadata", {})
+
     if not user:
-        # Create user on first API call
-        # Determine auth provider from token metadata
-        app_metadata = payload.get("app_metadata", {})
+        # Create user on first API call (fallback if trigger didn't run)
         auth_provider = app_metadata.get("provider", "email")
-        user_metadata = payload.get("user_metadata", {})
 
         user = User(
             id=user_id,
@@ -113,7 +114,10 @@ async def get_current_user(
         await db.flush()
         await db.refresh(user)
 
-        # Create personal organization for new user
+    # Check if user has an organization (may be missing for manually-created users)
+    user_orgs = await organization_ops.get_for_user(db, user.id)
+    if not user_orgs:
+        # Create personal organization (handles users created before trigger extension)
         display_name = user_metadata.get("full_name") or user_metadata.get("name")
         await organization_ops.create_personal_org(
             db,
@@ -330,9 +334,7 @@ async def require_agent_enabled(
     # Count current repos for the org
     repo_count = await repository_ops.count_by_org(db, ctx.organization.id)
 
-    is_enabled = await subscription_ops.is_agent_enabled(
-        db, ctx.organization.id, repo_count
-    )
+    is_enabled = await subscription_ops.is_agent_enabled(db, ctx.organization.id, repo_count)
 
     if not is_enabled:
         raise HTTPException(
