@@ -31,6 +31,15 @@ from app.services.github.types import RepoTreeItem
 logger = logging.getLogger(__name__)
 
 
+def _ensure_aware(dt: datetime | None) -> datetime | None:
+    """Ensure datetime is timezone-aware (assume UTC for naive datetimes)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
 class DocsSyncService:
     """
     Synchronize documentation between Trajan and GitHub repositories.
@@ -83,10 +92,7 @@ class DocsSyncService:
             return ImportResult(imported=0, updated=0, skipped=0)
 
         # Find markdown files in docs/ folder or root changelog
-        docs_items = [
-            item for item in tree.all_items
-            if self._is_doc_file(item)
-        ]
+        docs_items = [item for item in tree.all_items if self._is_doc_file(item)]
 
         if not docs_items:
             logger.info(f"No documentation files found in {repository.full_name}")
@@ -168,10 +174,12 @@ class DocsSyncService:
                 path = doc.github_path or generate_github_path(
                     doc.title or "untitled", folder_path, doc.type or "blueprint"
                 )
-                files_to_commit.append({
-                    "path": path,
-                    "content": doc.content,
-                })
+                files_to_commit.append(
+                    {
+                        "path": path,
+                        "content": doc.content,
+                    }
+                )
 
             if not files_to_commit:
                 return SyncResult(success=True, files_synced=0)
@@ -188,9 +196,7 @@ class DocsSyncService:
                 path = doc.github_path or generate_github_path(
                     doc.title or "untitled", folder_path, doc.type or "blueprint"
                 )
-                new_sha = await self.github_service.get_file_sha(
-                    owner, repo_name, path, branch
-                )
+                new_sha = await self.github_service.get_file_sha(owner, repo_name, path, branch)
 
                 doc.github_sha = new_sha
                 doc.github_path = path
@@ -257,18 +263,18 @@ class DocsSyncService:
 
         for repo_id, repo_docs in docs_by_repo.items():
             # Get repository
-            repo_result = await self.db.execute(
-                select(Repository).where(Repository.id == repo_id)
-            )
+            repo_result = await self.db.execute(select(Repository).where(Repository.id == repo_id))
             repo = repo_result.scalar_one_or_none()
 
             if not repo or not repo.full_name:
                 for doc in repo_docs:
-                    statuses.append(DocumentSyncStatus(
-                        document_id=str(doc.id),
-                        status="error",
-                        error="Repository not found",
-                    ))
+                    statuses.append(
+                        DocumentSyncStatus(
+                            document_id=str(doc.id),
+                            status="error",
+                            error="Repository not found",
+                        )
+                    )
                 continue
 
             owner, repo_name = repo.full_name.split("/", 1)
@@ -286,44 +292,56 @@ class DocsSyncService:
 
                     if remote_sha is None:
                         # File deleted from remote
-                        statuses.append(DocumentSyncStatus(
-                            document_id=str(doc.id),
-                            status="remote_changes",
-                            local_sha=doc.github_sha,
-                            remote_sha=None,
-                        ))
+                        statuses.append(
+                            DocumentSyncStatus(
+                                document_id=str(doc.id),
+                                status="remote_changes",
+                                local_sha=doc.github_sha,
+                                remote_sha=None,
+                            )
+                        )
                     elif remote_sha != doc.github_sha:
                         # File changed on remote
-                        statuses.append(DocumentSyncStatus(
-                            document_id=str(doc.id),
-                            status="remote_changes",
-                            local_sha=doc.github_sha,
-                            remote_sha=remote_sha,
-                        ))
+                        statuses.append(
+                            DocumentSyncStatus(
+                                document_id=str(doc.id),
+                                status="remote_changes",
+                                local_sha=doc.github_sha,
+                                remote_sha=remote_sha,
+                            )
+                        )
                     else:
                         # Check for local changes (updated_at > last_synced_at)
-                        if doc.last_synced_at and doc.updated_at > doc.last_synced_at:
-                            statuses.append(DocumentSyncStatus(
-                                document_id=str(doc.id),
-                                status="local_changes",
-                                local_sha=doc.github_sha,
-                                remote_sha=remote_sha,
-                            ))
+                        updated = _ensure_aware(doc.updated_at)
+                        synced = _ensure_aware(doc.last_synced_at)
+                        if synced and updated and updated > synced:
+                            statuses.append(
+                                DocumentSyncStatus(
+                                    document_id=str(doc.id),
+                                    status="local_changes",
+                                    local_sha=doc.github_sha,
+                                    remote_sha=remote_sha,
+                                )
+                            )
                         else:
-                            statuses.append(DocumentSyncStatus(
-                                document_id=str(doc.id),
-                                status="synced",
-                                local_sha=doc.github_sha,
-                                remote_sha=remote_sha,
-                            ))
+                            statuses.append(
+                                DocumentSyncStatus(
+                                    document_id=str(doc.id),
+                                    status="synced",
+                                    local_sha=doc.github_sha,
+                                    remote_sha=remote_sha,
+                                )
+                            )
 
             except GitHubAPIError as e:
                 for doc in repo_docs:
-                    statuses.append(DocumentSyncStatus(
-                        document_id=str(doc.id),
-                        status="error",
-                        error=str(e),
-                    ))
+                    statuses.append(
+                        DocumentSyncStatus(
+                            document_id=str(doc.id),
+                            status="error",
+                            error=str(e),
+                        )
+                    )
 
         return statuses
 
