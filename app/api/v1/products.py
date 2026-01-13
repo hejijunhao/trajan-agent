@@ -204,7 +204,7 @@ async def analyze_product(
         # (set when status changes to "completed")
         last_analysis_time = product.updated_at
         if last_analysis_time:
-            hours_since_last = (datetime.utcnow() - last_analysis_time).total_seconds() / 3600
+            hours_since_last = (datetime.now(UTC) - last_analysis_time).total_seconds() / 3600
             if hours_since_last < frequency_limit_hours:
                 hours_remaining = int(frequency_limit_hours - hours_since_last)
                 frequency_display = (

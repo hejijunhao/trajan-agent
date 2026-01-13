@@ -1,7 +1,7 @@
 """Subscription model - organization billing and plan management."""
 
 import uuid as uuid_pkg
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
@@ -149,7 +149,7 @@ class Subscription(SQLModel, table=True):
 
     # Timestamps
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC),
         nullable=False,
         sa_column_kwargs={"server_default": text("now()")},
     )

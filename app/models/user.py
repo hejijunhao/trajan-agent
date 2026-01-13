@@ -1,5 +1,5 @@
 import uuid as uuid_pkg
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import text
@@ -43,7 +43,7 @@ class User(SQLModel, table=True):
     )
 
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC),
         nullable=False,
         sa_column_kwargs={"server_default": text("now()")},
     )

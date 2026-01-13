@@ -2,7 +2,7 @@
 
 import uuid as uuid_pkg
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -131,7 +131,7 @@ class SubscriptionOperations:
         subscription.base_repo_limit = plan.base_repo_limit
         subscription.is_manually_assigned = True
         subscription.manually_assigned_by = admin_user_id
-        subscription.manually_assigned_at = datetime.utcnow()
+        subscription.manually_assigned_at = datetime.now(UTC)
         subscription.manual_assignment_note = note
         subscription.status = SubscriptionStatus.ACTIVE.value
 

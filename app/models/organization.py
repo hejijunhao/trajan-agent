@@ -1,7 +1,7 @@
 """Organization model - billing and team unit."""
 
 import uuid as uuid_pkg
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -43,7 +43,7 @@ class Organization(SQLModel, table=True):
 
     # Timestamps
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC),
         nullable=False,
         sa_column_kwargs={"server_default": text("now()")},
     )
@@ -122,7 +122,7 @@ class OrganizationMember(SQLModel, table=True):
     )
     invited_at: datetime | None = Field(default=None, nullable=True)
     joined_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC),
         nullable=False,
         sa_column_kwargs={"server_default": text("now()")},
     )

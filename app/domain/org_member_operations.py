@@ -1,7 +1,7 @@
 """Domain operations for OrganizationMember model."""
 
 import uuid as uuid_pkg
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,7 +96,7 @@ class OrgMemberOperations:
             user_id=user_id,
             role=role,
             invited_by=invited_by,
-            invited_at=datetime.utcnow() if invited_by else None,
+            invited_at=datetime.now(UTC) if invited_by else None,
         )
         db.add(member)
         await db.flush()
