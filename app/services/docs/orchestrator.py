@@ -16,8 +16,11 @@ V1 Flow (legacy, use_v2=False):
     Import existing → ChangelogAgent → BlueprintAgent → PlansAgent
 """
 
+import asyncio
 import logging
+from collections.abc import Coroutine
 from datetime import UTC, datetime
+from typing import Any, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +44,12 @@ logger = logging.getLogger(__name__)
 
 # Default token budget for codebase analysis
 DEFAULT_ANALYSIS_TOKEN_BUDGET = 100_000
+
+# Timeout settings for agent operations (in seconds)
+AGENT_TIMEOUT_LIGHT = 60  # For lightweight operations (plans, changelog)
+AGENT_TIMEOUT_HEAVY = 300  # For heavy operations (analysis, generation)
+
+T = TypeVar("T")
 
 
 class DocumentOrchestrator:
@@ -133,32 +142,41 @@ class DocumentOrchestrator:
             except Exception as e:
                 logger.error(f"Failed to scan docs for {repo.full_name}: {e}")
 
-        # Stage 2: Deep codebase analysis
+        # Stage 2: Deep codebase analysis (with timeout)
         await self._update_progress("analyzing", "Analyzing codebase structure...")
         try:
-            codebase_context = await self.codebase_analyzer.analyze(
-                repos, token_budget=DEFAULT_ANALYSIS_TOKEN_BUDGET
+            codebase_context = await self._run_with_timeout(
+                self.codebase_analyzer.analyze(repos, token_budget=DEFAULT_ANALYSIS_TOKEN_BUDGET),
+                timeout=AGENT_TIMEOUT_HEAVY,
+                stage_name="Codebase analysis",
             )
             logger.info(
                 f"Codebase analysis complete: {codebase_context.total_files} files, "
                 f"{codebase_context.total_tokens} tokens analyzed"
             )
+        except TimeoutError:
+            # Timeout already logged and progress updated, fall back to v1
+            return await self._run_v1()
         except Exception as e:
             logger.error(f"Codebase analysis failed: {e}")
             # Fall back to v1 if analysis fails
             await self._update_progress("error", f"Analysis failed: {e}")
             return await self._run_v1()
 
-        # Stage 3: Documentation planning
+        # Stage 3: Documentation planning (with timeout)
         await self._update_progress("planning", "Creating documentation plan...")
         try:
             # Get existing docs to avoid duplication
             existing_docs = await self._get_existing_docs()
 
-            planner_result = await self.documentation_planner.create_plan(
-                codebase_context=codebase_context,
-                existing_docs=existing_docs,
-                mode="full",
+            planner_result = await self._run_with_timeout(
+                self.documentation_planner.create_plan(
+                    codebase_context=codebase_context,
+                    existing_docs=existing_docs,
+                    mode="full",
+                ),
+                timeout=AGENT_TIMEOUT_HEAVY,
+                stage_name="Documentation planning",
             )
 
             if not planner_result.success:
@@ -170,8 +188,12 @@ class DocumentOrchestrator:
             logger.info(
                 f"Documentation plan created: {len(plan.planned_documents)} documents to generate"
             )
+        except TimeoutError:
+            # Timeout already logged and progress updated, fall back to v1
+            return await self._run_v1()
         except Exception as e:
             logger.error(f"Documentation planning failed: {e}")
+            await self._update_progress("error", f"Planning failed: {e}")
             return await self._run_v1()
 
         # Stage 4: Sequential document generation
@@ -205,21 +227,33 @@ class DocumentOrchestrator:
             except Exception as e:
                 logger.error(f"Document generation failed: {e}")
 
-        # Stage 5: Changelog (still use v1 agent for changelog)
+        # Stage 5: Changelog (non-critical, failures don't block completion)
         await self._update_progress("changelog", "Processing changelog...")
         try:
-            changelog_result = await self.changelog_agent.run()
+            changelog_result = await self._run_with_timeout(
+                self.changelog_agent.run(),
+                timeout=AGENT_TIMEOUT_LIGHT,
+                stage_name="Changelog processing",
+            )
             results.changelog = changelog_result
             logger.info(f"Changelog result: {changelog_result.action}")
+        except TimeoutError:
+            logger.warning("Changelog processing timed out, continuing...")
         except Exception as e:
             logger.error(f"Changelog agent failed: {e}")
 
-        # Stage 6: Organize plans
+        # Stage 6: Organize plans (non-critical, failures don't block completion)
         await self._update_progress("plans", "Organizing plans...")
         try:
-            plans_result = await self.plans_agent.run()
+            plans_result = await self._run_with_timeout(
+                self.plans_agent.run(),
+                timeout=AGENT_TIMEOUT_LIGHT,
+                stage_name="Plans organization",
+            )
             results.plans_structured = plans_result
             logger.info(f"Plans result: organized {plans_result.organized_count} plans")
+        except TimeoutError:
+            logger.warning("Plans organization timed out, continuing...")
         except Exception as e:
             logger.error(f"Plans agent failed: {e}")
 
@@ -267,33 +301,52 @@ class DocumentOrchestrator:
                 logger.error(f"Failed to scan docs for {repo.full_name}: {e}")
                 # Continue with other repos
 
-        # Step 2: Delegate to sub-agents
+        # Step 2: Delegate to sub-agents (with timeouts)
         # Each agent checks what exists and fills gaps
 
-        # Changelog
+        # Changelog (non-critical)
         await self._update_progress("changelog", "Processing changelog...")
         try:
-            changelog_result = await self.changelog_agent.run()
+            changelog_result = await self._run_with_timeout(
+                self.changelog_agent.run(),
+                timeout=AGENT_TIMEOUT_LIGHT,
+                stage_name="Changelog processing",
+            )
             results.changelog = changelog_result
             logger.info(f"Changelog result: {changelog_result.action}")
+        except TimeoutError:
+            logger.warning("Changelog processing timed out, continuing...")
         except Exception as e:
             logger.error(f"Changelog agent failed: {e}")
 
-        # Blueprints (overview, architecture, etc.)
+        # Blueprints (overview, architecture, etc.) - critical for v1
         await self._update_progress("blueprints", "Generating blueprints...")
         try:
-            blueprint_result = await self.blueprint_agent.run()
+            blueprint_result = await self._run_with_timeout(
+                self.blueprint_agent.run(),
+                timeout=AGENT_TIMEOUT_HEAVY,
+                stage_name="Blueprint generation",
+            )
             results.blueprints.extend(blueprint_result.documents)
             logger.info(f"Blueprint result: created {blueprint_result.created_count} new docs")
+        except TimeoutError:
+            logger.error("Blueprint generation timed out")
+            # Continue to complete - partial docs are better than none
         except Exception as e:
             logger.error(f"Blueprint agent failed: {e}")
 
-        # Plans structure (ensure folders exist, map any imported plans)
+        # Plans structure (non-critical)
         await self._update_progress("plans", "Organizing plans...")
         try:
-            plans_result = await self.plans_agent.run()
+            plans_result = await self._run_with_timeout(
+                self.plans_agent.run(),
+                timeout=AGENT_TIMEOUT_LIGHT,
+                stage_name="Plans organization",
+            )
             results.plans_structured = plans_result
             logger.info(f"Plans result: organized {plans_result.organized_count} plans")
+        except TimeoutError:
+            logger.warning("Plans organization timed out, continuing...")
         except Exception as e:
             logger.error(f"Plans agent failed: {e}")
 
@@ -311,9 +364,7 @@ class DocumentOrchestrator:
         """Get all existing documents for this product."""
         if self.product.id is None:
             return []
-        return await document_ops.get_by_product(
-            self.db, self.product.user_id, self.product.id
-        )
+        return await document_ops.get_by_product(self.db, self.product.user_id, self.product.id)
 
     async def _get_linked_repos(self) -> list[Repository]:
         """Get all GitHub-linked repositories for this product."""
@@ -414,3 +465,33 @@ class DocumentOrchestrator:
         self.db.add(self.product)
         await self.db.commit()
         await self.db.refresh(self.product)
+
+    async def _run_with_timeout(
+        self,
+        coro: Coroutine[Any, Any, T],
+        timeout: int,
+        stage_name: str,
+    ) -> T:
+        """
+        Run a coroutine with a timeout.
+
+        On timeout, updates progress to error state and raises asyncio.TimeoutError.
+
+        Args:
+            coro: The coroutine to run
+            timeout: Timeout in seconds
+            stage_name: Human-readable name for error messages
+
+        Returns:
+            The result of the coroutine
+
+        Raises:
+            asyncio.TimeoutError: If the operation times out
+        """
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except TimeoutError:
+            error_msg = f"{stage_name} timed out after {timeout}s"
+            logger.error(error_msg)
+            await self._update_progress("error", error_msg)
+            raise

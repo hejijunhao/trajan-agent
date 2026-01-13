@@ -1,5 +1,6 @@
+import logging
 import uuid as uuid_pkg
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +16,10 @@ from app.schemas.product_overview import AnalyzeProductResponse
 from app.services.analysis import run_analysis_task
 
 router = APIRouter(prefix="/products", tags=["products"])
+logger = logging.getLogger(__name__)
 
+# Stale job detection: mark as failed if generating for longer than this
+DOCS_GENERATION_TIMEOUT_MINUTES = 15
 
 # Analysis frequency limits in hours
 ANALYSIS_FREQUENCY_LIMITS = {
@@ -204,7 +208,9 @@ async def analyze_product(
             if hours_since_last < frequency_limit_hours:
                 hours_remaining = int(frequency_limit_hours - hours_since_last)
                 frequency_display = (
-                    "once per week" if sub_ctx.plan.analysis_frequency == "weekly" else "once per day"
+                    "once per week"
+                    if sub_ctx.plan.analysis_frequency == "weekly"
+                    else "once per day"
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -302,7 +308,11 @@ async def get_docs_generation_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DocsStatusResponse:
-    """Get current documentation generation status."""
+    """Get current documentation generation status.
+
+    Includes stale job detection: if a job has been "generating" for longer than
+    DOCS_GENERATION_TIMEOUT_MINUTES, it's automatically marked as failed.
+    """
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
     if not product:
         raise HTTPException(
@@ -310,12 +320,77 @@ async def get_docs_generation_status(
             detail="Product not found",
         )
 
+    # Stale job detection: auto-fail jobs that have been running too long
+    if product.docs_generation_status == "generating":
+        progress = product.docs_generation_progress or {}
+        updated_at_str = progress.get("updated_at")
+
+        if updated_at_str:
+            try:
+                # Parse ISO format timestamp
+                updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+                elapsed = datetime.now(UTC) - updated_at
+                timeout_delta = timedelta(minutes=DOCS_GENERATION_TIMEOUT_MINUTES)
+
+                if elapsed > timeout_delta:
+                    # Job is stale - mark as failed
+                    elapsed_minutes = int(elapsed.total_seconds() / 60)
+                    stage = progress.get("stage", "unknown")
+                    product.docs_generation_status = "failed"
+                    product.docs_generation_error = (
+                        f"Generation timed out after {elapsed_minutes} minutes "
+                        f"(stuck on '{stage}' stage). Please try again."
+                    )
+                    product.docs_generation_progress = None
+                    await db.commit()
+                    logger.warning(
+                        f"Auto-marked stale docs generation as failed for product {product_id}. "
+                        f"Was stuck on '{stage}' for {elapsed_minutes} minutes."
+                    )
+            except (ValueError, TypeError) as e:
+                # Couldn't parse timestamp - log but don't fail the request
+                logger.warning(f"Failed to parse docs progress timestamp: {e}")
+
     return DocsStatusResponse(
         status=product.docs_generation_status or "idle",
         progress=product.docs_generation_progress,
         error=product.docs_generation_error,
         last_generated_at=product.last_docs_generated_at,
     )
+
+
+async def _mark_generation_failed(
+    product_id: str,
+    user_id: str,
+    error_message: str,
+) -> None:
+    """
+    Helper to mark documentation generation as failed using a fresh DB session.
+
+    This is used for error recovery when the main session may be in a bad state.
+    """
+    from app.core.database import async_session_maker
+
+    try:
+        async with async_session_maker() as db:
+            product_uuid = uuid_pkg.UUID(product_id)
+            user_uuid = uuid_pkg.UUID(user_id)
+            product = await product_ops.get_by_user(db, user_id=user_uuid, id=product_uuid)
+            if product:
+                product.docs_generation_status = "failed"
+                product.docs_generation_error = error_message[:500]
+                product.docs_generation_progress = None
+                await db.commit()
+                logger.info(
+                    f"Marked product {product_id} docs generation as failed: {error_message}"
+                )
+    except Exception as db_error:
+        # Critical: even error handling failed - log for manual intervention
+        logger.critical(
+            f"CRITICAL: Failed to mark docs generation as failed. "
+            f"Product {product_id} may be stuck in 'generating' state. "
+            f"DB error: {db_error}. Original error: {error_message}"
+        )
 
 
 async def run_document_orchestrator(
@@ -334,6 +409,7 @@ async def run_document_orchestrator(
 
             product = await product_ops.get_by_user(db, user_id=user_uuid, id=product_uuid)
             if not product:
+                logger.warning(f"Product {product_id} not found for docs generation")
                 return
 
             # Get GitHub token from user preferences
@@ -350,19 +426,15 @@ async def run_document_orchestrator(
             orchestrator = DocumentOrchestrator(db, product, github_service)
             await orchestrator.run()
 
-            # Update status
+            # Update status on success
             product.docs_generation_status = "completed"
-            product.last_docs_generated_at = datetime.utcnow()
+            product.last_docs_generated_at = datetime.now(UTC)
             product.docs_generation_error = None
             product.docs_generation_progress = None
             await db.commit()
+            logger.info(f"Documentation generation completed for product {product_id}")
 
         except Exception as e:
-            # Update status on failure
-            product = await product_ops.get_by_user(db, user_id=user_uuid, id=product_uuid)
-            if product:
-                product.docs_generation_status = "failed"
-                product.docs_generation_error = str(e)[:500]
-                product.docs_generation_progress = None
-                await db.commit()
-            raise
+            logger.error(f"Documentation generation failed for product {product_id}: {e}")
+            # Use a fresh session for error handling to avoid stale session issues
+            await _mark_generation_failed(product_id, user_id, str(e))
