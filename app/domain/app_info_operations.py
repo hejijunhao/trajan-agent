@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.base_operations import BaseOperations
-from app.models.app_info import AppInfo
+from app.models.app_info import AppInfo, AppInfoBulkEntry
 
 
 class AppInfoOperations(BaseOperations[AppInfo]):
@@ -31,11 +31,7 @@ class AppInfoOperations(BaseOperations[AppInfo]):
         if category:
             statement = statement.where(AppInfo.category == category)
 
-        statement = (
-            statement.order_by(AppInfo.created_at.desc())
-            .offset(skip)
-            .limit(limit)
-        )
+        statement = statement.order_by(AppInfo.created_at.desc()).offset(skip).limit(limit)
 
         result = await db.execute(statement)
         return list(result.scalars().all())
@@ -55,6 +51,74 @@ class AppInfoOperations(BaseOperations[AppInfo]):
         )
         result = await db.execute(statement)
         return result.scalar_one_or_none()
+
+    async def get_existing_keys(
+        self,
+        db: AsyncSession,
+        user_id: uuid_pkg.UUID,
+        product_id: uuid_pkg.UUID,
+        keys: list[str],
+    ) -> set[str]:
+        """Get set of keys that already exist for a product."""
+        statement = select(AppInfo.key).where(
+            AppInfo.user_id == user_id,
+            AppInfo.product_id == product_id,
+            AppInfo.key.in_(keys),
+        )
+        result = await db.execute(statement)
+        return set(result.scalars().all())
+
+    async def bulk_create(
+        self,
+        db: AsyncSession,
+        user_id: uuid_pkg.UUID,
+        product_id: uuid_pkg.UUID,
+        entries: list[AppInfoBulkEntry],
+    ) -> tuple[list[AppInfo], list[str]]:
+        """
+        Create multiple app info entries, skipping duplicates.
+
+        Returns:
+            Tuple of (created entries, skipped keys)
+        """
+        if not entries:
+            return [], []
+
+        # Get existing keys to skip duplicates
+        incoming_keys = [e.key for e in entries]
+        existing_keys = await self.get_existing_keys(db, user_id, product_id, incoming_keys)
+
+        # Also handle duplicates within the incoming batch (take last occurrence)
+        seen_keys: dict[str, AppInfoBulkEntry] = {}
+        for entry in entries:
+            seen_keys[entry.key] = entry
+
+        created: list[AppInfo] = []
+        skipped: list[str] = []
+
+        for key, entry in seen_keys.items():
+            if key in existing_keys:
+                skipped.append(key)
+                continue
+
+            db_obj = AppInfo(
+                user_id=user_id,
+                product_id=product_id,
+                key=entry.key,
+                value=entry.value,
+                category=entry.category,
+                is_secret=entry.is_secret,
+                description=entry.description,
+            )
+            db.add(db_obj)
+            created.append(db_obj)
+
+        if created:
+            await db.flush()
+            for obj in created:
+                await db.refresh(obj)
+
+        return created, skipped
 
 
 app_info_ops = AppInfoOperations()

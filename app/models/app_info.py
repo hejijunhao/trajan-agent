@@ -1,5 +1,5 @@
 import uuid as uuid_pkg
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -38,6 +38,46 @@ class AppInfoUpdate(SQLModel):
     category: str | None = None
     is_secret: bool | None = None
     description: str | None = None
+
+
+class AppInfoBulkEntry(SQLModel):
+    """Schema for a single entry in bulk create."""
+
+    key: str
+    value: str
+    category: str | None = None
+    is_secret: bool = False
+    description: str | None = None
+
+
+class AppInfoBulkCreate(SQLModel):
+    """Request schema for bulk creating app info entries."""
+
+    product_id: uuid_pkg.UUID
+    entries: list[AppInfoBulkEntry]
+
+
+class AppInfoBulkResponse(SQLModel):
+    """Response schema for bulk create operation."""
+
+    created: list[dict[str, Any]]  # Created entries
+    skipped: list[str]  # Keys that were skipped (duplicates)
+
+
+class AppInfoExportEntry(SQLModel):
+    """Schema for a single exported entry with revealed value."""
+
+    key: str
+    value: str
+    category: str | None = None
+    is_secret: bool = False
+    description: str | None = None
+
+
+class AppInfoExportResponse(SQLModel):
+    """Response schema for export operation."""
+
+    entries: list[AppInfoExportEntry]
 
 
 class AppInfo(AppInfoBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True):

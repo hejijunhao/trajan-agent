@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.domain import app_info_ops
-from app.models.app_info import AppInfoCreate, AppInfoUpdate
+from app.models.app_info import (
+    AppInfoBulkCreate,
+    AppInfoBulkResponse,
+    AppInfoCreate,
+    AppInfoExportEntry,
+    AppInfoExportResponse,
+    AppInfoUpdate,
+)
 from app.models.user import User
 
 router = APIRouter(prefix="/app-info", tags=["app info"])
@@ -167,3 +174,74 @@ async def reveal_app_info_value(
             detail="App info not found",
         )
     return {"value": entry.value}
+
+
+@router.post("/bulk", response_model=AppInfoBulkResponse, status_code=status.HTTP_201_CREATED)
+async def bulk_create_app_info(
+    data: AppInfoBulkCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bulk create app info entries from parsed .env content.
+
+    Entries with duplicate keys (already existing in the product) are skipped.
+    Duplicate keys within the request take the last occurrence.
+    """
+    created, skipped = await app_info_ops.bulk_create(
+        db,
+        user_id=current_user.id,
+        product_id=data.product_id,
+        entries=data.entries,
+    )
+
+    return AppInfoBulkResponse(
+        created=[
+            {
+                "id": str(e.id),
+                "key": e.key,
+                "value": "********" if e.is_secret else e.value,
+                "category": e.category,
+                "is_secret": e.is_secret,
+                "description": e.description,
+                "product_id": str(e.product_id) if e.product_id else None,
+                "created_at": e.created_at.isoformat(),
+                "updated_at": e.updated_at.isoformat(),
+            }
+            for e in created
+        ],
+        skipped=skipped,
+    )
+
+
+@router.get("/export", response_model=AppInfoExportResponse)
+async def export_app_info(
+    product_id: uuid_pkg.UUID = Query(..., description="Product to export from"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export all app info entries with revealed secret values.
+
+    Returns all entries for a product with their actual values (secrets unmasked),
+    ready for formatting as a .env file.
+    """
+    entries = await app_info_ops.get_by_product(
+        db,
+        user_id=current_user.id,
+        product_id=product_id,
+        limit=1000,  # Reasonable limit for export
+    )
+
+    return AppInfoExportResponse(
+        entries=[
+            AppInfoExportEntry(
+                key=e.key or "",
+                value=e.value or "",
+                category=e.category,
+                is_secret=e.is_secret or False,
+                description=e.description,
+            )
+            for e in entries
+        ]
+    )
