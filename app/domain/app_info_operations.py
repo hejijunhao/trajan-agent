@@ -154,6 +154,7 @@ class AppInfoOperations(BaseOperations[AppInfo]):
                 category=entry.category,
                 is_secret=entry.is_secret,
                 description=entry.description,
+                target_file=entry.target_file,
             )
             db.add(db_obj)
             created.append(db_obj)
