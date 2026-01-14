@@ -159,7 +159,7 @@ async def _run_background_generation(
     This function is run as an asyncio task and updates the job store
     with progress as it runs.
     """
-    from app.core.database import async_session_factory
+    from app.core.database import async_session_maker
 
     job_store = get_job_store()
 
@@ -168,7 +168,7 @@ async def _run_background_generation(
 
     try:
         # Create a new database session for the background task
-        async with async_session_factory() as db:
+        async with async_session_maker() as db:
             github_service = GitHubService(github_token)
             generator = CustomDocGenerator(db, github_service)
 
