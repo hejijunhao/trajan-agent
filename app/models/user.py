@@ -2,7 +2,7 @@ import uuid as uuid_pkg
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import text
+from sqlalchemy import DateTime, text
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -38,6 +38,13 @@ class User(SQLModel, table=True):
         default=False,
         nullable=False,
         sa_column_kwargs={"comment": "Admin flag for manual plan assignment and admin operations"},
+    )
+
+    # Onboarding state
+    onboarding_completed_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+        description="Timestamp when user completed onboarding wizard",
     )
 
     created_at: datetime = Field(

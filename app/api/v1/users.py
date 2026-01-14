@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -21,6 +22,7 @@ class UserRead(BaseModel):
     github_username: str | None
     auth_provider: str | None
     created_at: str
+    onboarding_completed_at: str | None
 
     class Config:
         from_attributes = True
@@ -43,6 +45,9 @@ def user_to_response(user: User) -> dict:
         "github_username": user.github_username,
         "auth_provider": user.auth_provider,
         "created_at": user.created_at.isoformat(),
+        "onboarding_completed_at": (
+            user.onboarding_completed_at.isoformat() if user.onboarding_completed_at else None
+        ),
     }
 
 
@@ -87,3 +92,19 @@ async def delete_current_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+
+
+@router.post("/me/complete-onboarding", response_model=UserRead)
+async def complete_onboarding(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark the current user's onboarding as complete."""
+    if current_user.onboarding_completed_at is not None:
+        # Already completed, just return current state
+        return user_to_response(current_user)
+
+    updated_user = await user_ops.update(
+        db, current_user, {"onboarding_completed_at": datetime.now(UTC)}
+    )
+    return user_to_response(updated_user)
