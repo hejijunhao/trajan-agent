@@ -266,3 +266,46 @@ class BatchGeneratorResult:
     failed: list[str] = field(default_factory=list)  # Titles of docs that failed
     total_planned: int = 0
     total_generated: int = 0
+
+
+# ─────────────────────────────────────────────────────────────
+# Custom Documentation Request Types
+# ─────────────────────────────────────────────────────────────
+
+
+@dataclass
+class CustomDocRequest:
+    """User's request for custom documentation."""
+
+    prompt: str  # Free-form user prompt (required)
+    doc_type: str  # "how-to" | "wiki" | "overview" | "technical" | "guide"
+    format_style: str  # "technical" | "presentation" | "essay" | "email" | "how-to-guide"
+    target_audience: str  # "internal-technical" | "internal-non-technical" | etc.
+    focus_paths: list[str] | None = None  # Optional: specific files/folders to focus on
+    title: str | None = None  # Optional: user-provided title (auto-generated if not provided)
+
+
+@dataclass
+class CustomDocResult:
+    """Result of custom document generation."""
+
+    success: bool
+    content: str | None = None  # Raw markdown content
+    suggested_title: str | None = None  # AI-suggested title if user didn't provide one
+    document: Document | None = None  # The saved document (if saved)
+    error: str | None = None
+    generation_time_seconds: float | None = None
+
+
+@dataclass
+class CustomDocJob:
+    """State of an in-progress custom document generation job."""
+
+    job_id: str
+    product_id: str
+    user_id: str
+    status: str  # "generating" | "completed" | "failed"
+    progress: str | None = None  # Current stage message
+    content: str | None = None  # Generated content when complete
+    suggested_title: str | None = None
+    error: str | None = None

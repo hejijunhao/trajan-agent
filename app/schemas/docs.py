@@ -1,8 +1,9 @@
 """Pydantic schemas for documentation endpoints."""
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GenerateDocsResponse(BaseModel):
@@ -143,3 +144,55 @@ class BulkRefreshResponse(BaseModel):
     unchanged: int
     errors: int
     details: list[RefreshDocumentDetailResponse] = []
+
+
+# =============================================================================
+# Custom Documentation Request Schemas
+# =============================================================================
+
+# Type aliases for literal types
+CustomDocType = Literal["how-to", "wiki", "overview", "technical", "guide"]
+FormatStyle = Literal["technical", "presentation", "essay", "email", "how-to-guide"]
+TargetAudience = Literal[
+    "internal-technical", "internal-non-technical", "external-technical", "external-non-technical"
+]
+
+
+class CustomDocRequestSchema(BaseModel):
+    """Request body for POST /products/{id}/documents/custom/generate."""
+
+    prompt: str = Field(..., min_length=10, max_length=2000)
+    doc_type: CustomDocType
+    format_style: FormatStyle
+    target_audience: TargetAudience
+    focus_paths: list[str] | None = None
+    title: str | None = Field(None, max_length=200)
+
+
+class CustomDocResponseSchema(BaseModel):
+    """Response for POST /products/{id}/documents/custom/generate."""
+
+    job_id: str | None = None  # If background=True
+    content: str | None = None  # If background=False (sync)
+    suggested_title: str | None = None
+    status: Literal["completed", "generating", "failed"]
+    error: str | None = None
+    generation_time_seconds: float | None = None
+
+
+class CustomDocStatusSchema(BaseModel):
+    """Response for GET /products/{id}/documents/custom/status/{job_id}."""
+
+    status: Literal["generating", "completed", "failed"]
+    progress: str | None = None  # e.g., "Analyzing codebase...", "Generating content..."
+    content: str | None = None  # Available when completed
+    suggested_title: str | None = None
+    error: str | None = None
+
+
+class SaveCustomDocSchema(BaseModel):
+    """Request body for POST /documents/custom/{job_id}/save."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    folder: str = "blueprints"  # Default folder
+    is_pinned: bool = False

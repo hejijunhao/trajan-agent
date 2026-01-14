@@ -21,6 +21,9 @@ from app.api.v1.documents.crud import (
     serialize_document,
     update_document,
 )
+from app.api.v1.documents.custom import (
+    generate_custom_document,
+)
 from app.api.v1.documents.lifecycle import (
     archive_document,
     move_to_completed,
@@ -51,9 +54,7 @@ router.add_api_route("/{document_id}", update_document, methods=["PATCH"])
 router.add_api_route("/{document_id}", delete_document, methods=["DELETE"], status_code=204)
 
 # Product-scoped routes
-router.add_api_route(
-    "/products/{product_id}/grouped", get_documents_grouped, methods=["GET"]
-)
+router.add_api_route("/products/{product_id}/grouped", get_documents_grouped, methods=["GET"])
 router.add_api_route(
     "/products/{product_id}/changelog/add-entry", add_changelog_entry, methods=["POST"]
 )
@@ -64,9 +65,7 @@ router.add_api_route("/{document_id}/move-to-completed", move_to_completed, meth
 router.add_api_route("/{document_id}/archive", archive_document, methods=["POST"])
 
 # Sync routes
-router.add_api_route(
-    "/products/{product_id}/import-docs", import_docs_from_repo, methods=["POST"]
-)
+router.add_api_route("/products/{product_id}/import-docs", import_docs_from_repo, methods=["POST"])
 router.add_api_route(
     "/products/{product_id}/docs-sync-status", get_docs_sync_status, methods=["GET"]
 )
@@ -80,11 +79,16 @@ router.add_api_route(
 )
 
 # Repository docs routes (read-only scanning)
-router.add_api_route(
-    "/products/{product_id}/repo-docs-tree", get_repo_docs_tree, methods=["GET"]
-)
+router.add_api_route("/products/{product_id}/repo-docs-tree", get_repo_docs_tree, methods=["GET"])
 router.add_api_route(
     "/repositories/{repository_id}/file-content", get_repo_file_content, methods=["GET"]
+)
+
+# Custom document generation routes
+router.add_api_route(
+    "/products/{product_id}/custom/generate",
+    generate_custom_document,
+    methods=["POST"],
 )
 
 __all__ = ["router", "serialize_document"]

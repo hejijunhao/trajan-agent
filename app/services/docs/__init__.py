@@ -15,6 +15,7 @@ Provides agents for generating and maintaining documentation:
 from app.services.docs.blueprint_agent import BlueprintAgent
 from app.services.docs.changelog_agent import ChangelogAgent
 from app.services.docs.codebase_analyzer import CodebaseAnalyzer
+from app.services.docs.custom_generator import CustomDocGenerator
 from app.services.docs.document_generator import DocumentGenerator
 from app.services.docs.documentation_planner import DocumentationPlanner
 from app.services.docs.orchestrator import DocumentOrchestrator
@@ -27,6 +28,9 @@ from app.services.docs.types import (
     ChangeEntry,
     ChangelogResult,
     CodebaseContext,
+    CustomDocJob,
+    CustomDocRequest,
+    CustomDocResult,
     DocsInfo,
     DocumentationPlan,
     DocumentSpec,
@@ -55,6 +59,7 @@ __all__ = [
     # Services
     "DocsSyncService",
     "CodebaseAnalyzer",
+    "CustomDocGenerator",
     "DocumentationPlanner",
     "DocumentGenerator",
     # Types - v1
@@ -83,4 +88,8 @@ __all__ = [
     # Types - v2 (DocumentGenerator)
     "BatchGeneratorResult",
     "GeneratorResult",
+    # Types - Custom Doc Generation
+    "CustomDocJob",
+    "CustomDocRequest",
+    "CustomDocResult",
 ]
