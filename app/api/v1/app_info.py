@@ -45,12 +45,47 @@ async def list_app_info(
             "category": e.category,
             "is_secret": e.is_secret,
             "description": e.description,
+            "target_file": e.target_file,
             "product_id": str(e.product_id) if e.product_id else None,
             "created_at": e.created_at.isoformat(),
             "updated_at": e.updated_at.isoformat(),
         }
         for e in entries
     ]
+
+
+@router.get("/export", response_model=AppInfoExportResponse)
+async def export_app_info(
+    product_id: uuid_pkg.UUID = Query(..., description="Product to export from"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export all app info entries with revealed secret values.
+
+    Returns all entries for a product with their actual values (secrets unmasked),
+    ready for formatting as a .env file.
+    """
+    entries = await app_info_ops.get_by_product(
+        db,
+        user_id=current_user.id,
+        product_id=product_id,
+        limit=1000,  # Reasonable limit for export
+    )
+
+    return AppInfoExportResponse(
+        entries=[
+            AppInfoExportEntry(
+                key=e.key or "",
+                value=e.value or "",
+                category=e.category,
+                is_secret=e.is_secret or False,
+                description=e.description,
+                target_file=e.target_file,
+            )
+            for e in entries
+        ]
+    )
 
 
 @router.get("/{app_info_id}")
@@ -73,6 +108,7 @@ async def get_app_info(
         "category": entry.category,
         "is_secret": entry.is_secret,
         "description": entry.description,
+        "target_file": entry.target_file,
         "product_id": str(entry.product_id) if entry.product_id else None,
         "created_at": entry.created_at.isoformat(),
         "updated_at": entry.updated_at.isoformat(),
@@ -108,6 +144,7 @@ async def create_app_info(
         "category": entry.category,
         "is_secret": entry.is_secret,
         "description": entry.description,
+        "target_file": entry.target_file,
         "product_id": str(entry.product_id) if entry.product_id else None,
         "created_at": entry.created_at.isoformat(),
         "updated_at": entry.updated_at.isoformat(),
@@ -139,6 +176,7 @@ async def update_app_info(
         "category": updated.category,
         "is_secret": updated.is_secret,
         "description": updated.description,
+        "target_file": updated.target_file,
         "product_id": str(updated.product_id) if updated.product_id else None,
         "created_at": updated.created_at.isoformat(),
         "updated_at": updated.updated_at.isoformat(),
@@ -204,6 +242,7 @@ async def bulk_create_app_info(
                 "category": e.category,
                 "is_secret": e.is_secret,
                 "description": e.description,
+                "target_file": e.target_file,
                 "product_id": str(e.product_id) if e.product_id else None,
                 "created_at": e.created_at.isoformat(),
                 "updated_at": e.updated_at.isoformat(),
@@ -211,37 +250,4 @@ async def bulk_create_app_info(
             for e in created
         ],
         skipped=skipped,
-    )
-
-
-@router.get("/export", response_model=AppInfoExportResponse)
-async def export_app_info(
-    product_id: uuid_pkg.UUID = Query(..., description="Product to export from"),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Export all app info entries with revealed secret values.
-
-    Returns all entries for a product with their actual values (secrets unmasked),
-    ready for formatting as a .env file.
-    """
-    entries = await app_info_ops.get_by_product(
-        db,
-        user_id=current_user.id,
-        product_id=product_id,
-        limit=1000,  # Reasonable limit for export
-    )
-
-    return AppInfoExportResponse(
-        entries=[
-            AppInfoExportEntry(
-                key=e.key or "",
-                value=e.value or "",
-                category=e.category,
-                is_secret=e.is_secret or False,
-                description=e.description,
-            )
-            for e in entries
-        ]
     )

@@ -17,6 +17,7 @@ class AppInfoBase(SQLModel):
     category: str | None = Field(default=None, max_length=50)  # e.g. env_var, url, credential, note
     is_secret: bool | None = Field(default=False)
     description: str | None = Field(default=None, max_length=500)
+    target_file: str | None = Field(default=None, max_length=100)  # e.g. .env, .env.local
 
 
 class AppInfoCreate(SQLModel):
@@ -28,6 +29,7 @@ class AppInfoCreate(SQLModel):
     category: str | None = None
     is_secret: bool = False
     description: str | None = None
+    target_file: str | None = None
 
 
 class AppInfoUpdate(SQLModel):
@@ -38,6 +40,7 @@ class AppInfoUpdate(SQLModel):
     category: str | None = None
     is_secret: bool | None = None
     description: str | None = None
+    target_file: str | None = None
 
 
 class AppInfoBulkEntry(SQLModel):
@@ -48,6 +51,7 @@ class AppInfoBulkEntry(SQLModel):
     category: str | None = None
     is_secret: bool = False
     description: str | None = None
+    target_file: str | None = None
 
 
 class AppInfoBulkCreate(SQLModel):
@@ -72,6 +76,7 @@ class AppInfoExportEntry(SQLModel):
     category: str | None = None
     is_secret: bool = False
     description: str | None = None
+    target_file: str | None = None
 
 
 class AppInfoExportResponse(SQLModel):
