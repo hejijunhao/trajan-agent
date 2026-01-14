@@ -30,10 +30,36 @@ def _build_doc_tree(
     """
     Build a hierarchical tree structure from flat file list.
 
-    Returns root-level files and directories.
+    Returns root-level files and directories with full nested structure.
     """
     root_files: list[RepoDocFile] = []
+    # Use nested dict structure: path -> RepoDocDirectory
     directories: dict[str, RepoDocDirectory] = {}
+
+    def get_or_create_directory(dir_parts: list[str]) -> RepoDocDirectory:
+        """Recursively get or create directory structure."""
+        full_path = "/".join(dir_parts)
+
+        if full_path in directories:
+            return directories[full_path]
+
+        # Create this directory
+        directory = RepoDocDirectory(
+            path=full_path,
+            name=dir_parts[-1],
+            files=[],
+            directories=[],
+        )
+        directories[full_path] = directory
+
+        # If this is nested, ensure parent exists and link to it
+        if len(dir_parts) > 1:
+            parent = get_or_create_directory(dir_parts[:-1])
+            # Add this directory to parent if not already there
+            if directory not in parent.directories:
+                parent.directories.append(directory)
+
+        return directory
 
     for path, size, sha in files:
         parts = path.split("/")
@@ -50,21 +76,12 @@ def _build_doc_tree(
                 )
             )
         else:
-            # File in a directory
-            top_dir = parts[0]
+            # File in a directory - build full nested structure
+            dir_parts = parts[:-1]
+            directory = get_or_create_directory(dir_parts)
 
-            # Ensure directory exists
-            if top_dir not in directories:
-                directories[top_dir] = RepoDocDirectory(
-                    path=top_dir,
-                    name=top_dir,
-                    files=[],
-                    directories=[],
-                )
-
-            # For nested directories, we'll flatten to top-level dir for simplicity
-            # The path preserves full path so frontend can still display hierarchy
-            directories[top_dir].files.append(
+            # Add file to its immediate parent directory
+            directory.files.append(
                 RepoDocFile(
                     path=path,
                     name=filename,
@@ -73,7 +90,10 @@ def _build_doc_tree(
                 )
             )
 
-    return root_files, list(directories.values())
+    # Return only top-level directories (those with single-part paths)
+    top_level_dirs = [d for path, d in directories.items() if "/" not in path]
+
+    return root_files, top_level_dirs
 
 
 async def get_repo_docs_tree(
