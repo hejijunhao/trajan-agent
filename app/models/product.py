@@ -2,7 +2,7 @@ import uuid as uuid_pkg
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column
+from sqlalchemy import Column, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -101,7 +101,11 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     )
     last_docs_generated_at: datetime | None = Field(
         default=None,
-        sa_column_kwargs={"comment": "Timestamp of last successful doc generation"},
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=True,
+            comment="Timestamp of last successful doc generation",
+        ),
     )
 
     # Quick Access fields - allows password-protected shareable link to App Info
@@ -118,7 +122,11 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     )
     quick_access_created_at: datetime | None = Field(
         default=None,
-        sa_column_kwargs={"comment": "When quick access was enabled"},
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=True,
+            comment="When quick access was enabled",
+        ),
     )
     quick_access_created_by: uuid_pkg.UUID | None = Field(
         default=None,
