@@ -278,6 +278,7 @@ async def get_entries_by_token(
             "category": e.category,
             "is_secret": e.is_secret,
             "description": e.description,
+            "target_file": e.target_file,
             "product_id": str(e.product_id) if e.product_id else None,
             "created_at": e.created_at.isoformat() if e.created_at else None,
             "updated_at": e.updated_at.isoformat() if e.updated_at else None,
