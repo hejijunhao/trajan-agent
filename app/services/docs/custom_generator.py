@@ -10,11 +10,13 @@ Key features:
 2. User-specified parameters (doc type, format, audience)
 3. Optional file focus for targeted documentation
 4. Immediate content return (preview mode) or save to database
+5. Progress reporting for background jobs via job store
 """
 
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from uuid import UUID
 
@@ -28,6 +30,12 @@ from app.models.product import Product
 from app.models.repository import Repository
 from app.services.docs.codebase_analyzer import CodebaseAnalyzer
 from app.services.docs.custom_prompts import build_custom_prompt
+from app.services.docs.job_store import (
+    STAGE_ANALYZING,
+    STAGE_FINALIZING,
+    STAGE_GENERATING,
+    STAGE_PLANNING,
+)
 from app.services.docs.types import CodebaseContext, CustomDocRequest, CustomDocResult
 from app.services.github import GitHubService
 
@@ -72,6 +80,7 @@ class CustomDocGenerator:
         repositories: list[Repository],
         user_id: str | UUID,
         save_immediately: bool = False,
+        progress_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> CustomDocResult:
         """
         Generate custom documentation based on user request.
@@ -82,20 +91,34 @@ class CustomDocGenerator:
             repositories: Repositories to analyze for context
             user_id: User who owns this document
             save_immediately: If True, save as Document; if False, return content only
+            progress_callback: Optional async callback for progress updates (background jobs)
 
         Returns:
             CustomDocResult with generated content and optionally saved Document
         """
         start_time = time.time()
 
+        async def report_progress(stage: str) -> None:
+            """Report progress if callback provided."""
+            if progress_callback:
+                await progress_callback(stage)
+
         try:
             # Step 1: Analyze codebase for context
+            await report_progress(STAGE_ANALYZING)
             logger.info(f"Analyzing codebase for custom doc: {request.prompt[:50]}...")
             context = await self._get_codebase_context(repositories, request.focus_paths)
 
-            # Step 2: Generate content using Claude
+            # Step 2: Plan document structure
+            await report_progress(STAGE_PLANNING)
+
+            # Step 3: Generate content using Claude
+            await report_progress(STAGE_GENERATING)
             logger.info("Generating custom document content...")
             content, suggested_title = await self._call_claude(request, context)
+
+            # Step 4: Finalize
+            await report_progress(STAGE_FINALIZING)
 
             # Use user's title if provided, otherwise use AI-suggested title
             final_title = request.title or suggested_title or "Untitled Document"

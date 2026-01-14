@@ -2,13 +2,17 @@
 
 Endpoints for generating custom documentation based on user requests with
 specific parameters (doc type, format style, target audience).
+
+Supports both synchronous generation (for smaller requests) and background
+generation with progress tracking (for longer requests).
 """
 
+import asyncio
 import logging
 import uuid as uuid_pkg
 from typing import Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -18,8 +22,10 @@ from app.models.user import User
 from app.schemas.docs import (
     CustomDocRequestSchema,
     CustomDocResponseSchema,
+    CustomDocStatusSchema,
 )
 from app.services.docs.custom_generator import CustomDocGenerator
+from app.services.docs.job_store import get_job_store
 from app.services.docs.types import CustomDocRequest
 from app.services.github import GitHubService
 
@@ -29,23 +35,25 @@ logger = logging.getLogger(__name__)
 async def generate_custom_document(
     product_id: uuid_pkg.UUID,
     request: CustomDocRequestSchema,
+    background: bool = Query(False, description="Run generation in background with progress"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CustomDocResponseSchema:
     """
     Generate a custom document based on user request.
 
-    This endpoint generates documentation synchronously and returns the content.
-    The content can then be previewed before saving, or saved immediately.
+    If background=False (default): Generates synchronously and returns content.
+    If background=True: Starts background job and returns job_id for polling.
 
     Args:
         product_id: The product to generate documentation for
         request: The custom doc request with prompt and parameters
+        background: If True, run async and return job ID
         current_user: The authenticated user
         db: Database session
 
     Returns:
-        CustomDocResponseSchema with generated content
+        CustomDocResponseSchema with generated content or job_id
     """
     # Get the product
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
@@ -86,30 +94,150 @@ async def generate_custom_document(
         title=request.title,
     )
 
-    # Generate the document
-    github_service = GitHubService(preferences.github_token)
-    generator = CustomDocGenerator(db, github_service)
+    if background:
+        # Start background job
+        job_store = get_job_store()
+        job_id = await job_store.create_job(
+            product_id=str(product_id),
+            user_id=str(current_user.id),
+        )
 
-    result = await generator.generate(
-        request=custom_request,
-        product=product,
-        repositories=repositories,
-        user_id=current_user.id,
-        save_immediately=False,  # Preview mode - don't save yet
-    )
+        # Run generation in background task
+        asyncio.create_task(
+            _run_background_generation(
+                job_id=job_id,
+                custom_request=custom_request,
+                product=product,
+                repositories=repositories,
+                user_id=current_user.id,
+                github_token=preferences.github_token,
+            )
+        )
 
-    if result.success:
         return CustomDocResponseSchema(
-            status="completed",
-            content=result.content,
-            suggested_title=result.suggested_title,
-            generation_time_seconds=result.generation_time_seconds,
+            status="generating",
+            job_id=job_id,
         )
     else:
-        return CustomDocResponseSchema(
-            status="failed",
-            error=result.error,
+        # Synchronous generation
+        github_service = GitHubService(preferences.github_token)
+        generator = CustomDocGenerator(db, github_service)
+
+        result = await generator.generate(
+            request=custom_request,
+            product=product,
+            repositories=repositories,
+            user_id=current_user.id,
+            save_immediately=False,
         )
+
+        if result.success:
+            return CustomDocResponseSchema(
+                status="completed",
+                content=result.content,
+                suggested_title=result.suggested_title,
+                generation_time_seconds=result.generation_time_seconds,
+            )
+        else:
+            return CustomDocResponseSchema(
+                status="failed",
+                error=result.error,
+            )
+
+
+async def _run_background_generation(
+    job_id: str,
+    custom_request: CustomDocRequest,
+    product: Any,
+    repositories: list[Any],
+    user_id: Any,
+    github_token: str,
+) -> None:
+    """
+    Run custom doc generation in background with progress updates.
+
+    This function is run as an asyncio task and updates the job store
+    with progress as it runs.
+    """
+    from app.core.database import async_session_factory
+
+    job_store = get_job_store()
+
+    async def progress_callback(stage: str) -> None:
+        await job_store.update_progress(job_id, stage)
+
+    try:
+        # Create a new database session for the background task
+        async with async_session_factory() as db:
+            github_service = GitHubService(github_token)
+            generator = CustomDocGenerator(db, github_service)
+
+            result = await generator.generate(
+                request=custom_request,
+                product=product,
+                repositories=repositories,
+                user_id=user_id,
+                save_immediately=False,
+                progress_callback=progress_callback,
+            )
+
+            if result.success:
+                await job_store.set_completed(
+                    job_id,
+                    content=result.content or "",
+                    suggested_title=result.suggested_title or "Untitled Document",
+                )
+            else:
+                await job_store.set_failed(job_id, result.error or "Unknown error")
+
+    except Exception as e:
+        logger.exception(f"Background generation failed for job {job_id}")
+        await job_store.set_failed(job_id, str(e))
+
+
+async def get_custom_doc_status(
+    product_id: uuid_pkg.UUID,
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CustomDocStatusSchema:
+    """
+    Get the status of a background custom document generation job.
+
+    Poll this endpoint to check progress and get the result when complete.
+
+    Args:
+        product_id: The product ID (for authorization)
+        job_id: The job ID returned from generate endpoint
+        current_user: The authenticated user
+        db: Database session
+
+    Returns:
+        CustomDocStatusSchema with current status, progress, and content when done
+    """
+    job_store = get_job_store()
+    job = await job_store.get_job(job_id)
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found or expired",
+        )
+
+    # Verify the job belongs to this user and product
+    if job.user_id != str(current_user.id) or job.product_id != str(product_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this job",
+        )
+
+    return CustomDocStatusSchema(
+        status=job.status,  # type: ignore[arg-type]
+        progress=job.progress,
+        content=job.content,
+        suggested_title=job.suggested_title,
+        error=job.error,
+    )
 
 
 async def save_custom_document(

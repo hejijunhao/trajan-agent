@@ -23,6 +23,7 @@ from app.api.v1.documents.crud import (
 )
 from app.api.v1.documents.custom import (
     generate_custom_document,
+    get_custom_doc_status,
 )
 from app.api.v1.documents.lifecycle import (
     archive_document,
@@ -89,6 +90,11 @@ router.add_api_route(
     "/products/{product_id}/custom/generate",
     generate_custom_document,
     methods=["POST"],
+)
+router.add_api_route(
+    "/products/{product_id}/custom/status/{job_id}",
+    get_custom_doc_status,
+    methods=["GET"],
 )
 
 __all__ = ["router", "serialize_document"]
