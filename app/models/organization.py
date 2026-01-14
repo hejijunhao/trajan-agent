@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column, ForeignKey, String, UniqueConstraint, text
+from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
@@ -120,10 +120,13 @@ class OrganizationMember(SQLModel, table=True):
     invited_by: uuid_pkg.UUID | None = Field(
         foreign_key="users.id", default=None, nullable=True
     )
-    invited_at: datetime | None = Field(default=None, nullable=True)
-    joined_at: datetime = Field(
+    invited_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, nullable=True, sa_type=DateTime(timezone=True)
+    )
+    joined_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": text("now()")},
     )
 

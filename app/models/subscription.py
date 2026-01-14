@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, ForeignKey, String, text
+from sqlalchemy import Column, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -89,14 +89,20 @@ class Subscription(SQLModel, table=True):
     )
 
     # Billing period
-    current_period_start: datetime | None = Field(default=None, nullable=True)
-    current_period_end: datetime | None = Field(default=None, nullable=True)
+    current_period_start: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, nullable=True, sa_type=DateTime(timezone=True)
+    )
+    current_period_end: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, nullable=True, sa_type=DateTime(timezone=True)
+    )
     cancel_at_period_end: bool = Field(
         default=False,
         nullable=False,
         sa_column_kwargs={"server_default": text("false")},
     )
-    canceled_at: datetime | None = Field(default=None, nullable=True)
+    canceled_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, nullable=True, sa_type=DateTime(timezone=True)
+    )
 
     # Stripe references (nullable for manually assigned subscriptions)
     stripe_customer_id: str | None = Field(
@@ -139,7 +145,9 @@ class Subscription(SQLModel, table=True):
             nullable=True,
         ),
     )
-    manually_assigned_at: datetime | None = Field(default=None, nullable=True)
+    manually_assigned_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, nullable=True, sa_type=DateTime(timezone=True)
+    )
     manual_assignment_note: str | None = Field(
         default=None,
         max_length=500,

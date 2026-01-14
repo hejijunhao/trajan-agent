@@ -2,7 +2,7 @@ import uuid as uuid_pkg
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column, Index, text
+from sqlalchemy import Column, DateTime, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -85,8 +85,9 @@ class Document(DocumentBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=Tr
         index=True,
         description="Path to the file in the GitHub repository",
     )
-    last_synced_at: datetime | None = Field(
+    last_synced_at: datetime | None = Field(  # type: ignore[call-overload]
         default=None,
+        sa_type=DateTime(timezone=True),
         description="Timestamp of last successful sync with GitHub",
     )
     sync_status: str | None = Field(

@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column, Date, ForeignKey, String, text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
@@ -257,9 +257,15 @@ class Referral(SQLModel, table=True):
         nullable=False,
         sa_column_kwargs={"server_default": text("now()")},
     )
-    signed_up_at: datetime | None = Field(default=None, nullable=True)
-    converted_at: datetime | None = Field(default=None, nullable=True)
-    credited_at: datetime | None = Field(default=None, nullable=True)
+    signed_up_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, nullable=True, sa_type=DateTime(timezone=True)
+    )
+    converted_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, nullable=True, sa_type=DateTime(timezone=True)
+    )
+    credited_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, nullable=True, sa_type=DateTime(timezone=True)
+    )
 
     # Relationships
     referrer_org: Optional["Organization"] = Relationship(
