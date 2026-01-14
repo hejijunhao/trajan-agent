@@ -6,6 +6,7 @@ from app.models.billing import (
     ReferralStatus,
     UsageSnapshot,
 )
+from app.models.custom_doc_job import CustomDocJob, JobStatus
 from app.models.document import Document, DocumentCreate, DocumentUpdate
 from app.models.feedback import (
     Feedback,
@@ -67,6 +68,8 @@ __all__ = [
     "Document",
     "DocumentCreate",
     "DocumentUpdate",
+    "CustomDocJob",
+    "JobStatus",
     "AppInfo",
     "AppInfoCreate",
     "AppInfoUpdate",

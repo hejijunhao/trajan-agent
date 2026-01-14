@@ -81,6 +81,7 @@ class CustomDocGenerator:
         user_id: str | UUID,
         save_immediately: bool = False,
         progress_callback: Callable[[str], Awaitable[None]] | None = None,
+        cancellation_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> CustomDocResult:
         """
         Generate custom documentation based on user request.
@@ -92,6 +93,7 @@ class CustomDocGenerator:
             user_id: User who owns this document
             save_immediately: If True, save as Document; if False, return content only
             progress_callback: Optional async callback for progress updates (background jobs)
+            cancellation_check: Optional async callback to check if job was cancelled
 
         Returns:
             CustomDocResult with generated content and optionally saved Document
@@ -103,21 +105,51 @@ class CustomDocGenerator:
             if progress_callback:
                 await progress_callback(stage)
 
+        async def check_cancelled() -> bool:
+            """Check if job was cancelled."""
+            if cancellation_check:
+                return await cancellation_check()
+            return False
+
         try:
             # Step 1: Analyze codebase for context
+            if await check_cancelled():
+                return CustomDocResult(
+                    success=False,
+                    error="Cancelled by user",
+                    generation_time_seconds=time.time() - start_time,
+                )
             await report_progress(STAGE_ANALYZING)
             logger.info(f"Analyzing codebase for custom doc: {request.prompt[:50]}...")
             context = await self._get_codebase_context(repositories, request.focus_paths)
 
             # Step 2: Plan document structure
+            if await check_cancelled():
+                return CustomDocResult(
+                    success=False,
+                    error="Cancelled by user",
+                    generation_time_seconds=time.time() - start_time,
+                )
             await report_progress(STAGE_PLANNING)
 
             # Step 3: Generate content using Claude
+            if await check_cancelled():
+                return CustomDocResult(
+                    success=False,
+                    error="Cancelled by user",
+                    generation_time_seconds=time.time() - start_time,
+                )
             await report_progress(STAGE_GENERATING)
             logger.info("Generating custom document content...")
             content, suggested_title = await self._call_claude(request, context)
 
             # Step 4: Finalize
+            if await check_cancelled():
+                return CustomDocResult(
+                    success=False,
+                    error="Cancelled by user",
+                    generation_time_seconds=time.time() - start_time,
+                )
             await report_progress(STAGE_FINALIZING)
 
             # Use user's title if provided, otherwise use AI-suggested title

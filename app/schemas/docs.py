@@ -191,7 +191,7 @@ class CustomDocResponseSchema(BaseModel):
 class CustomDocStatusSchema(BaseModel):
     """Response for GET /products/{id}/documents/custom/status/{job_id}."""
 
-    status: Literal["generating", "completed", "failed"]
+    status: Literal["generating", "completed", "failed", "cancelled"]
     progress: str | None = None  # e.g., "Analyzing codebase...", "Generating content..."
     content: str | None = None  # Available when completed
     suggested_title: str | None = None

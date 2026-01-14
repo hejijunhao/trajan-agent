@@ -1,19 +1,22 @@
 """
-In-memory job store for custom document generation.
+Database-backed job store for custom document generation.
 
-This provides ephemeral storage for tracking the progress of custom doc
-generation jobs. Jobs are stored in memory and automatically cleaned up
-after a TTL period.
+This provides persistent storage for tracking the progress of custom doc
+generation jobs. Works across multiple workers/processes.
 
-For production with multiple workers, consider Redis or database storage.
+Jobs are stored in the database with automatic TTL cleanup.
 """
 
-import asyncio
 import logging
-import time
 import uuid
-from dataclasses import dataclass, field
-from typing import ClassVar
+from datetime import UTC, datetime, timedelta
+from typing import cast
+
+from sqlalchemy import delete, select, update
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.custom_doc_job import CustomDocJob, JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -27,116 +30,175 @@ STAGE_GENERATING = "Generating content..."
 STAGE_FINALIZING = "Finalizing document..."
 
 
-@dataclass
-class CustomDocJobState:
-    """State of an in-progress custom document generation job."""
+async def create_job(db: AsyncSession, product_id: str, user_id: str) -> str:
+    """Create a new job and return its ID."""
+    expires_at = datetime.now(UTC) + timedelta(seconds=JOB_TTL_SECONDS)
 
-    job_id: str
-    product_id: str
-    user_id: str
-    status: str = "generating"  # "generating" | "completed" | "failed"
-    progress: str = STAGE_ANALYZING
-    content: str | None = None
-    suggested_title: str | None = None
-    error: str | None = None
-    created_at: float = field(default_factory=time.time)
+    job = CustomDocJob(
+        product_id=uuid.UUID(product_id),
+        user_id=uuid.UUID(user_id),
+        status=JobStatus.GENERATING.value,
+        progress=STAGE_ANALYZING,
+        expires_at=expires_at,
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    logger.info(f"Created custom doc job: {job.id}")
+    return str(job.id)
 
 
-class CustomDocJobStore:
-    """
-    In-memory store for custom document generation jobs.
+async def get_job(db: AsyncSession, job_id: str) -> CustomDocJob | None:
+    """Get job by ID."""
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        return None
 
-    Thread-safe singleton that manages job state for background generation.
-    Jobs are automatically cleaned up after TTL_SECONDS.
-    """
+    result = await db.execute(
+        select(CustomDocJob).where(CustomDocJob.id == job_uuid)  # type: ignore[arg-type]
+    )
+    return result.scalar_one_or_none()
 
-    _instance: ClassVar["CustomDocJobStore | None"] = None
-    _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
-    def __new__(cls) -> "CustomDocJobStore":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._jobs: dict[str, CustomDocJobState] = {}
-            cls._instance._cleanup_task: asyncio.Task[None] | None = None
-        return cls._instance
+async def update_progress(db: AsyncSession, job_id: str, progress: str) -> None:
+    """Update the progress message for a job."""
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        return
 
-    async def create_job(self, product_id: str, user_id: str) -> str:
-        """Create a new job and return its ID."""
-        job_id = str(uuid.uuid4())
-        job = CustomDocJobState(
-            job_id=job_id,
-            product_id=product_id,
-            user_id=user_id,
+    await db.execute(
+        update(CustomDocJob)
+        .where(CustomDocJob.id == job_uuid)  # type: ignore[arg-type]
+        .values(progress=progress)
+    )
+    await db.commit()
+    logger.debug(f"Job {job_id} progress: {progress}")
+
+
+async def set_completed(
+    db: AsyncSession,
+    job_id: str,
+    content: str,
+    suggested_title: str,
+) -> None:
+    """Mark a job as completed with its result."""
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        return
+
+    await db.execute(
+        update(CustomDocJob)
+        .where(CustomDocJob.id == job_uuid)  # type: ignore[arg-type]
+        .values(
+            status=JobStatus.COMPLETED.value,
+            progress="Complete",
+            content=content,
+            suggested_title=suggested_title,
         )
-        self._jobs[job_id] = job
-        logger.info(f"Created custom doc job: {job_id}")
-
-        # Start cleanup task if not running
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
-
-        return job_id
-
-    async def get_job(self, job_id: str) -> CustomDocJobState | None:
-        """Get job state by ID."""
-        return self._jobs.get(job_id)
-
-    async def update_progress(self, job_id: str, progress: str) -> None:
-        """Update the progress message for a job."""
-        if job_id in self._jobs:
-            self._jobs[job_id].progress = progress
-            logger.debug(f"Job {job_id} progress: {progress}")
-
-    async def set_completed(
-        self,
-        job_id: str,
-        content: str,
-        suggested_title: str,
-    ) -> None:
-        """Mark a job as completed with its result."""
-        if job_id in self._jobs:
-            job = self._jobs[job_id]
-            job.status = "completed"
-            job.content = content
-            job.suggested_title = suggested_title
-            job.progress = "Complete"
-            logger.info(f"Job {job_id} completed")
-
-    async def set_failed(self, job_id: str, error: str) -> None:
-        """Mark a job as failed with an error message."""
-        if job_id in self._jobs:
-            job = self._jobs[job_id]
-            job.status = "failed"
-            job.error = error
-            logger.error(f"Job {job_id} failed: {error}")
-
-    async def delete_job(self, job_id: str) -> None:
-        """Delete a job from the store."""
-        if job_id in self._jobs:
-            del self._jobs[job_id]
-            logger.debug(f"Deleted job {job_id}")
-
-    async def _cleanup_loop(self) -> None:
-        """Background task to clean up expired jobs."""
-        while True:
-            await asyncio.sleep(300)  # Run every 5 minutes
-            await self._cleanup_expired()
-
-    async def _cleanup_expired(self) -> None:
-        """Remove jobs older than TTL."""
-        now = time.time()
-        expired = [
-            job_id
-            for job_id, job in self._jobs.items()
-            if now - job.created_at > JOB_TTL_SECONDS
-        ]
-        for job_id in expired:
-            del self._jobs[job_id]
-        if expired:
-            logger.info(f"Cleaned up {len(expired)} expired jobs")
+    )
+    await db.commit()
+    logger.info(f"Job {job_id} completed")
 
 
-# Singleton accessor
-def get_job_store() -> CustomDocJobStore:
-    """Get the singleton job store instance."""
-    return CustomDocJobStore()
+async def set_failed(db: AsyncSession, job_id: str, error: str) -> None:
+    """Mark a job as failed with an error message."""
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        return
+
+    # Sanitize error message for users
+    sanitized_error = _sanitize_error(error)
+
+    await db.execute(
+        update(CustomDocJob)
+        .where(CustomDocJob.id == job_uuid)  # type: ignore[arg-type]
+        .values(
+            status=JobStatus.FAILED.value,
+            error=sanitized_error,
+        )
+    )
+    await db.commit()
+    logger.error(f"Job {job_id} failed: {error}")
+
+
+async def set_cancelled(db: AsyncSession, job_id: str) -> bool:
+    """
+    Mark a job as cancelled.
+
+    Returns True if the job was found and cancelled, False otherwise.
+    """
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        return False
+
+    result = await db.execute(
+        update(CustomDocJob)
+        .where(CustomDocJob.id == job_uuid)  # type: ignore[arg-type]
+        .where(CustomDocJob.status == JobStatus.GENERATING.value)  # type: ignore[arg-type]
+        .values(status=JobStatus.CANCELLED.value)
+    )
+    await db.commit()
+
+    cursor_result = cast(CursorResult[tuple[()]], result)
+    if cursor_result.rowcount > 0:
+        logger.info(f"Job {job_id} cancelled")
+        return True
+    return False
+
+
+async def is_cancelled(db: AsyncSession, job_id: str) -> bool:
+    """Check if a job has been cancelled."""
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        return False
+
+    result = await db.execute(
+        select(CustomDocJob).where(CustomDocJob.id == job_uuid)  # type: ignore[arg-type]
+    )
+    job = result.scalar_one_or_none()
+    return job is not None and job.status == JobStatus.CANCELLED.value
+
+
+async def cleanup_expired_jobs(db: AsyncSession) -> int:
+    """Remove jobs older than TTL. Returns number of jobs cleaned up."""
+    now = datetime.now(UTC)
+    result = await db.execute(
+        delete(CustomDocJob).where(CustomDocJob.expires_at < now)  # type: ignore[arg-type]
+    )
+    await db.commit()
+
+    cursor_result = cast(CursorResult[tuple[()]], result)
+    if cursor_result.rowcount > 0:
+        logger.info(f"Cleaned up {cursor_result.rowcount} expired jobs")
+    return cursor_result.rowcount
+
+
+def _sanitize_error(error: str) -> str:
+    """
+    Sanitize error message for user display.
+
+    Converts technical API errors into user-friendly messages.
+    """
+    error_lower = error.lower()
+
+    if "ratelimit" in error_lower or "rate limit" in error_lower:
+        return "Service is busy. Please try again in a few minutes."
+    if "apierror" in error_lower or "api error" in error_lower:
+        return "Failed to generate document. Please try again."
+    if "timeout" in error_lower:
+        return "Request timed out. Please try again."
+    if "anthropic" in error_lower:
+        return "Failed to generate document. Please try again."
+
+    # If error is already short and clean, return it
+    if len(error) < 100 and not any(char in error for char in ["<", ">", "{", "}"]):
+        return error
+
+    return "An unexpected error occurred. Please try again."

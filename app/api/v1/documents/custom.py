@@ -10,26 +10,77 @@ generation with progress tracking (for longer requests).
 import asyncio
 import logging
 import uuid as uuid_pkg
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import SubscriptionContext, get_current_user, get_subscription_context
 from app.core.database import get_db
 from app.domain import preferences_ops, product_ops, repository_ops
+from app.models.custom_doc_job import CustomDocJob
 from app.models.user import User
 from app.schemas.docs import (
     CustomDocRequestSchema,
     CustomDocResponseSchema,
     CustomDocStatusSchema,
 )
+from app.services.docs import job_store
 from app.services.docs.custom_generator import CustomDocGenerator
-from app.services.docs.job_store import get_job_store
 from app.services.docs.types import CustomDocRequest
 from app.services.github import GitHubService
 
 logger = logging.getLogger(__name__)
+
+# Rate limit configuration by plan tier
+RATE_LIMITS = {
+    "free": {"max_requests": 5, "window_hours": 24},
+    "starter": {"max_requests": 25, "window_hours": 24},
+    "pro": {"max_requests": 100, "window_hours": 24},
+    "enterprise": {"max_requests": 1000, "window_hours": 24},
+}
+
+
+class RateLimiter:
+    """
+    Rate limiter for custom doc generation.
+
+    Limits are based on subscription tier.
+    """
+
+    async def __call__(
+        self,
+        ctx: SubscriptionContext = Depends(get_subscription_context),
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        """Check if user is within rate limits."""
+        tier = ctx.subscription.plan_tier
+        limits = RATE_LIMITS.get(tier, RATE_LIMITS["free"])
+
+        window_start = datetime.now(UTC) - timedelta(hours=limits["window_hours"])
+
+        # Count recent jobs for this user
+        result = await db.execute(
+            select(func.count())
+            .select_from(CustomDocJob)
+            .where(CustomDocJob.user_id == current_user.id)  # type: ignore[arg-type]
+            .where(CustomDocJob.created_at >= window_start)  # type: ignore[arg-type]
+        )
+        count = result.scalar() or 0
+
+        if count >= limits["max_requests"]:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Your {ctx.plan.display_name} plan allows "
+                f"{limits['max_requests']} custom doc requests per "
+                f"{limits['window_hours']} hours. Please try again later.",
+            )
+
+
+rate_limiter = RateLimiter()
 
 
 async def generate_custom_document(
@@ -38,6 +89,7 @@ async def generate_custom_document(
     background: bool = Query(False, description="Run generation in background with progress"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(rate_limiter),
 ) -> CustomDocResponseSchema:
     """
     Generate a custom document based on user request.
@@ -95,9 +147,9 @@ async def generate_custom_document(
     )
 
     if background:
-        # Start background job
-        job_store = get_job_store()
+        # Create job in database
         job_id = await job_store.create_job(
+            db,
             product_id=str(product_id),
             user_id=str(current_user.id),
         )
@@ -161,10 +213,13 @@ async def _run_background_generation(
     """
     from app.core.database import async_session_maker
 
-    job_store = get_job_store()
-
     async def progress_callback(stage: str) -> None:
-        await job_store.update_progress(job_id, stage)
+        async with async_session_maker() as db:
+            await job_store.update_progress(db, job_id, stage)
+
+    async def check_cancelled() -> bool:
+        async with async_session_maker() as db:
+            return await job_store.is_cancelled(db, job_id)
 
     try:
         # Create a new database session for the background task
@@ -179,20 +234,26 @@ async def _run_background_generation(
                 user_id=user_id,
                 save_immediately=False,
                 progress_callback=progress_callback,
+                cancellation_check=check_cancelled,
             )
 
             if result.success:
                 await job_store.set_completed(
+                    db,
                     job_id,
                     content=result.content or "",
                     suggested_title=result.suggested_title or "Untitled Document",
                 )
+            elif result.error == "Cancelled by user":
+                # Already marked as cancelled, nothing to do
+                pass
             else:
-                await job_store.set_failed(job_id, result.error or "Unknown error")
+                await job_store.set_failed(db, job_id, result.error or "Unknown error")
 
     except Exception as e:
         logger.exception(f"Background generation failed for job {job_id}")
-        await job_store.set_failed(job_id, str(e))
+        async with async_session_maker() as db:
+            await job_store.set_failed(db, job_id, str(e))
 
 
 async def get_custom_doc_status(
@@ -215,8 +276,7 @@ async def get_custom_doc_status(
     Returns:
         CustomDocStatusSchema with current status, progress, and content when done
     """
-    job_store = get_job_store()
-    job = await job_store.get_job(job_id)
+    job = await job_store.get_job(db, job_id)
 
     if not job:
         raise HTTPException(
@@ -225,19 +285,58 @@ async def get_custom_doc_status(
         )
 
     # Verify the job belongs to this user and product
-    if job.user_id != str(current_user.id) or job.product_id != str(product_id):
+    if job.user_id != current_user.id or job.product_id != product_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this job",
         )
 
     return CustomDocStatusSchema(
-        status=job.status,  # type: ignore[arg-type]
+        status=job.status,
         progress=job.progress,
         content=job.content,
         suggested_title=job.suggested_title,
         error=job.error,
     )
+
+
+async def cancel_custom_doc_job(
+    product_id: uuid_pkg.UUID,
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
+    """
+    Cancel a running custom document generation job.
+
+    This marks the job as cancelled and stops further processing.
+
+    Args:
+        product_id: The product ID (for authorization)
+        job_id: The job ID to cancel
+        current_user: The authenticated user
+        db: Database session
+
+    Returns:
+        {"cancelled": True} if job was cancelled, {"cancelled": False} otherwise
+    """
+    job = await job_store.get_job(db, job_id)
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found or expired",
+        )
+
+    # Verify the job belongs to this user and product
+    if job.user_id != current_user.id or job.product_id != product_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this job",
+        )
+
+    cancelled = await job_store.set_cancelled(db, job_id)
+    return {"cancelled": cancelled}
 
 
 async def save_custom_document(

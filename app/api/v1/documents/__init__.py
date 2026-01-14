@@ -22,6 +22,7 @@ from app.api.v1.documents.crud import (
     update_document,
 )
 from app.api.v1.documents.custom import (
+    cancel_custom_doc_job,
     generate_custom_document,
     get_custom_doc_status,
 )
@@ -95,6 +96,11 @@ router.add_api_route(
     "/products/{product_id}/custom/status/{job_id}",
     get_custom_doc_status,
     methods=["GET"],
+)
+router.add_api_route(
+    "/products/{product_id}/custom/cancel/{job_id}",
+    cancel_custom_doc_job,
+    methods=["DELETE"],
 )
 
 __all__ = ["router", "serialize_document"]
