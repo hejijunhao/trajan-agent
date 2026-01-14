@@ -72,11 +72,32 @@ class RateLimiter:
         count = result.scalar() or 0
 
         if count >= limits["max_requests"]:
+            # Get oldest job in window to calculate reset time
+            oldest_result = await db.execute(
+                select(func.min(CustomDocJob.created_at))
+                .where(CustomDocJob.user_id == current_user.id)  # type: ignore[arg-type]
+                .where(CustomDocJob.created_at >= window_start)  # type: ignore[arg-type]
+            )
+            oldest_job_time = oldest_result.scalar()
+
+            # Calculate approximate reset time (when oldest job falls out of window)
+            if oldest_job_time:
+                reset_at = oldest_job_time + timedelta(hours=limits["window_hours"])
+            else:
+                reset_at = datetime.now(UTC) + timedelta(hours=limits["window_hours"])
+
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded. Your {ctx.plan.display_name} plan allows "
-                f"{limits['max_requests']} custom doc requests per "
-                f"{limits['window_hours']} hours. Please try again later.",
+                detail={
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Generation limit reached",
+                    "current_plan": tier,
+                    "plan_display_name": ctx.plan.display_name,
+                    "limit": limits["max_requests"],
+                    "used": count,
+                    "window_hours": limits["window_hours"],
+                    "reset_at": reset_at.isoformat(),
+                },
             )
 
 
