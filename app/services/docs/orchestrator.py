@@ -85,13 +85,16 @@ class DocumentOrchestrator:
         self.blueprint_agent = BlueprintAgent(db, product, github_service)
         self.plans_agent = PlansAgent(db, product, github_service)
 
-    async def run(self, use_v2: bool = True) -> OrchestratorResult:
+    async def run(self, use_v2: bool = True, mode: str = "full") -> OrchestratorResult:
         """
         Main entry point for documentation generation.
 
         Args:
             use_v2: If True (default), use the v2 flow with deep analysis and planning.
                     If False, use the legacy v1 flow with BlueprintAgent.
+            mode: Generation mode:
+                  - "full": Regenerate all documentation from scratch (default)
+                  - "additive": Only add new docs, preserve existing ones
 
         V2 Flow:
             1. Scan and import existing docs
@@ -110,20 +113,29 @@ class DocumentOrchestrator:
             OrchestratorResult with all processing results
         """
         if use_v2:
-            return await self._run_v2()
+            return await self._run_v2(mode=mode)
         else:
             return await self._run_v1()
 
-    async def _run_v2(self) -> OrchestratorResult:
+    async def _run_v2(self, mode: str = "full") -> OrchestratorResult:
         """
         V2 flow: Deep analysis → Intelligent planning → Sequential generation.
 
         This is the new Documentation Agent v2 flow that uses Claude Opus 4.5
         for planning and generates documents based on actual codebase analysis.
+
+        Args:
+            mode: "full" to regenerate all docs, "additive" to only add new docs
         """
         results = OrchestratorResult()
 
-        logger.info(f"Starting v2 documentation orchestration for product {self.product.id}")
+        # Map API mode to planner mode
+        planner_mode = "expand" if mode == "additive" else "full"
+
+        logger.info(
+            f"Starting v2 documentation orchestration for product {self.product.id} "
+            f"(mode: {mode}, planner_mode: {planner_mode})"
+        )
 
         # Stage 1: Import existing docs
         await self._update_progress("importing", "Scanning repositories for documentation...")
@@ -173,7 +185,7 @@ class DocumentOrchestrator:
                 self.documentation_planner.create_plan(
                     codebase_context=codebase_context,
                     existing_docs=existing_docs,
-                    mode="full",
+                    mode=planner_mode,
                 ),
                 timeout=AGENT_TIMEOUT_HEAVY,
                 stage_name="Documentation planning",

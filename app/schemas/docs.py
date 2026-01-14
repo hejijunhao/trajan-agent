@@ -6,6 +6,14 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class GenerateDocsRequest(BaseModel):
+    """Request body for POST /products/{id}/generate-docs."""
+
+    mode: Literal["full", "additive"] = "full"
+    # full: Regenerate all documentation from scratch
+    # additive: Only add new docs, don't overwrite existing
+
+
 class GenerateDocsResponse(BaseModel):
     """Response for POST /products/{id}/generate-docs."""
 

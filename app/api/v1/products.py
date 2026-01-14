@@ -11,7 +11,7 @@ from app.domain import product_ops
 from app.domain.preferences_operations import preferences_ops
 from app.models.product import ProductCreate, ProductUpdate
 from app.models.user import User
-from app.schemas.docs import DocsStatusResponse, GenerateDocsResponse
+from app.schemas.docs import DocsStatusResponse, GenerateDocsRequest, GenerateDocsResponse
 from app.schemas.product_overview import AnalyzeProductResponse
 from app.services.analysis import run_analysis_task
 
@@ -251,11 +251,17 @@ async def analyze_product(
 async def generate_documentation(
     product_id: uuid_pkg.UUID,
     background_tasks: BackgroundTasks,
+    request: GenerateDocsRequest | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GenerateDocsResponse:
     """
     Trigger DocumentOrchestrator to analyze and generate documentation.
+
+    Args:
+        request: Optional request body with generation mode
+            - mode="full": Regenerate all documentation from scratch (default)
+            - mode="additive": Only add new docs, preserve existing
 
     Runs as a background task with progress updates. Poll GET /products/{id}/docs-status
     for real-time progress.
@@ -282,6 +288,9 @@ async def generate_documentation(
             detail="GitHub token required for documentation generation. Configure it in Settings → General.",
         )
 
+    # Parse mode from request (default to "full")
+    mode = request.mode if request else "full"
+
     # Update status
     product.docs_generation_status = "generating"
     product.docs_generation_error = None
@@ -294,11 +303,12 @@ async def generate_documentation(
         run_document_orchestrator,
         product_id=str(product.id),
         user_id=str(current_user.id),
+        mode=mode,
     )
 
     return GenerateDocsResponse(
         status="started",
-        message="Documentation generation started. Poll for progress.",
+        message=f"Documentation generation started (mode: {mode}). Poll for progress.",
     )
 
 
@@ -396,8 +406,15 @@ async def _mark_generation_failed(
 async def run_document_orchestrator(
     product_id: str,
     user_id: str,
+    mode: str = "full",
 ) -> None:
-    """Background task to run documentation generation."""
+    """Background task to run documentation generation.
+
+    Args:
+        product_id: The product UUID
+        user_id: The user UUID
+        mode: Generation mode - "full" (regenerate all) or "additive" (only add new)
+    """
     from app.core.database import async_session_maker
     from app.services.docs import DocumentOrchestrator
     from app.services.github import GitHubService
@@ -422,9 +439,9 @@ async def run_document_orchestrator(
 
             github_service = GitHubService(prefs.github_token)
 
-            # Run orchestrator
+            # Run orchestrator with specified mode
             orchestrator = DocumentOrchestrator(db, product, github_service)
-            await orchestrator.run()
+            await orchestrator.run(mode=mode)
 
             # Update status on success
             product.docs_generation_status = "completed"
@@ -432,7 +449,7 @@ async def run_document_orchestrator(
             product.docs_generation_error = None
             product.docs_generation_progress = None
             await db.commit()
-            logger.info(f"Documentation generation completed for product {product_id}")
+            logger.info(f"Documentation generation completed for product {product_id} (mode: {mode})")
 
         except Exception as e:
             logger.error(f"Documentation generation failed for product {product_id}: {e}")
