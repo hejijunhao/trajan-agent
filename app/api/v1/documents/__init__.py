@@ -5,6 +5,7 @@ Modules:
 - lifecycle.py — Plan state transitions (move-to-executing, move-to-completed, archive)
 - sync.py — GitHub synchronization endpoints
 - refresh.py — Document refresh endpoints
+- repo_docs.py — Repository documentation scanning endpoints
 """
 
 from fastapi import APIRouter
@@ -28,6 +29,10 @@ from app.api.v1.documents.lifecycle import (
 from app.api.v1.documents.refresh import (
     refresh_all_documents,
     refresh_document,
+)
+from app.api.v1.documents.repo_docs import (
+    get_repo_docs_tree,
+    get_repo_file_content,
 )
 from app.api.v1.documents.sync import (
     get_docs_sync_status,
@@ -72,6 +77,14 @@ router.add_api_route("/products/{product_id}/sync-docs", sync_docs_to_repo, meth
 router.add_api_route("/{document_id}/refresh", refresh_document, methods=["POST"])
 router.add_api_route(
     "/products/{product_id}/refresh-all-docs", refresh_all_documents, methods=["POST"]
+)
+
+# Repository docs routes (read-only scanning)
+router.add_api_route(
+    "/products/{product_id}/repo-docs-tree", get_repo_docs_tree, methods=["GET"]
+)
+router.add_api_route(
+    "/repositories/{repository_id}/file-content", get_repo_file_content, methods=["GET"]
 )
 
 __all__ = ["router", "serialize_document"]

@@ -1,0 +1,243 @@
+"""Repository documentation scanning endpoints.
+
+Provides read-only access to documentation files from linked GitHub repositories.
+"""
+
+import uuid as uuid_pkg
+from datetime import UTC, datetime
+
+from fastapi import Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user
+from app.core.database import get_db
+from app.domain import preferences_ops, product_ops, repository_ops
+from app.models.user import User
+from app.schemas.repo_docs import (
+    RepoDocContent,
+    RepoDocDirectory,
+    RepoDocFile,
+    RepoDocsTree,
+    RepoDocsTreeResponse,
+)
+from app.services.github import GitHubService
+from app.services.github.constants import is_documentation_file
+
+
+def _build_doc_tree(
+    files: list[tuple[str, int, str]],  # (path, size, sha)
+) -> tuple[list[RepoDocFile], list[RepoDocDirectory]]:
+    """
+    Build a hierarchical tree structure from flat file list.
+
+    Returns root-level files and directories.
+    """
+    root_files: list[RepoDocFile] = []
+    directories: dict[str, RepoDocDirectory] = {}
+
+    for path, size, sha in files:
+        parts = path.split("/")
+        filename = parts[-1]
+
+        if len(parts) == 1:
+            # Root-level file
+            root_files.append(
+                RepoDocFile(
+                    path=path,
+                    name=filename,
+                    size=size,
+                    sha=sha,
+                )
+            )
+        else:
+            # File in a directory
+            top_dir = parts[0]
+
+            # Ensure directory exists
+            if top_dir not in directories:
+                directories[top_dir] = RepoDocDirectory(
+                    path=top_dir,
+                    name=top_dir,
+                    files=[],
+                    directories=[],
+                )
+
+            # For nested directories, we'll flatten to top-level dir for simplicity
+            # The path preserves full path so frontend can still display hierarchy
+            directories[top_dir].files.append(
+                RepoDocFile(
+                    path=path,
+                    name=filename,
+                    size=size,
+                    sha=sha,
+                )
+            )
+
+    return root_files, list(directories.values())
+
+
+async def get_repo_docs_tree(
+    product_id: uuid_pkg.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RepoDocsTreeResponse:
+    """
+    Scan all linked repositories for documentation files.
+
+    Returns a tree structure of all documentation files found in each
+    linked repository. Documentation files are identified by:
+    - File extension (.md, .mdx, .rst)
+    - Location (docs/, documentation/, doc/ directories)
+    - Known names (README, CHANGELOG, CONTRIBUTING, etc.)
+    """
+    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Get user's GitHub token
+    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
+    if not preferences or not preferences.github_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub token not configured. Please add your GitHub token in Settings.",
+        )
+
+    # Get linked repositories
+    repos = await repository_ops.get_github_repos_by_product(
+        db, user_id=current_user.id, product_id=product_id
+    )
+
+    if not repos:
+        return RepoDocsTreeResponse(
+            repositories=[],
+            total_files=0,
+            fetched_at=datetime.now(UTC),
+        )
+
+    github_service = GitHubService(preferences.github_token)
+
+    repo_trees: list[RepoDocsTree] = []
+    total_files = 0
+
+    for repo in repos:
+        if not repo.full_name:
+            continue
+
+        try:
+            owner, repo_name = repo.full_name.split("/")
+            branch = repo.default_branch or "main"
+
+            # Fetch repository tree
+            tree = await github_service.get_repo_tree(owner, repo_name, branch)
+
+            # Filter for documentation files
+            doc_files: list[tuple[str, int, str]] = []
+            for item in tree.all_items:
+                if item.type == "blob" and is_documentation_file(item.path):
+                    doc_files.append((item.path, item.size or 0, item.sha))
+
+            # Build tree structure
+            root_files, directories = _build_doc_tree(doc_files)
+
+            repo_trees.append(
+                RepoDocsTree(
+                    repository_id=str(repo.id),
+                    repository_name=repo.full_name,
+                    branch=branch,
+                    files=root_files,
+                    directories=directories,
+                )
+            )
+
+            total_files += len(doc_files)
+
+        except Exception:
+            # Skip repos that fail (private, deleted, etc.)
+            # Could log this for debugging
+            continue
+
+    return RepoDocsTreeResponse(
+        repositories=repo_trees,
+        total_files=total_files,
+        fetched_at=datetime.now(UTC),
+    )
+
+
+async def get_repo_file_content(
+    repository_id: uuid_pkg.UUID,
+    path: str = Query(..., description="File path within the repository"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RepoDocContent:
+    """
+    Fetch the content of a specific file from a repository.
+
+    Returns the file content as text. Large files (>100KB) will be truncated.
+    """
+    repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found",
+        )
+
+    if not repo.full_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Repository has no GitHub link",
+        )
+
+    # Get user's GitHub token
+    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
+    if not preferences or not preferences.github_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub token not configured",
+        )
+
+    github_service = GitHubService(preferences.github_token)
+
+    try:
+        owner, repo_name = repo.full_name.split("/")
+        branch = repo.default_branch or "main"
+
+        # Try to fetch file content (with larger limit for docs)
+        max_size = 500_000  # 500KB for docs
+        file_content = await github_service.get_file_content(
+            owner, repo_name, path, branch, max_size
+        )
+
+        if not file_content:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found or is binary/too large",
+            )
+
+        # Check if we should truncate for very large files
+        truncated = False
+        content = file_content.content
+        if len(content) > 100_000:
+            content = content[:100_000] + "\n\n... [Content truncated - file too large]"
+            truncated = True
+
+        return RepoDocContent(
+            path=path,
+            content=content,
+            size=file_content.size,
+            sha=file_content.sha,
+            repository_id=str(repo.id),
+            repository_name=repo.full_name,
+            branch=branch,
+            truncated=truncated,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch file: {str(e)}",
+        ) from e
