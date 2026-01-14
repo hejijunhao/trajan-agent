@@ -1,7 +1,7 @@
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
-from sqlalchemy import text
+from sqlalchemy import DateTime, text
 from sqlmodel import Field, SQLModel
 
 
@@ -18,16 +18,23 @@ class UUIDMixin(SQLModel):
 
 
 class TimestampMixin(SQLModel):
-    """Mixin providing created_at and updated_at timestamps."""
+    """Mixin providing created_at and updated_at timestamps.
 
-    created_at: datetime = Field(
+    Note: The database columns should be TIMESTAMP WITH TIME ZONE.
+    Migration 'fix_all_timestamp_columns_timezone' ensures this at DB level.
+    SQLModel Field uses sa_type to override the default DateTime mapping.
+    """
+
+    created_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": text("now()")},
     )
-    updated_at: datetime = Field(
+    updated_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": text("now()")},
     )
 
