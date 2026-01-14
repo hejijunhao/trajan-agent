@@ -59,7 +59,6 @@ class Subscription(SQLModel, table=True):
             ForeignKey("organizations.id", ondelete="CASCADE"),
             nullable=False,
             unique=True,
-            index=True,
         ),
     )
 

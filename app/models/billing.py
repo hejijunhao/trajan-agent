@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column, Date, DateTime, ForeignKey, String, text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
@@ -47,6 +47,9 @@ class UsageSnapshot(SQLModel, table=True):
     """
 
     __tablename__ = "usage_snapshots"
+    __table_args__ = (
+        Index("ix_usage_snapshots_period", "organization_id", "period_start"),
+    )
 
     id: uuid_pkg.UUID = Field(
         default_factory=uuid_pkg.uuid4,
@@ -230,7 +233,7 @@ class Referral(SQLModel, table=True):
 
     # Tracking
     referral_code: str = Field(
-        sa_column=Column(String(20), unique=True, nullable=False, index=True),
+        sa_column=Column(String(20), unique=True, nullable=False),
     )
     status: str = Field(
         default=ReferralStatus.PENDING.value,
