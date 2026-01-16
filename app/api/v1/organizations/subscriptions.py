@@ -5,11 +5,10 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_db_with_rls
 from app.api.v1.organizations.helpers import require_org_access
 from app.api.v1.organizations.schemas import SubscriptionResponse
 from app.config.plans import get_plan
-from app.core.database import get_db
 from app.domain import organization_ops, subscription_ops
 from app.models.user import User
 
@@ -17,7 +16,7 @@ from app.models.user import User
 async def get_subscription(
     org_id: uuid_pkg.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> SubscriptionResponse:
     """
     Get subscription details for an organization.

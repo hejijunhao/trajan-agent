@@ -5,7 +5,7 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_db_with_rls
 from app.api.v1.organizations.helpers import require_org_access
 from app.api.v1.organizations.schemas import (
     OrganizationDetailResponse,
@@ -13,7 +13,6 @@ from app.api.v1.organizations.schemas import (
     PlanResponse,
 )
 from app.config.plans import PLANS
-from app.core.database import get_db
 from app.domain import org_member_ops, organization_ops
 from app.models.organization import MemberRole, OrganizationCreate, OrganizationUpdate
 from app.models.user import User
@@ -21,7 +20,7 @@ from app.models.user import User
 
 async def list_organizations(
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> list[OrganizationResponse]:
     """
     List all organizations the user is a member of.
@@ -52,7 +51,7 @@ async def list_organizations(
 async def create_organization(
     data: OrganizationCreate,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> OrganizationResponse:
     """
     Create a new organization.
@@ -105,7 +104,7 @@ async def list_plans(
 async def get_organization(
     org_id: uuid_pkg.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> OrganizationDetailResponse:
     """
     Get detailed information about an organization.
@@ -139,7 +138,7 @@ async def update_organization(
     org_id: uuid_pkg.UUID,
     data: OrganizationUpdate,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> OrganizationDetailResponse:
     """
     Update an organization.
@@ -180,7 +179,7 @@ async def update_organization(
 async def delete_organization(
     org_id: uuid_pkg.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> None:
     """
     Delete an organization.

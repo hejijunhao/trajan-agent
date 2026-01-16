@@ -5,10 +5,9 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_db_with_rls
 from app.api.v1.organizations.helpers import require_org_access
 from app.api.v1.organizations.schemas import MemberResponse
-from app.core.database import get_db
 from app.core.roles import ROLE_HIERARCHY
 from app.domain import org_member_ops, organization_ops
 from app.domain.org_member_operations import InvalidEmailError, SupabaseInviteError
@@ -23,7 +22,7 @@ from app.models.user import User
 async def list_members(
     org_id: uuid_pkg.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> list[MemberResponse]:
     """
     List all members of an organization.
@@ -62,7 +61,7 @@ async def add_member(
     org_id: uuid_pkg.UUID,
     data: OrganizationMemberCreate,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> MemberResponse:
     """
     Add a member to an organization.
@@ -143,7 +142,7 @@ async def update_member_role(
     member_id: uuid_pkg.UUID,
     data: OrganizationMemberUpdate,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> MemberResponse:
     """
     Update a member's role.
@@ -232,7 +231,7 @@ async def remove_member(
     org_id: uuid_pkg.UUID,
     member_id: uuid_pkg.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> None:
     """
     Remove a member from an organization.
