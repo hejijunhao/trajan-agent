@@ -70,12 +70,7 @@ async def list_products(
             continue
 
         # Get all products in this org
-        org_products = await product_ops.get_multi_by_user(
-            db, user_id=current_user.id, skip=0, limit=1000
-        )
-
-        # Filter to products in this org
-        org_products = [p for p in org_products if p.organization_id == org.id]
+        org_products = await product_ops.get_by_organization(db, org.id)
 
         for product in org_products:
             # Check if user can access this product

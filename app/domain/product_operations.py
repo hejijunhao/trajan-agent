@@ -107,5 +107,19 @@ class ProductOperations(BaseOperations[Product]):
         result = await db.execute(statement)
         return result.scalar_one_or_none()
 
+    async def get_by_organization(
+        self,
+        db: AsyncSession,
+        organization_id: uuid_pkg.UUID,
+    ) -> list[Product]:
+        """Get all products in an organization."""
+        statement = (
+            select(Product)
+            .where(Product.organization_id == organization_id)  # type: ignore[arg-type]
+            .order_by(Product.created_at.desc())  # type: ignore[attr-defined]
+        )
+        result = await db.execute(statement)
+        return list(result.scalars().all())
+
 
 product_ops = ProductOperations()
