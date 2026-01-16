@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.router import api_router
 from app.config import settings
@@ -56,6 +57,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Proxy headers middleware - trust X-Forwarded-Proto from reverse proxy (Fly.io)
+# This ensures redirects use HTTPS when behind TLS-terminating proxy
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
 # CORS middleware
 app.add_middleware(
