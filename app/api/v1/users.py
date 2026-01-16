@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
-from app.core.database import get_db
+from app.api.deps import get_current_user, get_db_with_rls
 from app.domain.user_operations import user_ops
 from app.models.user import User
 
@@ -63,7 +62,7 @@ async def get_current_user_profile(
 async def update_current_user_profile(
     data: UserUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update the current user's profile."""
     update_data = data.model_dump(exclude_unset=True)
@@ -78,7 +77,7 @@ async def update_current_user_profile(
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_current_user(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Delete the current user's account and all associated data.
@@ -97,7 +96,7 @@ async def delete_current_user(
 @router.post("/me/complete-onboarding", response_model=UserRead)
 async def complete_onboarding(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Mark the current user's onboarding as complete."""
     if current_user.onboarding_completed_at is not None:

@@ -3,8 +3,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
-from app.core.database import get_db
+from app.api.deps import get_current_user, get_db_with_rls
 from app.domain.preferences_operations import preferences_ops
 from app.models.user import User
 from app.models.user_preferences import UserPreferences
@@ -70,7 +69,7 @@ def prefs_to_response(prefs: UserPreferences) -> dict:
 @router.get("", response_model=PreferencesRead)
 async def get_preferences(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Get the current user's preferences.
@@ -85,7 +84,7 @@ async def get_preferences(
 async def update_preferences(
     data: PreferencesUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update the current user's preferences."""
     prefs = await preferences_ops.get_or_create(db, current_user.id)

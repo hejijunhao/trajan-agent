@@ -7,8 +7,8 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
-from app.core.database import async_session_maker, get_db
+from app.api.deps import get_current_user, get_db_with_rls
+from app.core.database import async_session_maker
 from app.domain.feedback_operations import feedback_ops
 from app.models.feedback import Feedback, FeedbackCreate, FeedbackRead
 from app.models.user import User
@@ -40,7 +40,7 @@ async def submit_feedback(
     data: FeedbackCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
     """Submit user feedback. AI interpretation runs in background."""
     feedback = await feedback_ops.create_feedback(db, user_id=current_user.id, data=data)
@@ -56,7 +56,7 @@ async def list_my_feedback(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> list[dict[str, Any]]:
     """List feedback submitted by the current user."""
     items = await feedback_ops.list_by_user(db, user_id=current_user.id, skip=skip, limit=limit)
@@ -67,7 +67,7 @@ async def list_my_feedback(
 async def get_feedback(
     feedback_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
     """Get a single feedback item."""
     # Use base class get_by_user which takes user_id and id
