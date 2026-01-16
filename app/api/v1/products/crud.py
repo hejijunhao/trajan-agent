@@ -20,7 +20,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-@router.get("", response_model=list[dict])
+@router.get("/", response_model=list[dict])
 async def list_products(
     skip: int = 0,
     limit: int = 100,
@@ -121,7 +121,7 @@ async def get_product(
     }
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_product(
     data: ProductCreate,
     current_user: User = Depends(get_current_user),
