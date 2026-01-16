@@ -210,7 +210,7 @@ async def update_member_role(
     member.role = data.role
     db.add(member)
     await db.commit()
-    await db.refresh(member)
+    await db.refresh(member, ["user"])
 
     return MemberResponse(
         id=str(member.id),

@@ -4,6 +4,7 @@ import uuid as uuid_pkg
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.organization import MemberRole
 from app.models.product_access import ProductAccess, ProductAccessLevel
@@ -74,6 +75,28 @@ class ProductAccessOperations:
         """Get all collaborators with explicit access to a product."""
         statement = (
             select(ProductAccess)
+            .where(
+                ProductAccess.product_id == product_id,  # type: ignore[arg-type]
+                ProductAccess.access_level != ProductAccessLevel.NONE.value,  # type: ignore[arg-type]
+            )
+            .order_by(ProductAccess.created_at.desc())  # type: ignore[attr-defined]
+        )
+        result = await db.execute(statement)
+        return list(result.scalars().all())
+
+    async def get_product_collaborators_with_users(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+    ) -> list[ProductAccess]:
+        """
+        Get all collaborators for a product with user details.
+
+        Returns ProductAccess records with the user relationship loaded.
+        """
+        statement = (
+            select(ProductAccess)
+            .options(selectinload(ProductAccess.user))  # type: ignore[arg-type]
             .where(
                 ProductAccess.product_id == product_id,  # type: ignore[arg-type]
                 ProductAccess.access_level != ProductAccessLevel.NONE.value,  # type: ignore[arg-type]

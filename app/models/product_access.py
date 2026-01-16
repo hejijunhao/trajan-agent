@@ -106,3 +106,24 @@ class ProductAccessRead(SQLModel):
     access_level: str
     created_at: datetime
     updated_at: datetime
+
+
+class UserBasicInfo(SQLModel):
+    """Minimal user info for collaborator display."""
+
+    id: uuid_pkg.UUID
+    email: str
+    display_name: str | None = None
+    avatar_url: str | None = None
+
+
+class ProductAccessWithUser(SQLModel):
+    """Product access with user details for collaborator lists."""
+
+    id: uuid_pkg.UUID
+    product_id: uuid_pkg.UUID
+    user_id: uuid_pkg.UUID
+    access_level: str
+    created_at: datetime
+    updated_at: datetime
+    user: UserBasicInfo

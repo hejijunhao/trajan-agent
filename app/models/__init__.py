@@ -32,6 +32,8 @@ from app.models.product_access import (
     ProductAccessLevel,
     ProductAccessRead,
     ProductAccessUpdate,
+    ProductAccessWithUser,
+    UserBasicInfo,
 )
 from app.models.repository import Repository, RepositoryCreate, RepositoryUpdate
 from app.models.subscription import (
@@ -71,6 +73,8 @@ __all__ = [
     "ProductAccessUpdate",
     "ProductAccessRead",
     "ProductAccessLevel",
+    "ProductAccessWithUser",
+    "UserBasicInfo",
     "Repository",
     "RepositoryCreate",
     "RepositoryUpdate",
