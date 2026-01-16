@@ -10,6 +10,7 @@ from app.api.deps import (
     check_product_admin_access,
     check_product_editor_access,
     get_current_user,
+    get_db_with_rls,
     get_subscription_context,
 )
 from app.core.database import get_db
@@ -28,7 +29,7 @@ async def list_products(
     limit: int = 100,
     org_id: uuid_pkg.UUID | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     List all products the current user has access to.
@@ -102,7 +103,7 @@ async def list_products(
 async def get_product(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Get a single product with all related entities."""
     product = await product_ops.get_with_relations(db, user_id=current_user.id, id=product_id)
@@ -134,7 +135,7 @@ async def create_product(
     data: ProductCreate,
     current_user: User = Depends(get_current_user),
     sub_ctx: SubscriptionContext = Depends(get_subscription_context),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Create a new product."""
     # Check for duplicate name
@@ -170,7 +171,7 @@ async def update_product(
     product_id: uuid_pkg.UUID,
     data: ProductUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update a product. Requires Editor or Admin access."""
     # Check product access first
@@ -201,7 +202,7 @@ async def update_product(
 async def delete_product(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Delete a product and all related entities. Requires Admin access."""
     # Check admin access first

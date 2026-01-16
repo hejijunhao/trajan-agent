@@ -3,7 +3,7 @@ import uuid as uuid_pkg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import check_product_editor_access, get_current_user
+from app.api.deps import check_product_editor_access, get_current_user, get_db_with_rls
 from app.core.database import get_db
 from app.domain import work_item_ops
 from app.models.user import User
@@ -20,7 +20,7 @@ async def list_work_items(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """List work items, optionally filtered by product."""
     items = await work_item_ops.get_by_product(
@@ -53,7 +53,7 @@ async def list_work_items(
 async def get_work_item(
     work_item_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Get a single work item."""
     item = await work_item_ops.get_by_user(db, user_id=current_user.id, id=work_item_id)
@@ -80,7 +80,7 @@ async def get_work_item(
 async def create_work_item(
     data: WorkItemCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Create a new work item. Requires Editor or Admin access to the product."""
     # Check product access
@@ -111,7 +111,7 @@ async def update_work_item(
     work_item_id: uuid_pkg.UUID,
     data: WorkItemUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update a work item. Requires Editor or Admin access to the product."""
     item = await work_item_ops.get_by_user(db, user_id=current_user.id, id=work_item_id)
@@ -146,7 +146,7 @@ async def update_work_item(
 async def delete_work_item(
     work_item_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Delete a work item. Requires Editor or Admin access to the product."""
     # Get work item first to check product access

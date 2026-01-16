@@ -7,6 +7,7 @@ from app.api.deps import (
     SubscriptionContext,
     check_product_editor_access,
     get_current_user,
+    get_db_with_rls,
     get_subscription_context,
 )
 from app.core.database import get_db
@@ -24,7 +25,7 @@ async def list_repositories(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """List repositories, optionally filtered by product."""
     repos = await repository_ops.get_by_product(
@@ -59,7 +60,7 @@ async def list_repositories(
 async def get_repository(
     repository_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Get a single repository."""
     repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
@@ -91,7 +92,7 @@ async def create_repository(
     data: RepositoryCreate,
     current_user: User = Depends(get_current_user),
     sub_ctx: SubscriptionContext = Depends(get_subscription_context),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Create a new repository.
@@ -150,7 +151,7 @@ async def update_repository(
     repository_id: uuid_pkg.UUID,
     data: RepositoryUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update a repository. Requires Editor or Admin access to the product."""
     repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
@@ -183,7 +184,7 @@ async def update_repository(
 async def delete_repository(
     repository_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Delete a repository. Requires Editor or Admin access to the product."""
     # Get repo first to check product access

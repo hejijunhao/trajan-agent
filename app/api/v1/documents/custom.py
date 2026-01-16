@@ -17,7 +17,7 @@ from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SubscriptionContext, get_current_user, get_subscription_context
+from app.api.deps import SubscriptionContext, get_current_user, get_db_with_rls, get_subscription_context
 from app.core.database import get_db
 from app.domain import preferences_ops, product_ops, repository_ops
 from app.models.custom_doc_job import CustomDocJob
@@ -54,7 +54,7 @@ class RateLimiter:
         self,
         ctx: SubscriptionContext = Depends(get_subscription_context),
         current_user: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db),
+        db: AsyncSession = Depends(get_db_with_rls),
     ) -> None:
         """Check if user is within rate limits."""
         tier = ctx.subscription.plan_tier
@@ -109,7 +109,7 @@ async def generate_custom_document(
     request: CustomDocRequestSchema,
     background: bool = Query(False, description="Run generation in background with progress"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
     _rate_limit: None = Depends(rate_limiter),
 ) -> CustomDocResponseSchema:
     """
@@ -281,7 +281,7 @@ async def get_custom_doc_status(
     product_id: uuid_pkg.UUID,
     job_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> CustomDocStatusSchema:
     """
     Get the status of a background custom document generation job.
@@ -325,7 +325,7 @@ async def cancel_custom_doc_job(
     product_id: uuid_pkg.UUID,
     job_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, bool]:
     """
     Cancel a running custom document generation job.
@@ -367,7 +367,7 @@ async def save_custom_document(
     doc_type: str,
     folder: str = "blueprints",
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
     """
     Save a generated custom document to the database.

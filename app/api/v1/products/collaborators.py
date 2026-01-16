@@ -5,7 +5,7 @@ import uuid as uuid_pkg
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import check_product_admin_access, get_current_user
+from app.api.deps import check_product_admin_access, get_current_user, get_db_with_rls
 from app.core.database import get_db
 from app.domain import product_ops
 from app.domain.organization_operations import organization_ops
@@ -26,7 +26,7 @@ router = APIRouter()
 async def get_my_product_access(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Get current user's access level for a product.
@@ -60,7 +60,7 @@ async def get_my_product_access(
 async def list_collaborators(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     List all collaborators for a product with user details.
@@ -101,7 +101,7 @@ async def add_or_update_collaborator(
     product_id: uuid_pkg.UUID,
     data: ProductAccessCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Add a new collaborator or update existing access level.
@@ -164,7 +164,7 @@ async def remove_collaborator(
     product_id: uuid_pkg.UUID,
     user_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Remove a collaborator's explicit access to a product.

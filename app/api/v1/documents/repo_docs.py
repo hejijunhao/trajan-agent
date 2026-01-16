@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_db_with_rls
 from app.core.database import get_db
 from app.domain import preferences_ops, product_ops, repository_ops
 from app.models.user import User
@@ -99,7 +99,7 @@ def _build_doc_tree(
 async def get_repo_docs_tree(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> RepoDocsTreeResponse:
     """
     Scan all linked repositories for documentation files.
@@ -190,7 +190,7 @@ async def get_repo_file_content(
     repository_id: uuid_pkg.UUID,
     path: str = Query(..., description="File path within the repository"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> RepoDocContent:
     """
     Fetch the content of a specific file from a repository.

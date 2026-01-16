@@ -5,7 +5,7 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_db_with_rls
 from app.api.v1.documents.crud import serialize_document
 from app.core.database import get_db
 from app.domain import document_ops, preferences_ops, product_ops, repository_ops
@@ -24,7 +24,7 @@ from app.services.github import GitHubService
 async def import_docs_from_repo(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> ImportDocsResponse:
     """
     Import documentation from linked GitHub repositories.
@@ -81,7 +81,7 @@ async def import_docs_from_repo(
 async def get_docs_sync_status(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> DocsSyncStatusResponse:
     """
     Check sync status for all documents in a product.
@@ -133,7 +133,7 @@ async def get_docs_sync_status(
 async def pull_remote_changes(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Pull latest content from GitHub for a document.
@@ -182,7 +182,7 @@ async def sync_docs_to_repo(
     product_id: uuid_pkg.UUID,
     data: SyncDocsRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> SyncDocsResponse:
     """
     Push documentation to linked GitHub repository.

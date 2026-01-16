@@ -10,6 +10,7 @@ from app.api.deps import (
     SubscriptionContext,
     check_product_editor_access,
     get_current_user,
+    get_db_with_rls,
     require_agent_enabled,
 )
 from app.core.database import get_db
@@ -35,7 +36,7 @@ async def analyze_product(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     sub_ctx: SubscriptionContext = Depends(require_agent_enabled),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> AnalyzeProductResponse:
     """
     Trigger AI analysis of the product's repositories.

@@ -3,7 +3,7 @@ import uuid as uuid_pkg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_db_with_rls
 from app.core.database import get_db
 from app.domain import app_info_ops
 from app.domain.organization_operations import organization_ops
@@ -73,7 +73,7 @@ async def list_app_info(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """List app info entries for a product."""
     # Check variables access
@@ -108,7 +108,7 @@ async def list_app_info(
 async def export_app_info(
     product_id: uuid_pkg.UUID = Query(..., description="Product to export from"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Export all app info entries with revealed secret values.
@@ -145,7 +145,7 @@ async def export_app_info(
 async def get_app_info(
     app_info_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Get a single app info entry."""
     entry = await app_info_ops.get_by_user(db, user_id=current_user.id, id=app_info_id)
@@ -177,7 +177,7 @@ async def get_app_info(
 async def create_app_info(
     data: AppInfoCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Create a new app info entry."""
     # Check variables access
@@ -217,7 +217,7 @@ async def update_app_info(
     app_info_id: uuid_pkg.UUID,
     data: AppInfoUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update an app info entry."""
     entry = await app_info_ops.get_by_user(db, user_id=current_user.id, id=app_info_id)
@@ -252,7 +252,7 @@ async def update_app_info(
 async def delete_app_info(
     app_info_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Delete an app info entry."""
     # First get the entry to check access
@@ -274,7 +274,7 @@ async def delete_app_info(
 async def reveal_app_info_value(
     app_info_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Reveal the actual value of a secret app info entry for copying."""
     entry = await app_info_ops.get_by_user(db, user_id=current_user.id, id=app_info_id)
@@ -295,7 +295,7 @@ async def reveal_app_info_value(
 async def bulk_create_app_info(
     data: AppInfoBulkCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Bulk create app info entries from parsed .env content.

@@ -5,7 +5,7 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_db_with_rls
 from app.core.database import get_db
 from app.domain import document_ops, preferences_ops, product_ops, repository_ops
 from app.models.user import User
@@ -21,7 +21,7 @@ from app.services.github import GitHubService
 async def refresh_document(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> RefreshDocumentResponse:
     """
     Refresh a single document by comparing with current codebase.
@@ -76,7 +76,7 @@ async def refresh_document(
 async def refresh_all_documents(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> BulkRefreshResponse:
     """
     Refresh all documents for a product.

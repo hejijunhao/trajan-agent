@@ -5,7 +5,7 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import check_product_editor_access, get_current_user
+from app.api.deps import check_product_editor_access, get_current_user, get_db_with_rls
 from app.core.database import get_db
 from app.domain import document_ops, product_ops
 from app.models.document import DocumentCreate, DocumentUpdate
@@ -47,7 +47,7 @@ async def list_documents(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """List documents, optionally filtered by product, type, and folder."""
     if product_id and folder:
@@ -70,7 +70,7 @@ async def list_documents(
 async def get_document(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Get a single document."""
     doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
@@ -85,7 +85,7 @@ async def get_document(
 async def create_document(
     data: DocumentCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Create a new document. Requires Editor or Admin access to the product."""
     # Check product access
@@ -104,7 +104,7 @@ async def update_document(
     document_id: uuid_pkg.UUID,
     data: DocumentUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update a document. Requires Editor or Admin access to the product."""
     doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
@@ -127,7 +127,7 @@ async def update_document(
 async def delete_document(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Delete a document. Requires Editor or Admin access to the product."""
     # Get document first to check product access
@@ -153,7 +153,7 @@ async def delete_document(
 async def get_documents_grouped(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ) -> DocumentsGroupedResponse:
     """Get documents grouped by folder."""
     # Verify product exists and user has access
@@ -198,7 +198,7 @@ async def add_changelog_entry(
     product_id: uuid_pkg.UUID,
     data: AddChangelogEntryRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Add an entry to the changelog. Requires Editor or Admin access to the product."""
     # Check product access first
