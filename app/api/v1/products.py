@@ -48,19 +48,35 @@ ANALYSIS_FREQUENCY_LIMITS = {
 async def list_products(
     skip: int = 0,
     limit: int = 100,
+    org_id: uuid_pkg.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     List all products the current user has access to.
 
-    Returns products from all organizations the user is a member of,
-    filtered by their access level:
+    Args:
+        org_id: Optional organization ID to filter by. If provided, only returns
+                products from that organization. If not provided, returns products
+                from all organizations the user is a member of.
+
+    Returns products filtered by their access level:
     - Org owners/admins: see all products in their orgs
     - Org members/viewers: only see products they have explicit access to
     """
-    # Get all organizations user is a member of
-    user_orgs = await organization_ops.get_for_user(db, current_user.id)
+    # Get organizations to query - either specific org or all user's orgs
+    if org_id:
+        # Verify user is a member of this org
+        org_role = await organization_ops.get_member_role(db, org_id, current_user.id)
+        if not org_role:
+            # User is not a member of this org, return empty list
+            return []
+        org = await organization_ops.get(db, org_id)
+        if not org:
+            return []
+        user_orgs = [org]
+    else:
+        user_orgs = await organization_ops.get_for_user(db, current_user.id)
 
     accessible_products = []
     for org in user_orgs:
