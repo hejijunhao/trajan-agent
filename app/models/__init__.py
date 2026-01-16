@@ -26,6 +26,13 @@ from app.models.organization import (
     OrganizationUpdate,
 )
 from app.models.product import Product, ProductCreate, ProductUpdate
+from app.models.product_access import (
+    ProductAccess,
+    ProductAccessCreate,
+    ProductAccessLevel,
+    ProductAccessRead,
+    ProductAccessUpdate,
+)
 from app.models.repository import Repository, RepositoryCreate, RepositoryUpdate
 from app.models.subscription import (
     PlanTier,
@@ -59,6 +66,11 @@ __all__ = [
     "Product",
     "ProductCreate",
     "ProductUpdate",
+    "ProductAccess",
+    "ProductAccessCreate",
+    "ProductAccessUpdate",
+    "ProductAccessRead",
+    "ProductAccessLevel",
     "Repository",
     "RepositoryCreate",
     "RepositoryUpdate",

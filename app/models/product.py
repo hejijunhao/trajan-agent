@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.app_info import AppInfo
     from app.models.document import Document
     from app.models.organization import Organization
+    from app.models.product_access import ProductAccess
     from app.models.repository import Repository
     from app.models.user import User
     from app.models.work_item import WorkItem
@@ -153,6 +154,10 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
     app_info_entries: list["AppInfo"] = Relationship(
+        back_populates="product",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    access_entries: list["ProductAccess"] = Relationship(
         back_populates="product",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )

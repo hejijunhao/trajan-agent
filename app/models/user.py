@@ -8,6 +8,7 @@ from sqlmodel import Field, Relationship, SQLModel
 if TYPE_CHECKING:
     from app.models.organization import Organization, OrganizationMember
     from app.models.product import Product
+    from app.models.product_access import ProductAccess
     from app.models.user_preferences import UserPreferences
 
 
@@ -72,4 +73,10 @@ class User(SQLModel, table=True):
     organization_memberships: list["OrganizationMember"] = Relationship(
         back_populates="user",
         sa_relationship_kwargs={"foreign_keys": "[OrganizationMember.user_id]"},
+    )
+
+    # Product access relationships
+    product_access_entries: list["ProductAccess"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"foreign_keys": "[ProductAccess.user_id]"},
     )
