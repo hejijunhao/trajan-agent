@@ -1,8 +1,11 @@
 """API dependencies - re-exports from submodules for backwards compatibility."""
 
 from .auth import (
+    CurrentUser,
+    DbSession,
     get_current_user,
     get_current_user_optional,
+    get_db_with_rls,
     get_jwks,
     get_signing_key,
     security,
@@ -36,6 +39,9 @@ __all__ = [
     "get_signing_key",
     "get_current_user",
     "get_current_user_optional",
+    "get_db_with_rls",
+    "DbSession",
+    "CurrentUser",
     # Organization
     "get_current_organization",
     "require_org_admin",

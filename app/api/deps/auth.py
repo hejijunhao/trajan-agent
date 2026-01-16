@@ -1,7 +1,14 @@
-"""JWT validation and user authentication dependencies."""
+"""JWT validation and user authentication dependencies.
+
+This module provides:
+- JWT validation against Supabase JWKS
+- User authentication and auto-creation
+- RLS-aware database session dependency
+"""
 
 import uuid as uuid_pkg
-from typing import Any
+from collections.abc import AsyncGenerator
+from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -13,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.database import get_db
+from app.core.rls import set_rls_user_context
 from app.domain.organization_operations import organization_ops
 from app.models.user import User
 
@@ -137,3 +145,35 @@ async def get_current_user_optional(
         return await get_current_user(credentials, db)
     except HTTPException:
         return None
+
+
+# Type aliases for cleaner dependency injection
+DbSession = Annotated[AsyncSession, Depends(get_db)]
+CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_db_with_rls(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> AsyncGenerator[AsyncSession, None]:
+    """
+    Database session with RLS user context automatically set.
+
+    This dependency combines get_db and get_current_user, then sets the
+    PostgreSQL session variable that RLS policies use to identify the user.
+
+    The RLS context uses SET LOCAL, which is transaction-scoped and
+    automatically cleared when the transaction ends. This works correctly
+    with connection poolers like PgBouncer.
+
+    Usage:
+        @router.get("/protected")
+        async def endpoint(db: AsyncSession = Depends(get_db_with_rls)):
+            # All queries are now filtered by RLS policies
+            products = await db.execute(select(Product))
+
+    Note: Use regular get_db for public endpoints or admin operations
+    that should bypass RLS (when using service role connection).
+    """
+    await set_rls_user_context(db, current_user.id)
+    yield db
