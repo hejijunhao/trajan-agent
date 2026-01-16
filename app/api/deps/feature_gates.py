@@ -1,0 +1,114 @@
+"""Subscription-based feature gating dependencies."""
+
+from dataclasses import dataclass
+
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config.plans import PlanConfig, get_plan
+from app.core.database import get_db
+from app.domain.subscription_operations import subscription_ops
+from app.models.organization import Organization
+from app.models.subscription import Subscription
+
+from .organization import get_current_organization
+
+
+@dataclass
+class SubscriptionContext:
+    """Context containing organization, subscription, and plan configuration."""
+
+    organization: Organization
+    subscription: Subscription
+    plan: PlanConfig
+
+
+async def get_subscription_context(
+    current_org: Organization = Depends(get_current_organization),
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionContext:
+    """
+    Get the subscription context for the current organization.
+
+    Returns org, subscription, and plan config for feature checks.
+    """
+    subscription = await subscription_ops.get_by_org(db, current_org.id)
+
+    if not subscription:
+        # Shouldn't happen if org was created properly, but handle gracefully
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Organization subscription not found",
+        )
+
+    plan = get_plan(subscription.plan_tier)
+
+    return SubscriptionContext(
+        organization=current_org,
+        subscription=subscription,
+        plan=plan,
+    )
+
+
+class FeatureGate:
+    """
+    Dependency class for feature gating based on subscription plan.
+
+    Usage:
+        @router.post("/some-feature")
+        async def some_feature(
+            _: bool = Depends(FeatureGate("drift_detection")),
+            ...
+        ):
+            # Only accessible if plan has drift_detection feature
+            ...
+    """
+
+    def __init__(self, feature: str):
+        self.feature = feature
+
+    async def __call__(
+        self,
+        ctx: SubscriptionContext = Depends(get_subscription_context),
+    ) -> bool:
+        """Check if the feature is enabled for the current organization's plan."""
+        has_feature = getattr(ctx.plan, self.feature, False)
+
+        if not has_feature:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Feature '{self.feature}' requires a higher plan. "
+                f"Current plan: {ctx.plan.display_name}",
+            )
+
+        return True
+
+
+async def require_agent_enabled(
+    ctx: SubscriptionContext = Depends(get_subscription_context),
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionContext:
+    """
+    Require that agent features are enabled for the organization.
+
+    For free tier: Checks if org is within repo limit.
+    For paid tiers: Always enabled.
+
+    Returns the subscription context if agent is enabled.
+    """
+    from app.domain.repository_operations import repository_ops
+
+    # Count current repos for the org
+    repo_count = await repository_ops.count_by_org(db, ctx.organization.id)
+
+    is_enabled = await subscription_ops.is_agent_enabled(db, ctx.organization.id, repo_count)
+
+    if not is_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Agent disabled. You have {repo_count} repositories but your "
+            f"{ctx.plan.display_name} plan only allows {ctx.plan.base_repo_limit}. "
+            "Remove repositories or upgrade to re-enable.",
+        )
+
+    return ctx
