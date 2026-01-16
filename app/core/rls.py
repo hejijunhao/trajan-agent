@@ -38,11 +38,9 @@ async def set_rls_user_context(session: AsyncSession, user_id: UUID) -> None:
             # All queries now filtered by RLS policies
             products = await session.execute(select(Product))
     """
-    # Use parameterized query format for safety, though UUID is already validated
-    await session.execute(
-        text("SET LOCAL app.current_user_id = :user_id"),
-        {"user_id": str(user_id)},
-    )
+    # SET LOCAL doesn't support parameterized queries ($1 placeholders) in PostgreSQL.
+    # This is safe because user_id is a validated UUID type (only hex chars and hyphens).
+    await session.execute(text(f"SET LOCAL app.current_user_id = '{user_id}'"))
 
 
 async def clear_rls_context(session: AsyncSession) -> None:
