@@ -2,7 +2,7 @@
 
 import uuid as uuid_pkg
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -105,6 +105,19 @@ class ProductAccessOperations:
         )
         result = await db.execute(statement)
         return list(result.scalars().all())
+
+    async def get_product_collaborators_count(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+    ) -> int:
+        """Count collaborators with explicit access to a product."""
+        statement = select(func.count(ProductAccess.id)).where(  # type: ignore[arg-type]
+            ProductAccess.product_id == product_id,  # type: ignore[arg-type]
+            ProductAccess.access_level != ProductAccessLevel.NONE.value,  # type: ignore[arg-type]
+        )
+        result = await db.execute(statement)
+        return result.scalar() or 0
 
     async def set_access(
         self,

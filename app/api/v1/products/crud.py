@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    SubscriptionContext,
     check_product_admin_access,
     check_product_editor_access,
     get_current_user,
+    get_subscription_context,
 )
 from app.core.database import get_db
 from app.domain import product_ops
@@ -75,19 +77,25 @@ async def list_products(
     # Apply pagination
     paginated = accessible_products[skip : skip + limit]
 
-    return [
-        {
-            "id": str(p.id),
-            "name": p.name,
-            "description": p.description,
-            "icon": p.icon,
-            "color": p.color,
-            "analysis_status": p.analysis_status,
-            "created_at": p.created_at.isoformat(),
-            "updated_at": p.updated_at.isoformat(),
-        }
-        for p in paginated
-    ]
+    # Build response with collaborator counts
+    result = []
+    for p in paginated:
+        collab_count = await product_access_ops.get_product_collaborators_count(db, p.id)
+        result.append(
+            {
+                "id": str(p.id),
+                "name": p.name,
+                "description": p.description,
+                "icon": p.icon,
+                "color": p.color,
+                "analysis_status": p.analysis_status,
+                "created_at": p.created_at.isoformat(),
+                "updated_at": p.updated_at.isoformat(),
+                "collaborator_count": collab_count,
+            }
+        )
+
+    return result
 
 
 @router.get("/{product_id}")
@@ -125,6 +133,7 @@ async def get_product(
 async def create_product(
     data: ProductCreate,
     current_user: User = Depends(get_current_user),
+    sub_ctx: SubscriptionContext = Depends(get_subscription_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new product."""
@@ -136,9 +145,13 @@ async def create_product(
             detail="Product with this name already exists",
         )
 
+    # Include organization_id from subscription context
+    product_data = data.model_dump()
+    product_data["organization_id"] = sub_ctx.organization.id
+
     product = await product_ops.create(
         db,
-        obj_in=data.model_dump(),
+        obj_in=product_data,
         user_id=current_user.id,
     )
     return {
