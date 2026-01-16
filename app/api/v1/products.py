@@ -5,10 +5,16 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SubscriptionContext, get_current_user, require_agent_enabled
+from app.api.deps import (
+    SubscriptionContext,
+    get_current_user,
+    require_agent_enabled,
+)
 from app.core.database import get_db
 from app.domain import product_ops
+from app.domain.organization_operations import organization_ops
 from app.domain.preferences_operations import preferences_ops
+from app.domain.product_access_operations import product_access_ops
 from app.models.product import ProductCreate, ProductUpdate
 from app.models.user import User
 from app.schemas.docs import DocsStatusResponse, GenerateDocsRequest, GenerateDocsResponse
@@ -36,10 +42,43 @@ async def list_products(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all products for the current user."""
-    products = await product_ops.get_multi_by_user(
-        db, user_id=current_user.id, skip=skip, limit=limit
-    )
+    """
+    List all products the current user has access to.
+
+    Returns products from all organizations the user is a member of,
+    filtered by their access level:
+    - Org owners/admins: see all products in their orgs
+    - Org members/viewers: only see products they have explicit access to
+    """
+    # Get all organizations user is a member of
+    user_orgs = await organization_ops.get_for_user(db, current_user.id)
+
+    accessible_products = []
+    for org in user_orgs:
+        # Get user's role in this org
+        org_role = await organization_ops.get_member_role(db, org.id, current_user.id)
+        if not org_role:
+            continue
+
+        # Get all products in this org
+        org_products = await product_ops.get_multi_by_user(
+            db, user_id=current_user.id, skip=0, limit=1000
+        )
+
+        # Filter to products in this org
+        org_products = [p for p in org_products if p.organization_id == org.id]
+
+        for product in org_products:
+            # Check if user can access this product
+            access = await product_access_ops.get_effective_access(
+                db, product.id, current_user.id, org_role
+            )
+            if access != "none":
+                accessible_products.append(product)
+
+    # Apply pagination
+    paginated = accessible_products[skip : skip + limit]
+
     return [
         {
             "id": str(p.id),
@@ -51,8 +90,42 @@ async def list_products(
             "created_at": p.created_at.isoformat(),
             "updated_at": p.updated_at.isoformat(),
         }
-        for p in products
+        for p in paginated
     ]
+
+
+@router.get("/{product_id}/access")
+async def get_my_product_access(
+    product_id: uuid_pkg.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get current user's access level for a product.
+
+    Returns the effective access level considering both org role and explicit access.
+    """
+    # Get product to find its organization
+    product = await product_ops.get(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Get user's org role
+    if not product.organization_id:
+        return {"access_level": "none"}
+    org_role = await organization_ops.get_member_role(db, product.organization_id, current_user.id)
+    if not org_role:
+        return {"access_level": "none"}
+
+    # Get effective access level
+    access_level = await product_access_ops.get_effective_access(
+        db, product_id, current_user.id, org_role
+    )
+
+    return {"access_level": access_level}
 
 
 @router.get("/{product_id}")
@@ -449,7 +522,9 @@ async def run_document_orchestrator(
             product.docs_generation_error = None
             product.docs_generation_progress = None
             await db.commit()
-            logger.info(f"Documentation generation completed for product {product_id} (mode: {mode})")
+            logger.info(
+                f"Documentation generation completed for product {product_id} (mode: {mode})"
+            )
 
         except Exception as e:
             logger.error(f"Documentation generation failed for product {product_id}: {e}")
