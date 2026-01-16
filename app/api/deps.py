@@ -453,3 +453,83 @@ async def require_variables_access(
             "Please contact your project Admin to request Editor access.",
         )
     return access_ctx
+
+
+async def check_product_editor_access(
+    db: AsyncSession,
+    product_id: uuid_pkg.UUID,
+    user_id: uuid_pkg.UUID,
+) -> None:
+    """
+    Check if user has editor (or higher) access to a product.
+
+    Raises 403 if user doesn't have edit access.
+    Use this for mutation endpoints (create, update, delete).
+    """
+    product = await product_ops.get(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    if not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Product is not associated with an organization",
+        )
+
+    org_role = await organization_ops.get_member_role(db, product.organization_id, user_id)
+    if not org_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not a member of this organization",
+        )
+
+    access_level = await product_access_ops.get_effective_access(db, product_id, user_id, org_role)
+
+    if access_level not in ("admin", "editor"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Editor access required. You have view-only access to this project.",
+        )
+
+
+async def check_product_admin_access(
+    db: AsyncSession,
+    product_id: uuid_pkg.UUID,
+    user_id: uuid_pkg.UUID,
+) -> None:
+    """
+    Check if user has admin access to a product.
+
+    Raises 403 if user doesn't have admin access.
+    Use this for admin-only operations (delete project, manage collaborators).
+    """
+    product = await product_ops.get(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    if not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Product is not associated with an organization",
+        )
+
+    org_role = await organization_ops.get_member_role(db, product.organization_id, user_id)
+    if not org_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not a member of this organization",
+        )
+
+    access_level = await product_access_ops.get_effective_access(db, product_id, user_id, org_role)
+
+    if access_level != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required for this action.",
+        )

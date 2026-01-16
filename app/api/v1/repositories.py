@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     SubscriptionContext,
+    check_product_editor_access,
     get_current_user,
     get_subscription_context,
 )
@@ -98,7 +99,13 @@ async def create_repository(
     Repository limits are enforced based on subscription plan:
     - Free tier (Observer): Cannot exceed base limit
     - Paid tiers: Allowed to exceed with overage charges
+
+    Requires Editor or Admin access to the product.
     """
+    # Check product access
+    if data.product_id:
+        await check_product_editor_access(db, data.product_id, current_user.id)
+
     # Check repo limit before creation
     current_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)
     limit_status = await subscription_ops.check_repo_limit(
@@ -145,13 +152,17 @@ async def update_repository(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a repository."""
+    """Update a repository. Requires Editor or Admin access to the product."""
     repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found",
         )
+
+    # Check product access
+    if repo.product_id:
+        await check_product_editor_access(db, repo.product_id, current_user.id)
 
     updated = await repository_ops.update(
         db, db_obj=repo, obj_in=data.model_dump(exclude_unset=True)
@@ -174,10 +185,17 @@ async def delete_repository(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a repository."""
-    deleted = await repository_ops.delete(db, id=repository_id, user_id=current_user.id)
-    if not deleted:
+    """Delete a repository. Requires Editor or Admin access to the product."""
+    # Get repo first to check product access
+    repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
+    if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found",
         )
+
+    # Check product access
+    if repo.product_id:
+        await check_product_editor_access(db, repo.product_id, current_user.id)
+
+    await repository_ops.delete(db, id=repository_id, user_id=current_user.id)

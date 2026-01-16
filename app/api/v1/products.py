@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     SubscriptionContext,
+    check_product_admin_access,
+    check_product_editor_access,
     get_current_user,
     require_agent_enabled,
 )
@@ -197,7 +199,10 @@ async def update_product(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a product."""
+    """Update a product. Requires Editor or Admin access."""
+    # Check product access first
+    await check_product_editor_access(db, product_id, current_user.id)
+
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
     if not product:
         raise HTTPException(
@@ -225,7 +230,10 @@ async def delete_product(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a product and all related entities."""
+    """Delete a product and all related entities. Requires Admin access."""
+    # Check admin access first
+    await check_product_admin_access(db, product_id, current_user.id)
+
     deleted = await product_ops.delete(db, id=product_id, user_id=current_user.id)
     if not deleted:
         raise HTTPException(
@@ -245,7 +253,9 @@ async def analyze_product(
     """
     Trigger AI analysis of the product's repositories.
 
-    Requires:
+    Requires Editor or Admin access to the product.
+
+    Additional requirements:
     - Agent to be enabled for the organization (free tier must be within repo limit)
     - Analysis frequency must be respected (weekly for Observer, daily for Foundations)
 
@@ -255,6 +265,9 @@ async def analyze_product(
     - "completed" when done (product_overview will contain results)
     - "failed" if an error occurred
     """
+    # Check product access first
+    await check_product_editor_access(db, product_id, current_user.id)
+
     # Get product
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
     if not product:
@@ -331,6 +344,8 @@ async def generate_documentation(
     """
     Trigger DocumentOrchestrator to analyze and generate documentation.
 
+    Requires Editor or Admin access to the product.
+
     Args:
         request: Optional request body with generation mode
             - mode="full": Regenerate all documentation from scratch (default)
@@ -339,6 +354,9 @@ async def generate_documentation(
     Runs as a background task with progress updates. Poll GET /products/{id}/docs-status
     for real-time progress.
     """
+    # Check product access first
+    await check_product_editor_access(db, product_id, current_user.id)
+
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
     if not product:
         raise HTTPException(

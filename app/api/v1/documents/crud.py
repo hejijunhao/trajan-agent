@@ -5,7 +5,7 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import check_product_editor_access, get_current_user
 from app.core.database import get_db
 from app.domain import document_ops, product_ops
 from app.models.document import DocumentCreate, DocumentUpdate
@@ -87,7 +87,11 @@ async def create_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new document."""
+    """Create a new document. Requires Editor or Admin access to the product."""
+    # Check product access
+    if data.product_id:
+        await check_product_editor_access(db, data.product_id, current_user.id)
+
     doc = await document_ops.create(
         db,
         obj_in=data.model_dump(),
@@ -102,13 +106,17 @@ async def update_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a document."""
+    """Update a document. Requires Editor or Admin access to the product."""
     doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
         )
+
+    # Check product access
+    if doc.product_id:
+        await check_product_editor_access(db, doc.product_id, current_user.id)
 
     updated = await document_ops.update(
         db, db_obj=doc, obj_in=data.model_dump(exclude_unset=True)
@@ -121,13 +129,20 @@ async def delete_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a document."""
-    deleted = await document_ops.delete(db, id=document_id, user_id=current_user.id)
-    if not deleted:
+    """Delete a document. Requires Editor or Admin access to the product."""
+    # Get document first to check product access
+    doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
+    if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
         )
+
+    # Check product access
+    if doc.product_id:
+        await check_product_editor_access(db, doc.product_id, current_user.id)
+
+    await document_ops.delete(db, id=document_id, user_id=current_user.id)
 
 
 # =============================================================================
@@ -185,7 +200,10 @@ async def add_changelog_entry(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Add an entry to the changelog (Tier 2 maintenance)."""
+    """Add an entry to the changelog. Requires Editor or Admin access to the product."""
+    # Check product access first
+    await check_product_editor_access(db, product_id, current_user.id)
+
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
     if not product:
         raise HTTPException(

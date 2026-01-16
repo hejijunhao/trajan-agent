@@ -3,7 +3,7 @@ import uuid as uuid_pkg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import check_product_editor_access, get_current_user
 from app.core.database import get_db
 from app.domain import work_item_ops
 from app.models.user import User
@@ -82,7 +82,11 @@ async def create_work_item(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new work item."""
+    """Create a new work item. Requires Editor or Admin access to the product."""
+    # Check product access
+    if data.product_id:
+        await check_product_editor_access(db, data.product_id, current_user.id)
+
     item = await work_item_ops.create(
         db,
         obj_in=data.model_dump(),
@@ -109,13 +113,17 @@ async def update_work_item(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a work item."""
+    """Update a work item. Requires Editor or Admin access to the product."""
     item = await work_item_ops.get_by_user(db, user_id=current_user.id, id=work_item_id)
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Work item not found",
         )
+
+    # Check product access
+    if item.product_id:
+        await check_product_editor_access(db, item.product_id, current_user.id)
 
     updated = await work_item_ops.update(
         db, db_obj=item, obj_in=data.model_dump(exclude_unset=True)
@@ -140,10 +148,17 @@ async def delete_work_item(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a work item."""
-    deleted = await work_item_ops.delete(db, id=work_item_id, user_id=current_user.id)
-    if not deleted:
+    """Delete a work item. Requires Editor or Admin access to the product."""
+    # Get work item first to check product access
+    item = await work_item_ops.get_by_user(db, user_id=current_user.id, id=work_item_id)
+    if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Work item not found",
         )
+
+    # Check product access
+    if item.product_id:
+        await check_product_editor_access(db, item.product_id, current_user.id)
+
+    await work_item_ops.delete(db, id=work_item_id, user_id=current_user.id)
