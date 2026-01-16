@@ -44,6 +44,7 @@ class MemberResponse(BaseModel):
     joined_at: str
     invited_by: str | None
     invited_at: str | None
+    has_signed_in: bool  # True if user has completed onboarding (reliable pending detection)
 
 
 class SubscriptionResponse(BaseModel):

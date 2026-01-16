@@ -1,5 +1,8 @@
 """Domain operations for OrganizationMember model."""
 
+import asyncio
+import logging
+import re
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
@@ -9,6 +12,24 @@ from sqlalchemy.orm import selectinload
 
 from app.models.organization import MemberRole, OrganizationMember
 from app.models.user import User
+from app.services.supabase import get_supabase_admin_client
+
+logger = logging.getLogger(__name__)
+
+# Simple email validation pattern (RFC 5322 simplified)
+EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+class InvalidEmailError(Exception):
+    """Raised when email format is invalid."""
+
+    pass
+
+
+class SupabaseInviteError(Exception):
+    """Raised when Supabase invite fails."""
+
+    pass
 
 
 class OrgMemberOperations:
@@ -139,6 +160,100 @@ class OrgMemberOperations:
         statement = select(User).where(User.email == email)
         result = await db.execute(statement)
         return result.scalar_one_or_none()
+
+    async def create_user_via_supabase(
+        self,
+        db: AsyncSession,
+        email: str,
+    ) -> User:
+        """
+        Create a user via Supabase Admin API.
+
+        This invites the user by email - Supabase creates the auth.users record
+        and sends an invite email automatically. The user clicks the link,
+        sets their password, and their account is activated.
+
+        Returns the newly created public.users record.
+
+        Raises:
+            InvalidEmailError: If email format is invalid.
+            SupabaseInviteError: If Supabase API call fails.
+        """
+        # Validate email format before calling external API
+        if not EMAIL_PATTERN.match(email):
+            raise InvalidEmailError(f"Invalid email format: {email}")
+
+        try:
+            supabase = get_supabase_admin_client()
+            # Use thread pool to avoid blocking the async event loop
+            response = await asyncio.to_thread(
+                supabase.auth.admin.invite_user_by_email, email
+            )
+            supabase_user_id = uuid_pkg.UUID(response.user.id)
+        except Exception as e:
+            error_msg = str(e).lower()
+
+            # Handle race condition: user already exists in Supabase auth
+            if "already been registered" in error_msg or "already exists" in error_msg:
+                logger.info(f"User {email} already exists in Supabase, syncing to local DB")
+
+                # First check our local database
+                existing_user = await self.find_user_by_email(db, email)
+                if existing_user:
+                    return existing_user
+
+                # User exists in Supabase but not locally - fetch and sync
+                try:
+                    synced_user = await self._sync_user_from_supabase(db, email)
+                    if synced_user:
+                        return synced_user
+                except Exception as sync_error:
+                    logger.error(f"Failed to sync Supabase user {email}: {sync_error}")
+
+                raise SupabaseInviteError(
+                    "User exists in auth system but sync failed. Please try again."
+                ) from e
+
+            # Log and re-raise other errors with cleaner message
+            logger.error(f"Supabase invite failed for {email}: {e}")
+            raise SupabaseInviteError(
+                "Failed to send invite email. Please try again later."
+            ) from e
+
+        # Create public.users record
+        user = User(id=supabase_user_id, email=email)
+        db.add(user)
+        await db.flush()
+        await db.refresh(user)
+        return user
+
+    async def _sync_user_from_supabase(
+        self,
+        db: AsyncSession,
+        email: str,
+    ) -> User | None:
+        """
+        Fetch a user from Supabase admin API and create local record.
+
+        Used for recovery when user exists in Supabase auth but not in public.users.
+        """
+        supabase = get_supabase_admin_client()
+
+        # Fetch users from Supabase (runs in thread pool)
+        response = await asyncio.to_thread(supabase.auth.admin.list_users)
+
+        # Find user by email
+        supabase_user = next((u for u in response if u.email == email), None)
+        if not supabase_user:
+            return None
+
+        # Create local record
+        user = User(id=uuid_pkg.UUID(supabase_user.id), email=email)
+        db.add(user)
+        await db.flush()
+        await db.refresh(user)
+        logger.info(f"Synced Supabase user {email} to local database")
+        return user
 
     async def get_owners(
         self,

@@ -14,6 +14,7 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
     "alembic>=1.13.0",
     "anthropic>=0.40.0",
+    "supabase>=2.0.0",
 ]
 
 [project.optional-dependencies]

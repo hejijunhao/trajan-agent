@@ -11,6 +11,7 @@ from app.api.v1.organizations.schemas import MemberResponse
 from app.core.database import get_db
 from app.core.roles import ROLE_HIERARCHY
 from app.domain import org_member_ops, organization_ops
+from app.domain.org_member_operations import InvalidEmailError, SupabaseInviteError
 from app.models.organization import (
     MemberRole,
     OrganizationMemberCreate,
@@ -51,6 +52,7 @@ async def list_members(
             joined_at=m.joined_at.isoformat(),
             invited_by=str(m.invited_by) if m.invited_by else None,
             invited_at=m.invited_at.isoformat() if m.invited_at else None,
+            has_signed_in=m.user.onboarding_completed_at is not None if m.user else False,
         )
         for m in members
     ]
@@ -86,13 +88,22 @@ async def add_member(
             detail="Admins can only assign member or viewer roles",
         )
 
-    # Find user by email
+    # Find user by email, or create via Supabase invite if not found
     target_user = await org_member_ops.find_user_by_email(db, data.email)
     if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found. They must have an account first.",
-        )
+        try:
+            # Create user via Supabase Admin API (sends invite email automatically)
+            target_user = await org_member_ops.create_user_via_supabase(db, data.email)
+        except InvalidEmailError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid email address format",
+            ) from e
+        except SupabaseInviteError as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(e),
+            ) from e
 
     # Check if already a member
     existing = await org_member_ops.get_by_org_and_user(db, org_id, target_user.id)
@@ -123,6 +134,7 @@ async def add_member(
         joined_at=member.joined_at.isoformat(),
         invited_by=str(member.invited_by) if member.invited_by else None,
         invited_at=member.invited_at.isoformat() if member.invited_at else None,
+        has_signed_in=target_user.onboarding_completed_at is not None,
     )
 
 
@@ -210,6 +222,9 @@ async def update_member_role(
         joined_at=member.joined_at.isoformat(),
         invited_by=str(member.invited_by) if member.invited_by else None,
         invited_at=member.invited_at.isoformat() if member.invited_at else None,
+        has_signed_in=(
+            member.user.onboarding_completed_at is not None if member.user else False
+        ),
     )
 
 

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_jwks_url: str = ""  # JWKS endpoint for ES256 JWT verification
+    supabase_service_role_key: str = ""  # Service role key for admin operations (user invites)
 
     # Application
     debug: bool = False
