@@ -94,18 +94,14 @@ class BlueprintAgent:
         """Get existing blueprint documents."""
         if self.product.id is None:
             return []
-        return await document_ops.get_by_folder(
-            self.db, self.product.id, "blueprints", self.product.user_id
-        )
+        return await document_ops.get_by_folder(self.db, self.product.id, "blueprints")
 
     async def _fetch_repo_contexts(self) -> list[RepoContext]:
         """Fetch context from all linked repositories."""
         if self.product.id is None:
             return []
 
-        repos = await repository_ops.get_github_repos_by_product(
-            self.db, self.product.user_id, self.product.id
-        )
+        repos = await repository_ops.get_github_repos_by_product(self.db, self.product.id)
 
         contexts: list[RepoContext] = []
         for repo in repos:
@@ -176,7 +172,7 @@ class BlueprintAgent:
 
         doc = Document(
             product_id=self.product.id,
-            user_id=self.product.user_id,
+            created_by_user_id=self.product.user_id,
             title=spec.title,
             content=content,
             type=spec.doc_type,

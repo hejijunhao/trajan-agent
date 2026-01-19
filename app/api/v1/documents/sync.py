@@ -29,9 +29,9 @@ async def import_docs_from_repo(
     Import documentation from linked GitHub repositories.
 
     Scans all repositories linked to the product for docs/ folder
-    and imports markdown files with sync tracking.
+    and imports markdown files with sync tracking. RLS enforces product access.
     """
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    product = await product_ops.get(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -47,10 +47,8 @@ async def import_docs_from_repo(
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
         )
 
-    # Get linked repositories
-    repos = await repository_ops.get_github_repos_by_product(
-        db, user_id=current_user.id, product_id=product_id
-    )
+    # Get linked repositories (RLS enforces product access)
+    repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
     if not repos:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -87,9 +85,9 @@ async def get_docs_sync_status(
     Check sync status for all documents in a product.
 
     Returns which documents have local changes, remote changes,
-    or are in sync with GitHub.
+    or are in sync with GitHub. RLS enforces product access.
     """
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    product = await product_ops.get(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -110,10 +108,7 @@ async def get_docs_sync_status(
     github_service = GitHubService(github_token)
     sync_service = DocsSyncService(db, github_service)
 
-    statuses = await sync_service.check_for_updates(
-        product_id=str(product_id),
-        user_id=str(current_user.id),
-    )
+    statuses = await sync_service.check_for_updates(product_id=str(product_id))
 
     return DocsSyncStatusResponse(
         documents=[
@@ -139,9 +134,9 @@ async def pull_remote_changes(
     """
     Pull latest content from GitHub for a document.
 
-    Overwrites local content with remote version.
+    Overwrites local content with remote version. RLS enforces product access.
     """
-    doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
+    doc = await document_ops.get(db, id=document_id)
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -166,10 +161,7 @@ async def pull_remote_changes(
     github_service = GitHubService(github_token)
     sync_service = DocsSyncService(db, github_service)
 
-    updated_doc = await sync_service.pull_remote_changes(
-        document_id=str(document_id),
-        user_id=str(current_user.id),
-    )
+    updated_doc = await sync_service.pull_remote_changes(document_id=str(document_id))
 
     if not updated_doc:
         raise HTTPException(
@@ -190,9 +182,9 @@ async def sync_docs_to_repo(
     Push documentation to linked GitHub repository.
 
     Syncs specified documents (or all with local changes) to the
-    repository's docs/ folder.
+    repository's docs/ folder. RLS enforces product access.
     """
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    product = await product_ops.get(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -212,16 +204,12 @@ async def sync_docs_to_repo(
     if data.document_ids:
         documents = []
         for doc_id in data.document_ids:
-            doc = await document_ops.get_by_user(
-                db, user_id=current_user.id, id=uuid_pkg.UUID(doc_id)
-            )
+            doc = await document_ops.get(db, id=uuid_pkg.UUID(doc_id))
             if doc:
                 documents.append(doc)
     else:
         # Sync all with local changes
-        documents = await document_ops.get_with_local_changes(
-            db, product_id=product_id, user_id=current_user.id
-        )
+        documents = await document_ops.get_with_local_changes(db, product_id=product_id)
 
     if not documents:
         return SyncDocsResponse(
@@ -230,10 +218,8 @@ async def sync_docs_to_repo(
             errors=["No documents to sync"],
         )
 
-    # Get primary repository for this product
-    repos = await repository_ops.get_github_repos_by_product(
-        db, user_id=current_user.id, product_id=product_id
-    )
+    # Get primary repository for this product (RLS enforces access)
+    repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
     if not repos:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

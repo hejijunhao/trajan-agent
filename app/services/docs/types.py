@@ -288,6 +288,45 @@ class CustomDocRequest:
 
 
 @dataclass
+class ValidationWarning:
+    """Warning about a potential hallucination in generated content."""
+
+    claim_type: str  # "endpoint", "model", "technology"
+    claim: str  # The specific claim (e.g., "/api/v1/payments", "PaymentModel")
+    message: str  # Human-readable warning message
+    severity: str = "medium"  # "low", "medium", "high"
+
+
+@dataclass
+class ExtractedClaims:
+    """Claims extracted from generated documentation for validation."""
+
+    endpoints: list[str]  # API endpoints mentioned (e.g., "/api/v1/users")
+    models: list[str]  # Model/class names mentioned (e.g., "User", "Product")
+    technologies: list[str]  # Technologies mentioned (e.g., "Redis", "PostgreSQL")
+
+
+@dataclass
+class ValidationResult:
+    """Result of validating generated content against codebase."""
+
+    warnings: list[ValidationWarning]
+    claims_checked: int
+    claims_verified: int
+
+    @property
+    def has_warnings(self) -> bool:
+        return len(self.warnings) > 0
+
+    @property
+    def confidence_score(self) -> float:
+        """Score from 0-1 indicating how well claims match codebase."""
+        if self.claims_checked == 0:
+            return 1.0  # No claims to verify = no issues
+        return self.claims_verified / self.claims_checked
+
+
+@dataclass
 class CustomDocResult:
     """Result of custom document generation."""
 
@@ -297,6 +336,7 @@ class CustomDocResult:
     document: Document | None = None  # The saved document (if saved)
     error: str | None = None
     generation_time_seconds: float | None = None
+    # Note: validation is handled internally via feedback loop - not exposed to users
 
 
 @dataclass

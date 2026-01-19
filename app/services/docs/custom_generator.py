@@ -29,6 +29,7 @@ from app.models.document import Document
 from app.models.product import Product
 from app.models.repository import Repository
 from app.services.docs.codebase_analyzer import CodebaseAnalyzer
+from app.services.docs.content_validator import ContentValidator
 from app.services.docs.custom_prompts import build_custom_prompt
 from app.services.docs.job_store import (
     STAGE_ANALYZING,
@@ -36,7 +37,13 @@ from app.services.docs.job_store import (
     STAGE_GENERATING,
     STAGE_PLANNING,
 )
-from app.services.docs.types import CodebaseContext, CustomDocRequest, CustomDocResult
+from app.services.docs.types import (
+    CodebaseContext,
+    CustomDocRequest,
+    CustomDocResult,
+    ValidationResult,
+    ValidationWarning,
+)
 from app.services.github import GitHubService
 
 logger = logging.getLogger(__name__)
@@ -54,6 +61,11 @@ RETRY_DELAYS = [2, 4, 8]
 
 # Generation limits
 MAX_TOKENS_GENERATION = 8000
+
+# Validation feedback loop configuration
+MAX_CORRECTION_ITERATIONS = 2  # Max times to ask Claude to fix hallucinations
+MIN_CONFIDENCE_THRESHOLD = 0.7  # Below this, trigger correction loop
+HIGH_SEVERITY_THRESHOLD = 1  # Number of high-severity warnings that trigger correction
 
 
 class CustomDocGenerator:
@@ -132,7 +144,7 @@ class CustomDocGenerator:
                 )
             await report_progress(STAGE_PLANNING)
 
-            # Step 3: Generate content using Claude
+            # Step 3: Generate content using Claude with validation feedback loop
             if await check_cancelled():
                 return CustomDocResult(
                     success=False,
@@ -140,8 +152,21 @@ class CustomDocGenerator:
                     generation_time_seconds=time.time() - start_time,
                 )
             await report_progress(STAGE_GENERATING)
-            logger.info("Generating custom document content...")
-            content, suggested_title = await self._call_claude(request, context)
+
+            # Generate and validate with feedback loop
+            content, suggested_title, validation_result = await self._generate_with_validation(
+                request=request,
+                context=context,
+                check_cancelled=check_cancelled,
+            )
+
+            # Check if cancelled during generation
+            if content is None:
+                return CustomDocResult(
+                    success=False,
+                    error="Cancelled by user",
+                    generation_time_seconds=time.time() - start_time,
+                )
 
             # Step 4: Finalize
             if await check_cancelled():
@@ -167,7 +192,10 @@ class CustomDocGenerator:
                 )
 
             generation_time = time.time() - start_time
-            logger.info(f"Custom document generated in {generation_time:.2f}s")
+            logger.info(
+                f"Custom document generated in {generation_time:.2f}s "
+                f"(validation confidence: {validation_result.confidence_score:.0%})"
+            )
 
             return CustomDocResult(
                 success=True,
@@ -175,6 +203,7 @@ class CustomDocGenerator:
                 suggested_title=suggested_title,
                 document=document,
                 generation_time_seconds=generation_time,
+                # Note: validation is internal - user gets clean, validated content
             )
 
         except Exception as e:
@@ -210,6 +239,233 @@ class CustomDocGenerator:
                 context.all_key_files = focused_files + other_files
 
         return context
+
+    async def _generate_with_validation(
+        self,
+        request: CustomDocRequest,
+        context: CodebaseContext,
+        check_cancelled: Callable[[], Awaitable[bool]],
+    ) -> tuple[str | None, str, ValidationResult]:
+        """
+        Generate content with validation feedback loop.
+
+        If the initial generation has high-severity hallucinations, this method
+        feeds the validation warnings back to Claude to correct them. The loop
+        continues until validation passes or max iterations are reached.
+
+        Args:
+            request: The custom doc request
+            context: Codebase analysis context
+            check_cancelled: Async function to check if job was cancelled
+
+        Returns:
+            Tuple of (content, suggested_title, final_validation_result)
+            Content is None if cancelled.
+        """
+        validator = ContentValidator(context)
+
+        # Initial generation
+        logger.info("Generating custom document content...")
+        content, suggested_title = await self._call_claude(request, context)
+
+        # Validate initial content
+        validation_result = validator.validate(content)
+        iteration = 0
+
+        # Feedback loop: correct hallucinations if needed
+        while self._needs_correction(validation_result) and iteration < MAX_CORRECTION_ITERATIONS:
+            iteration += 1
+
+            if await check_cancelled():
+                return None, suggested_title, validation_result
+
+            high_severity_warnings = [w for w in validation_result.warnings if w.severity == "high"]
+            logger.warning(
+                f"Validation found {len(high_severity_warnings)} high-severity issues "
+                f"(iteration {iteration}/{MAX_CORRECTION_ITERATIONS}). Requesting correction..."
+            )
+            for warning in high_severity_warnings:
+                logger.warning(f"  - [{warning.claim_type}] {warning.message}")
+
+            # Build correction prompt and regenerate
+            content, suggested_title = await self._call_claude_with_correction(
+                request=request,
+                context=context,
+                previous_content=content,
+                warnings=high_severity_warnings,
+            )
+
+            # Re-validate corrected content
+            validation_result = validator.validate(content)
+
+            if not self._needs_correction(validation_result):
+                logger.info(
+                    f"Correction successful after {iteration} iteration(s). "
+                    f"Confidence: {validation_result.confidence_score:.0%}"
+                )
+
+        # Log final status
+        if validation_result.has_warnings and self._needs_correction(validation_result):
+            logger.warning(
+                f"Validation complete with {len(validation_result.warnings)} remaining warnings "
+                f"after {iteration} correction(s). Confidence: {validation_result.confidence_score:.0%}"
+            )
+        elif not validation_result.has_warnings:
+            logger.info("Content validated successfully with no warnings.")
+
+        return content, suggested_title, validation_result
+
+    def _needs_correction(self, validation_result: ValidationResult) -> bool:
+        """
+        Determine if validation result warrants a correction attempt.
+
+        Triggers correction if:
+        - Confidence score is below threshold, OR
+        - There are high-severity warnings (endpoints, models not found)
+        """
+        if validation_result.confidence_score < MIN_CONFIDENCE_THRESHOLD:
+            return True
+
+        high_severity_count = sum(1 for w in validation_result.warnings if w.severity == "high")
+        return high_severity_count >= HIGH_SEVERITY_THRESHOLD
+
+    async def _call_claude_with_correction(
+        self,
+        request: CustomDocRequest,
+        context: CodebaseContext,
+        previous_content: str,
+        warnings: list[ValidationWarning],
+    ) -> tuple[str, str]:
+        """
+        Call Claude with correction instructions for hallucinated content.
+
+        Sends the previous content along with specific warnings about what
+        needs to be fixed, asking Claude to regenerate without the hallucinations.
+        """
+        model = self._select_model(request.doc_type)
+        correction_prompt = self._build_correction_prompt(
+            request=request,
+            context=context,
+            previous_content=previous_content,
+            warnings=warnings,
+        )
+        tool_schema = self._build_tool_schema()
+
+        response = await self.client.messages.create(
+            model=model,
+            max_tokens=MAX_TOKENS_GENERATION,
+            tools=cast(Any, [tool_schema]),
+            tool_choice=cast(Any, {"type": "tool", "name": "save_document"}),
+            messages=[{"role": "user", "content": correction_prompt}],
+        )
+
+        return self._parse_response(response)
+
+    def _build_correction_prompt(
+        self,
+        request: CustomDocRequest,  # noqa: ARG002 - Reserved for future use
+        context: CodebaseContext,
+        previous_content: str,
+        warnings: list[ValidationWarning],
+    ) -> str:
+        """
+        Build a prompt asking Claude to correct hallucinated content.
+
+        The prompt includes:
+        1. The original request context
+        2. The previous (problematic) content
+        3. Specific warnings about what was hallucinated
+        4. Clear instructions to remove/fix the issues
+        """
+        # Group warnings by type for clearer presentation
+        endpoint_issues = [w for w in warnings if w.claim_type == "endpoint"]
+        model_issues = [w for w in warnings if w.claim_type == "model"]
+        tech_issues = [w for w in warnings if w.claim_type == "technology"]
+
+        sections = [
+            "# Documentation Correction Required",
+            "",
+            "You previously generated documentation that contains **hallucinated content** — ",
+            "references to features, endpoints, or models that do not exist in the actual codebase.",
+            "",
+            "## What Needs to Be Fixed",
+            "",
+        ]
+
+        if endpoint_issues:
+            sections.append("### Non-Existent API Endpoints")
+            sections.append(
+                "The following endpoints were mentioned but DO NOT EXIST in the codebase:"
+            )
+            for w in endpoint_issues:
+                sections.append(f"- `{w.claim}` — Remove or replace this reference")
+            sections.append("")
+
+        if model_issues:
+            sections.append("### Non-Existent Models/Entities")
+            sections.append("The following models were mentioned but DO NOT EXIST in the codebase:")
+            for w in model_issues:
+                sections.append(f"- `{w.claim}` — Remove or replace this reference")
+            sections.append("")
+
+        if tech_issues:
+            sections.append("### Unverified Technologies")
+            sections.append(
+                "The following technologies were mentioned but not detected in the codebase:"
+            )
+            for w in tech_issues:
+                sections.append(f"- `{w.claim}` — Verify this is actually used or remove")
+            sections.append("")
+
+        # Add the actual tech stack and models for reference
+        tech = context.combined_tech_stack
+        sections.extend(
+            [
+                "## What Actually Exists in the Codebase",
+                "",
+                "**Technologies detected:**",
+                f"- Languages: {', '.join(tech.languages) if tech.languages else 'None detected'}",
+                f"- Frameworks: {', '.join(tech.frameworks) if tech.frameworks else 'None detected'}",
+                f"- Databases: {', '.join(tech.databases) if tech.databases else 'None detected'}",
+                "",
+            ]
+        )
+
+        if context.all_models:
+            sections.append("**Models detected:**")
+            for model in context.all_models[:15]:  # Limit to avoid huge prompts
+                sections.append(f"- `{model.name}` ({model.model_type})")
+            sections.append("")
+
+        if context.all_endpoints:
+            sections.append("**API Endpoints detected:**")
+            for ep in context.all_endpoints[:20]:  # Limit to avoid huge prompts
+                sections.append(f"- `{ep.method} {ep.path}`")
+            sections.append("")
+
+        sections.extend(
+            [
+                "## Your Previous Content (Contains Errors)",
+                "",
+                "```markdown",
+                previous_content,
+                "```",
+                "",
+                "## Instructions",
+                "",
+                "1. **Remove all hallucinated references** listed above",
+                "2. **Only reference endpoints, models, and technologies that actually exist**",
+                "3. **If you can't find code evidence for something, don't include it**",
+                "4. **Keep the same overall structure and purpose** of the document",
+                "5. **If removing content leaves gaps, either:**",
+                "   - State that the feature doesn't exist in the current codebase, OR",
+                "   - Replace with accurate information about what DOES exist",
+                "",
+                "Use the `save_document` tool to output the corrected documentation.",
+            ]
+        )
+
+        return "\n".join(sections)
 
     async def _save_document(
         self,

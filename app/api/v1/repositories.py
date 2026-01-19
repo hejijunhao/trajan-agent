@@ -1,3 +1,10 @@
+"""Repository API endpoints with product-scoped visibility.
+
+Repositories are visible to all users with Product access.
+- Viewers can list and view repositories
+- Editors can create, update, and delete repositories
+"""
+
 import uuid as uuid_pkg
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +15,7 @@ from app.api.deps import (
     get_current_organization,
     get_current_user,
     get_db_with_rls,
+    get_product_access,
     get_subscription_context_for_product,
 )
 from app.config.plans import get_plan
@@ -19,6 +27,27 @@ from app.models.user import User
 router = APIRouter(prefix="/repositories", tags=["repositories"])
 
 
+def _serialize_repository(r):
+    """Serialize a repository to a dict response."""
+    return {
+        "id": str(r.id),
+        "name": r.name,
+        "full_name": r.full_name,
+        "description": r.description,
+        "url": r.url,
+        "default_branch": r.default_branch,
+        "is_private": r.is_private,
+        "language": r.language,
+        "github_id": r.github_id,
+        "stars_count": r.stars_count,
+        "forks_count": r.forks_count,
+        "product_id": str(r.product_id) if r.product_id else None,
+        "imported_by_user_id": str(r.imported_by_user_id),
+        "created_at": r.created_at.isoformat(),
+        "updated_at": r.updated_at.isoformat(),
+    }
+
+
 @router.get("", response_model=list[dict])
 async def list_repositories(
     product_id: uuid_pkg.UUID | None = Query(None, description="Filter by product"),
@@ -27,33 +56,21 @@ async def list_repositories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
-    """List repositories, optionally filtered by product."""
-    repos = await repository_ops.get_by_product(
-        db,
-        user_id=current_user.id,
-        product_id=product_id,
-        skip=skip,
-        limit=limit,
-    )
-    return [
-        {
-            "id": str(r.id),
-            "name": r.name,
-            "full_name": r.full_name,
-            "description": r.description,
-            "url": r.url,
-            "default_branch": r.default_branch,
-            "is_private": r.is_private,
-            "language": r.language,
-            "github_id": r.github_id,
-            "stars_count": r.stars_count,
-            "forks_count": r.forks_count,
-            "product_id": str(r.product_id) if r.product_id else None,
-            "created_at": r.created_at.isoformat(),
-            "updated_at": r.updated_at.isoformat(),
-        }
-        for r in repos
-    ]
+    """List repositories, optionally filtered by product.
+
+    If product_id is provided, returns all repos in that product (requires product access).
+    RLS enforces that only repos in accessible products are returned.
+    """
+    if product_id:
+        # Verify product access (will raise 403 if no access)
+        await get_product_access(product_id, db, current_user)
+        repos = await repository_ops.get_by_product(db, product_id=product_id, skip=skip, limit=limit)
+    else:
+        # Without product_id filter, RLS will only return repos from accessible products
+        # For now, require product_id to avoid returning repos from all products
+        repos = []
+
+    return [_serialize_repository(r) for r in repos]
 
 
 @router.get("/{repository_id}")
@@ -62,29 +79,19 @@ async def get_repository(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
-    """Get a single repository."""
-    repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
+    """Get a single repository. Requires viewer access to the product."""
+    repo = await repository_ops.get(db, id=repository_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found",
         )
-    return {
-        "id": str(repo.id),
-        "name": repo.name,
-        "full_name": repo.full_name,
-        "description": repo.description,
-        "url": repo.url,
-        "default_branch": repo.default_branch,
-        "is_private": repo.is_private,
-        "language": repo.language,
-        "github_id": repo.github_id,
-        "stars_count": repo.stars_count,
-        "forks_count": repo.forks_count,
-        "product_id": str(repo.product_id) if repo.product_id else None,
-        "created_at": repo.created_at.isoformat(),
-        "updated_at": repo.updated_at.isoformat(),
-    }
+
+    # Verify product access (RLS should already filter, but explicit check is clearer)
+    if repo.product_id:
+        await get_product_access(repo.product_id, db, current_user)
+
+    return _serialize_repository(repo)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -156,18 +163,9 @@ async def create_repository(
     repo = await repository_ops.create(
         db,
         obj_in=obj_data,
-        user_id=current_user.id,
+        imported_by_user_id=current_user.id,
     )
-    return {
-        "id": str(repo.id),
-        "name": repo.name,
-        "full_name": repo.full_name,
-        "description": repo.description,
-        "url": repo.url,
-        "product_id": str(repo.product_id) if repo.product_id else None,
-        "created_at": repo.created_at.isoformat(),
-        "updated_at": repo.updated_at.isoformat(),
-    }
+    return _serialize_repository(repo)
 
 
 @router.patch("/{repository_id}")
@@ -178,30 +176,21 @@ async def update_repository(
     db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update a repository. Requires Editor or Admin access to the product."""
-    repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
+    repo = await repository_ops.get(db, id=repository_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found",
         )
 
-    # Check product access
+    # Check product access (editor required for updates)
     if repo.product_id:
         await check_product_editor_access(db, repo.product_id, current_user.id)
 
     updated = await repository_ops.update(
         db, db_obj=repo, obj_in=data.model_dump(exclude_unset=True)
     )
-    return {
-        "id": str(updated.id),
-        "name": updated.name,
-        "full_name": updated.full_name,
-        "description": updated.description,
-        "url": updated.url,
-        "product_id": str(updated.product_id) if updated.product_id else None,
-        "created_at": updated.created_at.isoformat(),
-        "updated_at": updated.updated_at.isoformat(),
-    }
+    return _serialize_repository(updated)
 
 
 @router.delete("/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -212,15 +201,15 @@ async def delete_repository(
 ):
     """Delete a repository. Requires Editor or Admin access to the product."""
     # Get repo first to check product access
-    repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
+    repo = await repository_ops.get(db, id=repository_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found",
         )
 
-    # Check product access
+    # Check product access (editor required for deletion)
     if repo.product_id:
         await check_product_editor_access(db, repo.product_id, current_user.id)
 
-    await repository_ops.delete(db, id=repository_id, user_id=current_user.id)
+    await repository_ops.delete(db, id=repository_id)

@@ -81,7 +81,7 @@ class DocumentOrchestrator:
         self.document_generator = DocumentGenerator(db)
 
         # V1 sub-agents (legacy, used when use_v2=False)
-        self.changelog_agent = ChangelogAgent(db, product, github_service)
+        self.changelog_agent = ChangelogAgent(db, product, github_service=github_service)
         self.blueprint_agent = BlueprintAgent(db, product, github_service)
         self.plans_agent = PlansAgent(db, product, github_service)
 
@@ -223,7 +223,7 @@ class DocumentOrchestrator:
                     plan=plan,
                     codebase_context=codebase_context,
                     product=self.product,
-                    user_id=self.product.user_id,
+                    created_by_user_id=self.product.user_id,
                     on_progress=on_progress,
                 )
 
@@ -376,15 +376,13 @@ class DocumentOrchestrator:
         """Get all existing documents for this product."""
         if self.product.id is None:
             return []
-        return await document_ops.get_by_product(self.db, self.product.user_id, self.product.id)
+        return await document_ops.get_by_product(self.db, self.product.id)
 
     async def _get_linked_repos(self) -> list[Repository]:
         """Get all GitHub-linked repositories for this product."""
         if self.product.id is None:
             return []
-        return await repository_ops.get_github_repos_by_product(
-            self.db, self.product.user_id, self.product.id
-        )
+        return await repository_ops.get_github_repos_by_product(self.db, self.product.id)
 
     async def _scan_repo_docs(self, repo: Repository) -> DocsInfo:
         """Check if repo has docs/ folder and what's in it."""
@@ -443,7 +441,7 @@ class DocumentOrchestrator:
 
                 doc = Document(
                     product_id=self.product.id,
-                    user_id=self.product.user_id,
+                    created_by_user_id=self.product.user_id,
                     title=extract_title(content, item.path),
                     content=content,
                     type=doc_type,

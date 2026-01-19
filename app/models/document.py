@@ -6,7 +6,7 @@ from sqlalchemy import Column, DateTime, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
-from app.models.base import TimestampMixin, UserOwnedMixin, UUIDMixin
+from app.models.base import TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
     from app.models.product import Product
@@ -59,13 +59,25 @@ class DocumentUpdate(SQLModel):
     subsection: str | None = None
 
 
-class Document(DocumentBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True):
-    """Documentation entry within a Product."""
+class Document(DocumentBase, UUIDMixin, TimestampMixin, table=True):
+    """Documentation entry within a Product.
+
+    Visibility is controlled by Product access (RLS), not by user ownership.
+    The created_by_user_id tracks who created the doc (for audit trail).
+    """
 
     __tablename__ = "documents"
     __table_args__ = (
         # Functional index for folder path queries (grouping, filtering by folder)
         Index("ix_documents_folder_path", text("(folder->>'path')")),
+    )
+
+    # Tracks who created this document (for audit trail)
+    # This does NOT control visibility - Product access does that via RLS
+    created_by_user_id: uuid_pkg.UUID = Field(
+        foreign_key="users.id",
+        nullable=False,
+        index=True,
     )
 
     product_id: uuid_pkg.UUID | None = Field(

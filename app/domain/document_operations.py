@@ -1,33 +1,46 @@
+"""Document operations with product-scoped visibility.
+
+Documents are visible to all users with Product access (via RLS).
+The `created_by_user_id` field tracks who created the document (for audit)
+but does NOT control visibility.
+"""
+
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.base_operations import BaseOperations
 from app.models.document import Document
 
 
-class DocumentOperations(BaseOperations[Document]):
-    """CRUD operations for Document model."""
+class DocumentOperations:
+    """CRUD operations for Document model.
+
+    Unlike user-owned resources, documents use Product-based access control.
+    RLS policies enforce visibility based on Product access level.
+    """
 
     def __init__(self):
-        super().__init__(Document)
+        self.model = Document
+
+    async def get(self, db: AsyncSession, id: uuid_pkg.UUID) -> Document | None:
+        """Get a document by ID. RLS enforces product access."""
+        statement = select(Document).where(Document.id == id)
+        result = await db.execute(statement)
+        return result.scalar_one_or_none()
 
     async def get_by_product(
         self,
         db: AsyncSession,
-        user_id: uuid_pkg.UUID,
-        product_id: uuid_pkg.UUID | None = None,
+        product_id: uuid_pkg.UUID,
         doc_type: str | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> list[Document]:
-        """Get documents with optional filtering by product and type."""
-        statement = select(Document).where(Document.user_id == user_id)
+        """Get documents for a product. RLS enforces access control."""
+        statement = select(Document).where(Document.product_id == product_id)
 
-        if product_id:
-            statement = statement.where(Document.product_id == product_id)
         if doc_type:
             statement = statement.where(Document.type == doc_type)
 
@@ -44,10 +57,9 @@ class DocumentOperations(BaseOperations[Document]):
         self,
         db: AsyncSession,
         product_id: uuid_pkg.UUID,
-        user_id: uuid_pkg.UUID,
     ) -> dict[str, list[Document]]:
         """Get documents grouped by folder path."""
-        docs = await self.get_by_product(db, user_id, product_id)
+        docs = await self.get_by_product(db, product_id)
 
         grouped: dict[str, list[Document]] = {
             "changelog": [],
@@ -79,13 +91,11 @@ class DocumentOperations(BaseOperations[Document]):
         db: AsyncSession,
         product_id: uuid_pkg.UUID,
         folder_path: str,
-        user_id: uuid_pkg.UUID,
     ) -> list[Document]:
         """Get documents in a specific folder."""
         result = await db.execute(
             select(Document)
             .where(Document.product_id == product_id)
-            .where(Document.user_id == user_id)
             .where(Document.folder["path"].astext == folder_path)
             .order_by(Document.updated_at.desc())
         )
@@ -95,27 +105,95 @@ class DocumentOperations(BaseOperations[Document]):
         self,
         db: AsyncSession,
         product_id: uuid_pkg.UUID,
-        user_id: uuid_pkg.UUID,
     ) -> Document | None:
         """Get the changelog document for a product."""
         result = await db.execute(
             select(Document)
             .where(Document.product_id == product_id)
-            .where(Document.user_id == user_id)
             .where(Document.type == "changelog")
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def get_synced_documents(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+    ) -> list[Document]:
+        """Get documents that have been synced with GitHub."""
+        result = await db.execute(
+            select(Document)
+            .where(Document.product_id == product_id)
+            .where(Document.github_path.isnot(None))
+            .order_by(Document.updated_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_with_local_changes(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+    ) -> list[Document]:
+        """Get documents with unsynchronized local changes."""
+        result = await db.execute(
+            select(Document)
+            .where(Document.product_id == product_id)
+            .where(Document.sync_status == "local_changes")
+            .order_by(Document.updated_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def create(
+        self,
+        db: AsyncSession,
+        obj_in: dict,
+        created_by_user_id: uuid_pkg.UUID,
+    ) -> Document:
+        """Create a new document.
+
+        Args:
+            db: Database session
+            obj_in: Document data (title, content, product_id, etc.)
+            created_by_user_id: User who is creating this document
+        """
+        db_obj = Document(**obj_in, created_by_user_id=created_by_user_id)
+        db.add(db_obj)
+        await db.flush()
+        await db.refresh(db_obj)
+        return db_obj
+
+    async def update(
+        self,
+        db: AsyncSession,
+        db_obj: Document,
+        obj_in: dict,
+    ) -> Document:
+        """Update an existing document."""
+        for field, value in obj_in.items():
+            if value is not None:
+                setattr(db_obj, field, value)
+        db.add(db_obj)
+        await db.flush()
+        await db.refresh(db_obj)
+        return db_obj
+
+    async def delete(self, db: AsyncSession, id: uuid_pkg.UUID) -> bool:
+        """Delete a document by ID. Caller must verify product access."""
+        db_obj = await self.get(db, id)
+        if db_obj:
+            await db.delete(db_obj)
+            await db.flush()
+            return True
+        return False
 
     async def move_to_folder(
         self,
         db: AsyncSession,
         document_id: uuid_pkg.UUID,
         new_folder: str,
-        user_id: uuid_pkg.UUID,
     ) -> Document | None:
         """Move document to a new folder."""
-        doc = await self.get_by_user(db, user_id, document_id)
+        doc = await self.get(db, document_id)
         if not doc:
             return None
 
@@ -128,46 +206,13 @@ class DocumentOperations(BaseOperations[Document]):
         await db.refresh(doc)
         return doc
 
-    async def get_synced_documents(
-        self,
-        db: AsyncSession,
-        product_id: uuid_pkg.UUID,
-        user_id: uuid_pkg.UUID,
-    ) -> list[Document]:
-        """Get documents that have been synced with GitHub."""
-        result = await db.execute(
-            select(Document)
-            .where(Document.product_id == product_id)
-            .where(Document.user_id == user_id)
-            .where(Document.github_path.isnot(None))
-            .order_by(Document.updated_at.desc())
-        )
-        return list(result.scalars().all())
-
-    async def get_with_local_changes(
-        self,
-        db: AsyncSession,
-        product_id: uuid_pkg.UUID,
-        user_id: uuid_pkg.UUID,
-    ) -> list[Document]:
-        """Get documents with unsynchronized local changes."""
-        result = await db.execute(
-            select(Document)
-            .where(Document.product_id == product_id)
-            .where(Document.user_id == user_id)
-            .where(Document.sync_status == "local_changes")
-            .order_by(Document.updated_at.desc())
-        )
-        return list(result.scalars().all())
-
     async def mark_local_changes(
         self,
         db: AsyncSession,
         document_id: uuid_pkg.UUID,
-        user_id: uuid_pkg.UUID,
     ) -> Document | None:
         """Mark a document as having local changes (for sync tracking)."""
-        doc = await self.get_by_user(db, user_id, document_id)
+        doc = await self.get(db, document_id)
         if not doc:
             return None
 
@@ -181,29 +226,26 @@ class DocumentOperations(BaseOperations[Document]):
         self,
         db: AsyncSession,
         document_id: uuid_pkg.UUID,
-        user_id: uuid_pkg.UUID,
     ) -> Document | None:
         """Move a plan document to the executing/ folder."""
-        return await self.move_to_folder(db, document_id, "executing", user_id)
+        return await self.move_to_folder(db, document_id, "executing")
 
     async def move_to_completed(
         self,
         db: AsyncSession,
         document_id: uuid_pkg.UUID,
-        user_id: uuid_pkg.UUID,
     ) -> Document | None:
         """Move a plan document to completions/ folder with date prefix."""
         date_prefix = datetime.now(UTC).strftime("%Y-%m-%d")
-        return await self.move_to_folder(db, document_id, f"completions/{date_prefix}", user_id)
+        return await self.move_to_folder(db, document_id, f"completions/{date_prefix}")
 
     async def archive(
         self,
         db: AsyncSession,
         document_id: uuid_pkg.UUID,
-        user_id: uuid_pkg.UUID,
     ) -> Document | None:
         """Move a document to the archive/ folder."""
-        return await self.move_to_folder(db, document_id, "archive", user_id)
+        return await self.move_to_folder(db, document_id, "archive")
 
 
 document_ops = DocumentOperations()

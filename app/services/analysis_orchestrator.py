@@ -75,7 +75,7 @@ class AnalysisOrchestrator:
         self.file_selector = FileSelector()
         self.framework_detector = FrameworkDetector()
 
-    async def analyze_product(self, user_id: uuid_pkg.UUID) -> ProductOverview:
+    async def analyze_product(self) -> ProductOverview:
         """
         Full analysis workflow with parallel execution.
 
@@ -85,9 +85,6 @@ class AnalysisOrchestrator:
         3. Fetch selected files and update contexts
         4. Run stats extraction + architecture extraction in parallel
         5. Generate content (depends on stats + architecture)
-
-        Args:
-            user_id: The user's ID (for data isolation)
 
         Returns:
             ProductOverview with complete analysis results
@@ -104,7 +101,7 @@ class AnalysisOrchestrator:
             )
         )
 
-        repos = await self._get_github_repos(product.id, user_id)
+        repos = await self._get_github_repos(product.id)
         if not repos:
             logger.warning(f"No GitHub repositories found for product {product.id}")
             return self._create_empty_overview(product)
@@ -177,16 +174,11 @@ class AnalysisOrchestrator:
     async def _get_github_repos(
         self,
         product_id: uuid_pkg.UUID | None,
-        user_id: uuid_pkg.UUID,
     ) -> list[Repository]:
         """Fetch all GitHub-linked repositories for a product."""
         if product_id is None:
             return []
-        return await repository_ops.get_github_repos_by_product(
-            self.session,
-            user_id,
-            product_id,
-        )
+        return await repository_ops.get_github_repos_by_product(self.session, product_id)
 
     async def _fetch_all_contexts(self, repos: list[Repository]) -> list[RepoContext]:
         """

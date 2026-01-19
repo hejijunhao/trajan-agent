@@ -67,7 +67,7 @@ async def run_analysis_task(
 
             # Run orchestrated analysis
             orchestrator = AnalysisOrchestrator(session, github_token, product)
-            overview = await orchestrator.analyze_product(user_uuid)
+            overview = await orchestrator.analyze_product()
 
             # Update product with results and clear progress
             product.product_overview = overview.model_dump(mode="json")

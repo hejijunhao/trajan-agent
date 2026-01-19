@@ -224,16 +224,15 @@ class DocsSyncService:
     async def check_for_updates(
         self,
         product_id: str,
-        user_id: str,
     ) -> list[DocumentSyncStatus]:
         """
         Check which documents have remote changes.
 
         Compares local github_sha with current SHA in repository.
+        RLS enforces product access.
 
         Args:
             product_id: Product to check documents for
-            user_id: Owner user ID
 
         Returns:
             List of DocumentSyncStatus for each synced document
@@ -242,7 +241,6 @@ class DocsSyncService:
         result = await self.db.execute(
             select(Document)
             .where(Document.product_id == uuid_pkg.UUID(product_id))
-            .where(Document.user_id == uuid_pkg.UUID(user_id))
             .where(Document.github_path != None)  # noqa: E711
         )
         docs = list(result.scalars().all())
@@ -348,24 +346,21 @@ class DocsSyncService:
     async def pull_remote_changes(
         self,
         document_id: str,
-        user_id: str,
     ) -> Document | None:
         """
         Pull latest content from GitHub for a document.
 
         Updates the document with remote content and resets sync status.
+        RLS enforces product access.
 
         Args:
             document_id: Document to update
-            user_id: Owner user ID
 
         Returns:
             Updated Document or None if not found
         """
         result = await self.db.execute(
-            select(Document)
-            .where(Document.id == uuid_pkg.UUID(document_id))
-            .where(Document.user_id == uuid_pkg.UUID(user_id))
+            select(Document).where(Document.id == uuid_pkg.UUID(document_id))
         )
         doc = result.scalar_one_or_none()
 
@@ -461,7 +456,7 @@ class DocsSyncService:
 
         doc = Document(
             product_id=repository.product_id,
-            user_id=repository.user_id,
+            created_by_user_id=repository.imported_by_user_id,
             title=extract_title(content, item.path),
             content=content,
             type=doc_type,

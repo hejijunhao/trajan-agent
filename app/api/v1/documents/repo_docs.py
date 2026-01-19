@@ -125,10 +125,8 @@ async def get_repo_docs_tree(
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
         )
 
-    # Get linked repositories
-    repos = await repository_ops.get_github_repos_by_product(
-        db, user_id=current_user.id, product_id=product_id
-    )
+    # Get linked repositories (RLS enforces product access)
+    repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
 
     if not repos:
         return RepoDocsTreeResponse(
@@ -197,7 +195,7 @@ async def get_repo_file_content(
 
     Returns the file content as text. Large files (>100KB) will be truncated.
     """
-    repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
+    repo = await repository_ops.get(db, id=repository_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

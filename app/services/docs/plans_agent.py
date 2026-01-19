@@ -87,7 +87,7 @@ class PlansAgent:
         if self.product.id is None:
             return []
 
-        all_docs = await document_ops.get_by_product(self.db, self.product.user_id, self.product.id)
+        all_docs = await document_ops.get_by_product(self.db, self.product.id)
         return [doc for doc in all_docs if doc.type == "plan"]
 
     def _determine_correct_folder(self, plan: Document) -> str:
@@ -162,7 +162,7 @@ class PlansAgent:
         """
         doc = Document(
             product_id=self.product.id,
-            user_id=self.product.user_id,
+            created_by_user_id=self.product.user_id,
             title=title,
             content=content,
             type="plan",
@@ -188,7 +188,7 @@ class PlansAgent:
         Returns:
             Updated document, or None if not found
         """
-        doc = await document_ops.move_to_executing(self.db, document_id, self.product.user_id)
+        doc = await document_ops.move_to_executing(self.db, document_id)
         if doc:
             logger.info(f"Moved plan '{doc.title}' to executing/")
         else:
@@ -210,7 +210,7 @@ class PlansAgent:
         Returns:
             Updated document, or None if not found
         """
-        doc = await document_ops.move_to_completed(self.db, document_id, self.product.user_id)
+        doc = await document_ops.move_to_completed(self.db, document_id)
         if doc:
             folder_path = doc.folder.get("path") if doc.folder else "completions"
             logger.info(f"Moved plan '{doc.title}' to {folder_path}/")
@@ -231,7 +231,7 @@ class PlansAgent:
         Returns:
             Updated document, or None if not found
         """
-        doc = await document_ops.archive(self.db, document_id, self.product.user_id)
+        doc = await document_ops.archive(self.db, document_id)
         if doc:
             logger.info(f"Archived document '{doc.title}'")
         else:

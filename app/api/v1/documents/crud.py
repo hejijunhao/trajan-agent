@@ -5,7 +5,12 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import check_product_editor_access, get_current_user, get_db_with_rls
+from app.api.deps import (
+    check_product_editor_access,
+    get_current_user,
+    get_db_with_rls,
+    get_product_access,
+)
 from app.domain import document_ops, product_ops
 from app.models.document import DocumentCreate, DocumentUpdate
 from app.models.user import User
@@ -49,15 +54,21 @@ async def list_documents(
     db: AsyncSession = Depends(get_db_with_rls),
 ):
     """List documents, optionally filtered by product, type, and folder."""
-    if product_id and folder:
-        # Use folder-specific query
-        docs = await document_ops.get_by_folder(
-            db, product_id=product_id, folder_path=folder, user_id=current_user.id
+    if not product_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="product_id is required",
         )
+
+    # Verify product access (RLS enforces, but explicit check is clearer)
+    await get_product_access(product_id, db, current_user)
+
+    if folder:
+        # Use folder-specific query
+        docs = await document_ops.get_by_folder(db, product_id=product_id, folder_path=folder)
     else:
         docs = await document_ops.get_by_product(
             db,
-            user_id=current_user.id,
             product_id=product_id,
             doc_type=doc_type,
             skip=skip,
@@ -71,13 +82,18 @@ async def get_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
-    """Get a single document."""
-    doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
+    """Get a single document. RLS enforces product access."""
+    doc = await document_ops.get(db, id=document_id)
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
         )
+
+    # Verify product access (RLS enforces, but explicit check is clearer)
+    if doc.product_id:
+        await get_product_access(doc.product_id, db, current_user)
+
     return serialize_document(doc)
 
 
@@ -94,7 +110,7 @@ async def create_document(
     doc = await document_ops.create(
         db,
         obj_in=data.model_dump(),
-        user_id=current_user.id,
+        created_by_user_id=current_user.id,
     )
     return serialize_document(doc)
 
@@ -106,7 +122,7 @@ async def update_document(
     db: AsyncSession = Depends(get_db_with_rls),
 ):
     """Update a document. Requires Editor or Admin access to the product."""
-    doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
+    doc = await document_ops.get(db, id=document_id)
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -130,7 +146,7 @@ async def delete_document(
 ):
     """Delete a document. Requires Editor or Admin access to the product."""
     # Get document first to check product access
-    doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
+    doc = await document_ops.get(db, id=document_id)
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -141,7 +157,7 @@ async def delete_document(
     if doc.product_id:
         await check_product_editor_access(db, doc.product_id, current_user.id)
 
-    await document_ops.delete(db, id=document_id, user_id=current_user.id)
+    await document_ops.delete(db, id=document_id)
 
 
 # =============================================================================
@@ -154,18 +170,19 @@ async def get_documents_grouped(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> DocumentsGroupedResponse:
-    """Get documents grouped by folder."""
-    # Verify product exists and user has access
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    """Get documents grouped by folder. RLS enforces product access."""
+    # Verify product access (RLS enforces, but explicit check is clearer)
+    await get_product_access(product_id, db, current_user)
+
+    # Verify product exists
+    product = await product_ops.get(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
         )
 
-    grouped = await document_ops.get_by_product_grouped(
-        db, product_id=product_id, user_id=current_user.id
-    )
+    grouped = await document_ops.get_by_product_grouped(db, product_id=product_id)
 
     # Convert to response format
     def to_grouped(docs) -> list[DocumentGrouped]:
@@ -203,7 +220,7 @@ async def add_changelog_entry(
     # Check product access first
     await check_product_editor_access(db, product_id, current_user.id)
 
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    product = await product_ops.get(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -215,6 +232,6 @@ async def add_changelog_entry(
         ChangeEntry(category=c.category, description=c.description) for c in data.changes
     ]
 
-    changelog_agent = ChangelogAgent(db, product)
+    changelog_agent = ChangelogAgent(db, product, current_user.id)
     updated_doc = await changelog_agent.add_entry(data.version, changes)
     return serialize_document(updated_doc)

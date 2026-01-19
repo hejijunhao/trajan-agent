@@ -40,10 +40,8 @@ async def get_product_timeline(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # 2. Get GitHub-linked repositories
-    repos = await repository_ops.get_github_repos_by_product(
-        db, user_id=current_user.id, product_id=product_id
-    )
+    # 2. Get GitHub-linked repositories (RLS enforces product access)
+    repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
     if not repos:
         return {"events": [], "has_more": False, "next_cursor": None}
 

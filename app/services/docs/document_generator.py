@@ -69,7 +69,7 @@ class DocumentGenerator:
         planned_doc: PlannedDocument,
         codebase_context: CodebaseContext,
         product: Product,
-        user_id: str | UUID,
+        created_by_user_id: str | UUID,
     ) -> GeneratorResult:
         """
         Generate a single document based on the plan.
@@ -78,7 +78,7 @@ class DocumentGenerator:
             planned_doc: Specification from DocumentationPlanner
             codebase_context: Full codebase analysis (from CodebaseAnalyzer)
             product: The product this documentation belongs to
-            user_id: User who owns this document
+            created_by_user_id: User who is creating this document (for audit)
 
         Returns:
             GeneratorResult with the created Document or error details
@@ -96,7 +96,7 @@ class DocumentGenerator:
             # Create and save the document
             doc = Document(
                 product_id=product.id,
-                user_id=str(user_id),
+                created_by_user_id=str(created_by_user_id),
                 title=planned_doc.title,
                 content=content,
                 type=planned_doc.doc_type,
@@ -120,7 +120,7 @@ class DocumentGenerator:
         plan: DocumentationPlan,
         codebase_context: CodebaseContext,
         product: Product,
-        user_id: str | UUID,
+        created_by_user_id: str | UUID,
         on_progress: Any | None = None,
     ) -> BatchGeneratorResult:
         """
@@ -130,7 +130,7 @@ class DocumentGenerator:
             plan: Complete documentation plan from DocumentationPlanner
             codebase_context: Full codebase analysis
             product: The product this documentation belongs to
-            user_id: User who owns these documents
+            created_by_user_id: User who is creating these documents (for audit)
             on_progress: Optional callback(current: int, total: int, title: str)
 
         Returns:
@@ -153,7 +153,7 @@ class DocumentGenerator:
                 planned_doc=planned_doc,
                 codebase_context=codebase_context,
                 product=product,
-                user_id=user_id,
+                created_by_user_id=created_by_user_id,
             )
 
             if gen_result.success and gen_result.document:

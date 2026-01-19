@@ -166,10 +166,11 @@ async def list_github_repos(
             detail=detail,
         ) from None
 
-    # Check which repos are already imported for this user
+    # Check which repos are already imported (in any accessible product)
+    # RLS ensures we only see repos in products we have access to
     repos_with_status: list[GitHubRepoPreview] = []
     for repo in result.repos:
-        existing = await repository_ops.get_by_github_id(db, current_user.id, repo.github_id)
+        existing = await repository_ops.find_by_github_id(db, repo.github_id)
         repos_with_status.append(
             GitHubRepoPreview(
                 **asdict(repo),
@@ -222,10 +223,10 @@ async def import_github_repos(
     # Check repo limit before import
     current_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)
 
-    # Pre-filter: count how many are actually new (not already imported)
+    # Pre-filter: count how many are actually new (not already in this product)
     new_repo_count = 0
     for github_id in data.github_ids:
-        existing = await repository_ops.get_by_github_id(db, current_user.id, github_id)
+        existing = await repository_ops.get_by_github_id(db, data.product_id, github_id)
         if not existing:
             new_repo_count += 1
 
@@ -254,21 +255,11 @@ async def import_github_repos(
     skipped: list[SkippedRepo] = []
 
     for github_id in data.github_ids:
-        # Check if already imported to this product
-        existing = await repository_ops.get_by_github_id(db, current_user.id, github_id)
-        if existing and existing.product_id == data.product_id:
+        # Check if already imported to this specific product
+        existing = await repository_ops.get_by_github_id(db, data.product_id, github_id)
+        if existing:
             skipped.append(
                 SkippedRepo(github_id=github_id, reason="Already imported to this product")
-            )
-            continue
-
-        if existing:
-            # Imported to different product - skip with explanation
-            skipped.append(
-                SkippedRepo(
-                    github_id=github_id,
-                    reason=f"Already imported to product {existing.product_id}",
-                )
             )
             continue
 
@@ -306,7 +297,7 @@ async def import_github_repos(
                     "stars_count": fresh_data.stars_count,
                     "forks_count": fresh_data.forks_count,
                 },
-                user_id=current_user.id,
+                imported_by_user_id=current_user.id,
             )
 
             imported.append(
@@ -335,8 +326,9 @@ async def refresh_repository_metadata(
 
     Updates stars, forks, description, and default branch.
     Only works for repositories with a github_id (imported from GitHub).
+    Requires viewer access to the product (RLS enforced).
     """
-    repo = await repository_ops.get_by_user(db, user_id=current_user.id, id=repository_id)
+    repo = await repository_ops.get(db, id=repository_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -434,10 +426,8 @@ async def bulk_refresh_github_repos(
     token = await get_github_token(db, current_user.id)
     github = GitHubService(token)
 
-    # Get all GitHub-linked repos for this product
-    repos = await repository_ops.get_github_repos_by_product(
-        db, user_id=current_user.id, product_id=data.product_id
-    )
+    # Get all GitHub-linked repos for this product (RLS enforces access)
+    repos = await repository_ops.get_github_repos_by_product(db, product_id=data.product_id)
 
     if not repos:
         return BulkRefreshResponse(refreshed=[], failed=[])

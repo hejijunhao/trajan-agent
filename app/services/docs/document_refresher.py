@@ -14,6 +14,7 @@ Key capabilities:
 import asyncio
 import logging
 import re
+import uuid as uuid_pkg
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -153,7 +154,6 @@ class DocumentRefresher:
     async def refresh_all(
         self,
         product_id: str,
-        user_id: str,
         repos: list[Repository],
         on_progress: Any | None = None,
     ) -> BulkRefreshResult:
@@ -162,7 +162,6 @@ class DocumentRefresher:
 
         Args:
             product_id: The product to refresh docs for
-            user_id: User who owns the documents
             repos: Repositories linked to the product
             on_progress: Optional callback(current: int, total: int, title: str)
 
@@ -171,8 +170,10 @@ class DocumentRefresher:
         """
         result = BulkRefreshResult()
 
-        # Get all documents for this product
-        documents = await document_ops.get_by_product(self.db, user_id, product_id)
+        # Get all documents for this product (RLS enforces access)
+        documents = await document_ops.get_by_product(
+            self.db, uuid_pkg.UUID(product_id)
+        )
 
         if not documents:
             return result

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
-from app.models.base import TimestampMixin, UserOwnedMixin, UUIDMixin
+from app.models.base import TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
     from app.models.product import Product
@@ -49,14 +49,26 @@ class RepositoryUpdate(SQLModel):
     default_branch: str | None = None
 
 
-class Repository(RepositoryBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True):
-    """Repository linked to a Product."""
+class Repository(RepositoryBase, UUIDMixin, TimestampMixin, table=True):
+    """Repository linked to a Product.
+
+    Visibility is controlled by Product access (RLS), not by user ownership.
+    The imported_by_user_id tracks who imported the repo (for audit/token lookup).
+    """
 
     __tablename__ = "repositories"
 
     product_id: uuid_pkg.UUID | None = Field(
         default=None,
         foreign_key="products.id",
+        index=True,
+    )
+
+    # Tracks who imported this repository (for audit trail and GitHub token lookup)
+    # This does NOT control visibility - Product access does that via RLS
+    imported_by_user_id: uuid_pkg.UUID = Field(
+        foreign_key="users.id",
+        nullable=False,
         index=True,
     )
 

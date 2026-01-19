@@ -132,8 +132,8 @@ async def generate_custom_document(
     Returns:
         CustomDocResponseSchema with generated content or job_id
     """
-    # Get the product
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    # Get the product (RLS enforces access)
+    product = await product_ops.get(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -149,12 +149,8 @@ async def generate_custom_document(
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
         )
 
-    # Get repositories for the product
-    repositories = await repository_ops.get_by_product(
-        db,
-        user_id=current_user.id,
-        product_id=product_id,
-    )
+    # Get repositories for the product (RLS enforces access)
+    repositories = await repository_ops.get_by_product(db, product_id=product_id)
 
     if not repositories:
         raise HTTPException(
@@ -394,8 +390,8 @@ async def save_custom_document(
     """
     from app.models.document import Document
 
-    # Verify product exists and belongs to user
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    # Verify product exists (RLS enforces access)
+    product = await product_ops.get(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -405,7 +401,7 @@ async def save_custom_document(
     # Create the document
     doc = Document(
         product_id=product_id,
-        user_id=str(current_user.id),
+        created_by_user_id=current_user.id,
         title=title,
         content=content,
         type=doc_type,

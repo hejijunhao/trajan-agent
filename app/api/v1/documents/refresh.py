@@ -26,9 +26,9 @@ async def refresh_document(
     Refresh a single document by comparing with current codebase.
 
     Reviews the document against the current state of the source files
-    and updates if any information is outdated.
+    and updates if any information is outdated. RLS enforces product access.
     """
-    doc = await document_ops.get_by_user(db, user_id=current_user.id, id=document_id)
+    doc = await document_ops.get(db, id=document_id)
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -50,10 +50,8 @@ async def refresh_document(
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
         )
 
-    # Get linked repositories
-    repos = await repository_ops.get_github_repos_by_product(
-        db, user_id=current_user.id, product_id=doc.product_id
-    )
+    # Get linked repositories (RLS enforces product access)
+    repos = await repository_ops.get_github_repos_by_product(db, product_id=doc.product_id)
     if not repos:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -83,8 +81,9 @@ async def refresh_all_documents(
 
     Scans all documents and compares them against the current state
     of the codebase. Updates any documents that have become outdated.
+    RLS enforces product access.
     """
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    product = await product_ops.get(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -100,10 +99,8 @@ async def refresh_all_documents(
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
         )
 
-    # Get linked repositories
-    repos = await repository_ops.get_github_repos_by_product(
-        db, user_id=current_user.id, product_id=product_id
-    )
+    # Get linked repositories (RLS enforces product access)
+    repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
     if not repos:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -115,7 +112,6 @@ async def refresh_all_documents(
 
     result = await refresher.refresh_all(
         product_id=str(product_id),
-        user_id=str(current_user.id),
         repos=repos,
     )
 

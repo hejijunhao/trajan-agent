@@ -11,6 +11,7 @@ Tier 2 (Maintenance):
 """
 
 import logging
+import uuid as uuid_pkg
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,10 +37,13 @@ class ChangelogAgent:
         self,
         db: AsyncSession,
         product: Product,
+        created_by_user_id: uuid_pkg.UUID | None = None,
         github_service: GitHubService | None = None,
     ) -> None:
         self.db = db
         self.product = product
+        # If not provided, fall back to product owner (for orchestrator usage)
+        self.created_by_user_id = created_by_user_id or product.user_id
         self.github_service = github_service
 
     async def run(self) -> ChangelogResult:
@@ -70,7 +74,7 @@ class ChangelogAgent:
         """Find existing changelog document for this product."""
         if self.product.id is None:
             return None
-        return await document_ops.get_changelog(self.db, self.product.id, self.product.user_id)
+        return await document_ops.get_changelog(self.db, self.product.id)
 
     async def _generate_changelog(self) -> Document:
         """Generate a new changelog document from template."""
@@ -78,7 +82,7 @@ class ChangelogAgent:
 
         doc = Document(
             product_id=self.product.id,
-            user_id=self.product.user_id,
+            created_by_user_id=self.created_by_user_id,
             title="Changelog",
             content=template,
             type="changelog",
