@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.document import Document
 from app.models.product import Product
+from app.services.docs.custom_prompts import AUDIENCE_INSTRUCTIONS
 from app.services.docs.types import (
     BatchGeneratorResult,
     CodebaseContext,
@@ -100,6 +101,8 @@ class DocumentGenerator:
                 content=content,
                 type=planned_doc.doc_type,
                 folder={"path": planned_doc.folder},
+                section=planned_doc.section,
+                subsection=planned_doc.subsection,
             )
             self.db.add(doc)
             await self.db.commit()
@@ -274,8 +277,15 @@ class DocumentGenerator:
         context: CodebaseContext,
     ) -> str:
         """Build the prompt for document generation."""
+        # Determine audience based on section
+        is_conceptual = planned_doc.section == "conceptual"
+        audience_key = "internal-non-technical" if is_conceptual else "internal-technical"
+        audience_instruction = AUDIENCE_INSTRUCTIONS.get(
+            audience_key, "Write for a general technical audience."
+        )
+
         sections = [
-            "You are writing technical documentation for a software project.",
+            "You are writing documentation for a software project.",
             "",
             "---",
             "",
@@ -283,7 +293,12 @@ class DocumentGenerator:
             "",
             f"**Title:** {planned_doc.title}",
             f"**Type:** {planned_doc.doc_type}",
+            f"**Section:** {planned_doc.section} / {planned_doc.subsection}",
             f"**Purpose:** {planned_doc.purpose}",
+            "",
+            "## Target Audience",
+            "",
+            audience_instruction,
             "",
         ]
 

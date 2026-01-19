@@ -20,6 +20,18 @@ class DocumentBase(SQLModel):
     type: str | None = Field(default=None, max_length=50)  # e.g. blueprint, architecture, note, plan, changelog
     is_pinned: bool | None = Field(default=False)
 
+    # Section-based organization (for Trajan Docs sectioned view)
+    section: str | None = Field(
+        default=None,
+        max_length=50,
+        description="Top-level section: 'technical' or 'conceptual'",
+    )
+    subsection: str | None = Field(
+        default=None,
+        max_length=50,
+        description="Subsection within section, e.g., 'backend', 'frontend', 'concepts'",
+    )
+
 
 class DocumentCreate(SQLModel):
     """Schema for creating a document."""
@@ -31,6 +43,8 @@ class DocumentCreate(SQLModel):
     is_pinned: bool = False
     repository_id: uuid_pkg.UUID | None = None
     folder: dict[str, Any] | None = None  # e.g. {"path": "blueprints"}
+    section: str | None = None  # "technical" or "conceptual"
+    subsection: str | None = None  # e.g., "backend", "frontend", "concepts"
 
 
 class DocumentUpdate(SQLModel):
@@ -41,6 +55,8 @@ class DocumentUpdate(SQLModel):
     type: str | None = None
     is_pinned: bool | None = None
     folder: dict[str, Any] | None = None
+    section: str | None = None
+    subsection: str | None = None
 
 
 class Document(DocumentBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True):

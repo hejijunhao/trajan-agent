@@ -1,6 +1,7 @@
 """Organization member management endpoints."""
 
 import uuid as uuid_pkg
+from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -288,3 +289,65 @@ async def remove_member(
 
     await org_member_ops.remove_member(db, org_id, member.user_id)
     await db.commit()
+
+
+async def resend_invite(
+    org_id: uuid_pkg.UUID,
+    member_id: uuid_pkg.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+) -> dict[str, str]:
+    """
+    Resend invite email to a pending organization member.
+
+    Requires admin or owner role. Only works for members who haven't
+    completed onboarding yet.
+    """
+    org = await organization_ops.get(db, org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    await require_org_access(db, org_id, user, min_role=MemberRole.ADMIN)
+
+    # Get the membership with user relationship
+    member = await org_member_ops.get(db, member_id)
+    if not member or member.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found",
+        )
+
+    # Refresh to ensure we have the user relationship loaded
+    await db.refresh(member, ["user"])
+
+    # Verify member is pending (hasn't completed onboarding)
+    if member.user and member.user.onboarding_completed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User has already joined and completed onboarding",
+        )
+
+    if not member.user or not member.user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Member has no associated email address",
+        )
+
+    # Resend invite via Supabase
+    try:
+        await org_member_ops.resend_invite(member.user.email)
+    except SupabaseInviteError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(e),
+        ) from e
+
+    # Update invited_at timestamp to track last resend
+    member.invited_at = datetime.now(UTC)
+    db.add(member)
+    await db.commit()
+
+    return {"message": "Invite email resent successfully"}

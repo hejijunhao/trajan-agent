@@ -258,6 +258,29 @@ class OrgMemberOperations:
         logger.info(f"Synced Supabase user {email} to local database")
         return user
 
+    async def resend_invite(self, email: str) -> None:
+        """
+        Resend invite email to a pending user via Supabase Admin API.
+
+        Calling invite_user_by_email on an existing user resends the invite
+        with a fresh link.
+
+        Raises:
+            SupabaseInviteError: If Supabase API call fails.
+        """
+        try:
+            supabase = get_supabase_admin_client()
+            redirect_url = f"{settings.frontend_url}/auth/callback"
+            invite_options = {"redirect_to": redirect_url}
+
+            await asyncio.to_thread(
+                supabase.auth.admin.invite_user_by_email, email, invite_options
+            )
+            logger.info(f"Resent invite email to {email}")
+        except Exception as e:
+            logger.error(f"Failed to resend invite to {email}: {e}")
+            raise SupabaseInviteError("Failed to resend invite email. Please try again later.") from e
+
     async def get_owners(
         self,
         db: AsyncSession,

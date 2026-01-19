@@ -217,6 +217,8 @@ class PlannedDocument:
     source_files: list[str]  # File paths to reference when generating
     priority: int  # 1-5 (1 = most important)
     folder: str = "blueprints"  # Target folder
+    section: str = "technical"  # "technical" or "conceptual"
+    subsection: str = "overview"  # e.g., "backend", "frontend", "concepts"
 
 
 @dataclass

@@ -21,6 +21,11 @@ from anthropic import APIError, RateLimitError
 
 from app.config import settings
 from app.models.document import Document
+from app.services.docs.section_config import (
+    VALID_SECTIONS,
+    VALID_SUBSECTIONS,
+    get_subsection_prompt,
+)
 from app.services.docs.types import (
     CodebaseContext,
     DocumentationPlan,
@@ -290,6 +295,14 @@ class DocumentationPlanner:
             sections.append("*No existing documentation found.*")
             sections.append("")
 
+        # Section taxonomy
+        sections.extend([
+            "---",
+            "",
+            get_subsection_prompt(),
+            "",
+        ])
+
         # Planning instructions
         sections.extend([
             "---",
@@ -303,9 +316,14 @@ class DocumentationPlanner:
             "- **New developers** — getting started and understanding the codebase",
             "- **Existing developers** — reference material and architectural guidance",
             "",
+            "**Important:** Include a mix of technical AND conceptual documents.",
+            "Conceptual docs help non-technical stakeholders understand the product.",
+            "",
             "For each planned document, specify:",
             "- **title**: Clear, descriptive title",
             "- **doc_type**: Category (overview, architecture, guide, reference, concept)",
+            "- **section**: Top-level section ('technical' or 'conceptual')",
+            "- **subsection**: Specific subsection (see section taxonomy above)",
             "- **purpose**: Why this doc is valuable and who it serves",
             "- **key_topics**: What should be covered (list of topics)",
             "- **source_files**: Which source files to reference when generating",
@@ -356,6 +374,8 @@ class DocumentationPlanner:
                             "required": [
                                 "title",
                                 "doc_type",
+                                "section",
+                                "subsection",
                                 "purpose",
                                 "key_topics",
                                 "source_files",
@@ -371,6 +391,21 @@ class DocumentationPlanner:
                                     "type": "string",
                                     "enum": DOC_TYPES,
                                     "description": "Document category",
+                                },
+                                "section": {
+                                    "type": "string",
+                                    "enum": list(VALID_SECTIONS),
+                                    "description": "Top-level section: 'technical' or 'conceptual'",
+                                },
+                                "subsection": {
+                                    "type": "string",
+                                    "enum": list(VALID_SUBSECTIONS),
+                                    "description": (
+                                        "Subsection within the section. "
+                                        "Technical: infrastructure, frontend, backend, database, "
+                                        "integrations, code-quality, security, performance. "
+                                        "Conceptual: overview, concepts, workflows, glossary."
+                                    ),
                                 },
                                 "purpose": {
                                     "type": "string",
@@ -432,6 +467,8 @@ class DocumentationPlanner:
                                 source_files=raw_doc.get("source_files", []),
                                 priority=raw_doc.get("priority", 3),
                                 folder=raw_doc.get("folder", "blueprints"),
+                                section=raw_doc.get("section", "technical"),
+                                subsection=raw_doc.get("subsection", "overview"),
                             )
                         )
 

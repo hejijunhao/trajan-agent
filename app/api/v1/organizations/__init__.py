@@ -23,6 +23,7 @@ from app.api.v1.organizations.members import (
     add_member,
     list_members,
     remove_member,
+    resend_invite,
     update_member_role,
 )
 from app.api.v1.organizations.subscriptions import get_subscription
@@ -43,6 +44,9 @@ router.add_api_route("/{org_id}/members", add_member, methods=["POST"], status_c
 router.add_api_route("/{org_id}/members/{member_id}", update_member_role, methods=["PATCH"])
 router.add_api_route(
     "/{org_id}/members/{member_id}", remove_member, methods=["DELETE"], status_code=204
+)
+router.add_api_route(
+    "/{org_id}/members/{member_id}/resend-invite", resend_invite, methods=["POST"]
 )
 
 # Subscription routes
