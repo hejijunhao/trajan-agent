@@ -1,5 +1,6 @@
 """Subscription-based feature gating dependencies."""
 
+import uuid as uuid_pkg
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, status
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.plans import PlanConfig, get_plan
 from app.core.database import get_db
+from app.domain.organization_operations import organization_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.organization import Organization
 from app.models.subscription import Subscription
@@ -45,6 +47,68 @@ async def get_subscription_context(
 
     return SubscriptionContext(
         organization=current_org,
+        subscription=subscription,
+        plan=plan,
+    )
+
+
+async def get_subscription_context_for_product(
+    db: AsyncSession,
+    product_id: uuid_pkg.UUID,
+) -> SubscriptionContext:
+    """
+    Get subscription context for a product's organization.
+
+    Use this when checking limits for operations on a specific product,
+    rather than the user's default organization. This ensures that collaborators
+    on a paid organization can use that org's subscription limits, even if their
+    personal organization is on a free tier.
+
+    Args:
+        db: Database session
+        product_id: The product whose organization's subscription to use
+
+    Returns:
+        SubscriptionContext for the product's organization
+
+    Raises:
+        HTTPException 404: Product or organization not found
+        HTTPException 400: Product has no organization
+        HTTPException 500: Organization has no subscription
+    """
+    from app.domain.product_operations import product_ops
+
+    product = await product_ops.get(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    if not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Product has no organization",
+        )
+
+    org = await organization_ops.get(db, product.organization_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    subscription = await subscription_ops.get_by_org(db, org.id)
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Organization subscription not found",
+        )
+
+    plan = get_plan(subscription.plan_tier)
+
+    return SubscriptionContext(
+        organization=org,
         subscription=subscription,
         plan=plan,
     )

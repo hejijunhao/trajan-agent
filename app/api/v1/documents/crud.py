@@ -6,7 +6,6 @@ from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import check_product_editor_access, get_current_user, get_db_with_rls
-from app.core.database import get_db
 from app.domain import document_ops, product_ops
 from app.models.document import DocumentCreate, DocumentUpdate
 from app.models.user import User

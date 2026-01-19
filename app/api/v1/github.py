@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SubscriptionContext, get_current_user, get_subscription_context
+from app.api.deps import get_current_user, get_subscription_context_for_product
 from app.core.database import get_db
 from app.domain import product_ops, repository_ops
 from app.domain.preferences_operations import preferences_ops
@@ -112,14 +112,17 @@ class BulkRefreshResponse(BaseModel):
 
 
 async def get_github_token(db: AsyncSession, user_id: uuid_pkg.UUID) -> str:
-    """Get GitHub token for user, raising 400 if not configured."""
+    """Get GitHub token for user, raising 400 if not configured.
+
+    Automatically decrypts the token if encryption is enabled.
+    """
     prefs = await preferences_ops.get_by_user_id(db, user_id)
     if not prefs or not prefs.github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured. Add your token in Settings > General.",
         )
-    return prefs.github_token
+    return preferences_ops.get_decrypted_token(prefs) or ""
 
 
 # --- Endpoints ---
@@ -188,7 +191,6 @@ async def list_github_repos(
 async def import_github_repos(
     data: ImportRequest,
     current_user: User = Depends(get_current_user),
-    sub_ctx: SubscriptionContext = Depends(get_subscription_context),
     db: AsyncSession = Depends(get_db),
 ) -> ImportResponse:
     """
@@ -197,9 +199,12 @@ async def import_github_repos(
     Fetches fresh metadata from GitHub and creates Repository records.
     Skips repos already imported to the same product.
 
-    Repository limits are enforced based on subscription plan:
+    Repository limits are enforced based on the TARGET product's organization:
     - Free tier (Observer): Cannot exceed base limit
     - Paid tiers: Allowed to exceed with overage charges
+
+    This ensures collaborators on paid organizations can import repos using
+    that org's subscription limits, not their personal org's limits.
     """
     # Verify product exists and belongs to user
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=data.product_id)
@@ -208,6 +213,11 @@ async def import_github_repos(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
         )
+
+    # Get subscription context for the PRODUCT's organization (not user's default)
+    # This fixes the cross-org subscription bug where free-tier collaborators
+    # couldn't import repos to paid organizations
+    sub_ctx = await get_subscription_context_for_product(db, data.product_id)
 
     # Check repo limit before import
     current_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)

@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     check_product_editor_access,
+    get_current_organization,
     get_current_user,
     get_db_with_rls,
-    get_subscription_context,
+    get_subscription_context_for_product,
 )
-from app.core.database import get_db
+from app.config.plans import get_plan
 from app.domain import repository_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.repository import RepositoryCreate, RepositoryUpdate
@@ -91,7 +91,6 @@ async def get_repository(
 async def create_repository(
     data: RepositoryCreate,
     current_user: User = Depends(get_current_user),
-    sub_ctx: SubscriptionContext = Depends(get_subscription_context),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
@@ -101,11 +100,36 @@ async def create_repository(
     - Free tier (Observer): Cannot exceed base limit
     - Paid tiers: Allowed to exceed with overage charges
 
+    Subscription limits are checked against the TARGET organization:
+    - If product_id is provided, uses the product's organization subscription
+    - Otherwise, falls back to the user's default organization
+
     Requires Editor or Admin access to the product.
     """
-    # Check product access
+    # Determine target organization for subscription limit check
+    # IMPORTANT: Use product's org, not user's default org (fixes cross-org subscription bug)
     if data.product_id:
+        # Check product access first
         await check_product_editor_access(db, data.product_id, current_user.id)
+        # Get subscription context for the PRODUCT's organization
+        sub_ctx = await get_subscription_context_for_product(db, data.product_id)
+    else:
+        # Fallback: repo without a product uses user's default organization
+        default_org = await get_current_organization(org_id=None, current_user=current_user, db=db)
+        subscription = await subscription_ops.get_by_org(db, default_org.id)
+        if not subscription:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Organization subscription not found",
+            )
+        # Create a minimal context for limit checking
+        from app.api.deps import SubscriptionContext
+
+        sub_ctx = SubscriptionContext(
+            organization=default_org,
+            subscription=subscription,
+            plan=get_plan(subscription.plan_tier),
+        )
 
     # Check repo limit before creation
     current_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)

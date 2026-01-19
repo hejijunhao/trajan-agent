@@ -55,7 +55,8 @@ async def run_analysis_task(
             # Fetch GitHub token from user preferences (security: not passed as param)
             user_uuid = uuid_pkg.UUID(user_id)
             prefs = await preferences_ops.get_by_user_id(session, user_id=user_uuid)
-            if not prefs or not prefs.github_token:
+            github_token = preferences_ops.get_decrypted_token(prefs) if prefs else None
+            if not github_token:
                 logger.error(f"No GitHub token found for user {user_id}")
                 product.analysis_status = "failed"
                 product.analysis_error = "GitHub token not found. Configure it in Settings."
@@ -65,7 +66,7 @@ async def run_analysis_task(
                 return
 
             # Run orchestrated analysis
-            orchestrator = AnalysisOrchestrator(session, prefs.github_token, product)
+            orchestrator = AnalysisOrchestrator(session, github_token, product)
             overview = await orchestrator.analyze_product(user_uuid)
 
             # Update product with results and clear progress

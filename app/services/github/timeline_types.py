@@ -20,6 +20,11 @@ class TimelineEvent:
     commit_author_avatar: str | None
     commit_url: str
 
+    # Commit stats (optional - may not be fetched for performance)
+    additions: int | None = None
+    deletions: int | None = None
+    files_changed: int | None = None
+
 
 @dataclass
 class TimelineResponse:

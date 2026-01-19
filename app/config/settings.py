@@ -29,5 +29,9 @@ class Settings(BaseSettings):
     # AI / Anthropic
     anthropic_api_key: str = ""
 
+    # Security - Encryption key for sensitive data at rest (GitHub tokens, etc.)
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    token_encryption_key: str = ""
+
 
 settings = Settings()

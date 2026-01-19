@@ -4,6 +4,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.encryption import token_encryption
 from app.models.user_preferences import UserPreferences
 
 
@@ -43,14 +44,36 @@ class PreferencesOperations:
         prefs: UserPreferences,
         obj_in: dict,
     ) -> UserPreferences:
-        """Update user preferences."""
+        """Update user preferences.
+
+        Encrypts github_token before storing if encryption is enabled.
+        """
         for field, value in obj_in.items():
             if value is not None and hasattr(prefs, field):
+                # Encrypt GitHub token before storing
+                if field == "github_token" and value:
+                    value = token_encryption.encrypt(value)
                 setattr(prefs, field, value)
+            elif value is None and field == "github_token":
+                # Allow explicit removal of token
+                setattr(prefs, field, None)
         db.add(prefs)
         await db.flush()
         await db.refresh(prefs)
         return prefs
+
+    def get_decrypted_token(self, prefs: UserPreferences) -> str | None:
+        """Get decrypted GitHub token from preferences.
+
+        Args:
+            prefs: UserPreferences instance.
+
+        Returns:
+            Decrypted token string, or None if not set.
+        """
+        if not prefs.github_token:
+            return None
+        return token_encryption.decrypt(prefs.github_token)
 
     async def validate_github_token(self, token: str) -> dict:
         """

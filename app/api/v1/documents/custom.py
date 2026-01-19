@@ -17,8 +17,12 @@ from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SubscriptionContext, get_current_user, get_db_with_rls, get_subscription_context
-from app.core.database import get_db
+from app.api.deps import (
+    SubscriptionContext,
+    get_current_user,
+    get_db_with_rls,
+    get_subscription_context,
+)
 from app.domain import preferences_ops, product_ops, repository_ops
 from app.models.custom_doc_job import CustomDocJob
 from app.models.user import User
@@ -136,9 +140,10 @@ async def generate_custom_document(
             detail="Product not found",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
@@ -183,7 +188,7 @@ async def generate_custom_document(
                 product=product,
                 repositories=repositories,
                 user_id=current_user.id,
-                github_token=preferences.github_token,
+                github_token=github_token,
             )
         )
 
@@ -193,7 +198,7 @@ async def generate_custom_document(
         )
     else:
         # Synchronous generation
-        github_service = GitHubService(preferences.github_token)
+        github_service = GitHubService(github_token)
         generator = CustomDocGenerator(db, github_service)
 
         result = await generator.generate(

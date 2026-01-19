@@ -481,6 +481,48 @@ class GitHubReadOperations:
                 last_commit_date=last_commit_date,
             )
 
+    async def get_commit_detail(
+        self,
+        owner: str,
+        repo: str,
+        sha: str,
+        timeout: float = 5.0,
+    ) -> dict[str, int] | None:
+        """
+        Fetch detailed stats for a single commit.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            sha: Commit SHA
+            timeout: Request timeout in seconds (default: 5s for performance)
+
+        Returns:
+            Dict with additions, deletions, files_changed or None if fetch fails
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.BASE_URL}/repos/{owner}/{repo}/commits/{sha}",
+                    headers=self._headers,
+                    timeout=timeout,
+                )
+
+                if response.status_code != 200:
+                    return None
+
+                data = response.json()
+                stats = data.get("stats", {})
+                files = data.get("files", [])
+
+                return {
+                    "additions": stats.get("additions", 0),
+                    "deletions": stats.get("deletions", 0),
+                    "files_changed": len(files),
+                }
+        except (httpx.TimeoutException, httpx.RequestError):
+            return None
+
     async def get_commits_for_timeline(
         self,
         owner: str,

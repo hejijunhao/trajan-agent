@@ -14,6 +14,7 @@ from .feature_gates import (
     FeatureGate,
     SubscriptionContext,
     get_subscription_context,
+    get_subscription_context_for_product,
     require_agent_enabled,
 )
 from .organization import (
@@ -50,6 +51,7 @@ __all__ = [
     # Feature gates
     "SubscriptionContext",
     "get_subscription_context",
+    "get_subscription_context_for_product",
     "FeatureGate",
     "require_agent_enabled",
     # Product access

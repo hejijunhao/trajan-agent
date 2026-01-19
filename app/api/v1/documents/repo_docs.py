@@ -10,7 +10,6 @@ from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_with_rls
-from app.core.database import get_db
 from app.domain import preferences_ops, product_ops, repository_ops
 from app.models.user import User
 from app.schemas.repo_docs import (
@@ -117,9 +116,10 @@ async def get_repo_docs_tree(
             detail="Product not found",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
@@ -137,7 +137,7 @@ async def get_repo_docs_tree(
             fetched_at=datetime.now(UTC),
         )
 
-    github_service = GitHubService(preferences.github_token)
+    github_service = GitHubService(github_token)
 
     repo_trees: list[RepoDocsTree] = []
     total_files = 0
@@ -210,15 +210,16 @@ async def get_repo_file_content(
             detail="Repository has no GitHub link",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured",
         )
 
-    github_service = GitHubService(preferences.github_token)
+    github_service = GitHubService(github_token)
 
     try:
         owner, repo_name = repo.full_name.split("/")

@@ -13,7 +13,6 @@ from app.api.deps import (
     get_db_with_rls,
     require_agent_enabled,
 )
-from app.core.database import get_db
 from app.domain import product_ops
 from app.domain.preferences_operations import preferences_ops
 from app.models.user import User
@@ -92,9 +91,9 @@ async def analyze_product(
                     f"Next analysis available in {hours_remaining} hours.",
                 )
 
-    # Get user's GitHub token from preferences
+    # Get user's GitHub token from preferences (check existence only - token fetched in background task)
     prefs = await preferences_ops.get_by_user_id(db, user_id=current_user.id)
-    if not prefs or not prefs.github_token:
+    if not prefs or not preferences_ops.get_decrypted_token(prefs):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token required for analysis. Configure it in Settings → General.",

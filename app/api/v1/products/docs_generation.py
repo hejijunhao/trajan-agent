@@ -8,7 +8,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import check_product_editor_access, get_current_user, get_db_with_rls
-from app.core.database import get_db
 from app.domain import product_ops
 from app.domain.preferences_operations import preferences_ops
 from app.models.user import User
@@ -59,9 +58,9 @@ async def generate_documentation(
             message="Documentation generation already in progress",
         )
 
-    # Get user's GitHub token from preferences
+    # Get user's GitHub token from preferences (check existence only - token fetched in background task)
     prefs = await preferences_ops.get_by_user_id(db, user_id=current_user.id)
-    if not prefs or not prefs.github_token:
+    if not prefs or not preferences_ops.get_decrypted_token(prefs):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token required for documentation generation. "
@@ -209,15 +208,16 @@ async def run_document_orchestrator(
                 logger.warning(f"Product {product_id} not found for docs generation")
                 return
 
-            # Get GitHub token from user preferences
+            # Get GitHub token from user preferences (decrypted)
             prefs = await preferences_ops.get_by_user_id(db, user_id=user_uuid)
-            if not prefs or not prefs.github_token:
+            github_token = preferences_ops.get_decrypted_token(prefs) if prefs else None
+            if not github_token:
                 product.docs_generation_status = "failed"
                 product.docs_generation_error = "GitHub token not found"
                 await db.commit()
                 return
 
-            github_service = GitHubService(prefs.github_token)
+            github_service = GitHubService(github_token)
 
             # Run orchestrator with specified mode
             orchestrator = DocumentOrchestrator(db, product, github_service)

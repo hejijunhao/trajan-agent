@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_with_rls
 from app.api.v1.documents.crud import serialize_document
-from app.core.database import get_db
 from app.domain import document_ops, preferences_ops, product_ops, repository_ops
 from app.models.user import User
 from app.schemas.docs import (
@@ -39,9 +38,10 @@ async def import_docs_from_repo(
             detail="Product not found",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
@@ -57,7 +57,7 @@ async def import_docs_from_repo(
             detail="No GitHub repositories linked to this product",
         )
 
-    github_service = GitHubService(preferences.github_token)
+    github_service = GitHubService(github_token)
     sync_service = DocsSyncService(db, github_service)
 
     total_imported = 0
@@ -96,9 +96,10 @@ async def get_docs_sync_status(
             detail="Product not found",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         # Return empty status if no token
         return DocsSyncStatusResponse(
             documents=[],
@@ -106,7 +107,7 @@ async def get_docs_sync_status(
             has_remote_changes=False,
         )
 
-    github_service = GitHubService(preferences.github_token)
+    github_service = GitHubService(github_token)
     sync_service = DocsSyncService(db, github_service)
 
     statuses = await sync_service.check_for_updates(
@@ -153,15 +154,16 @@ async def pull_remote_changes(
             detail="Document is not synced with GitHub",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured",
         )
 
-    github_service = GitHubService(preferences.github_token)
+    github_service = GitHubService(github_token)
     sync_service = DocsSyncService(db, github_service)
 
     updated_doc = await sync_service.pull_remote_changes(
@@ -197,9 +199,10 @@ async def sync_docs_to_repo(
             detail="Product not found",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
@@ -240,7 +243,7 @@ async def sync_docs_to_repo(
     # Use first repo (primary)
     repo = repos[0]
 
-    github_service = GitHubService(preferences.github_token)
+    github_service = GitHubService(github_token)
     sync_service = DocsSyncService(db, github_service)
 
     result = await sync_service.sync_to_repo(documents, repo, data.message)

@@ -6,7 +6,6 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_with_rls
-from app.core.database import get_db
 from app.domain import document_ops, preferences_ops, product_ops, repository_ops
 from app.models.user import User
 from app.schemas.docs import (
@@ -42,9 +41,10 @@ async def refresh_document(
             detail="Document is not linked to a product",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
@@ -60,7 +60,7 @@ async def refresh_document(
             detail="No GitHub repositories linked to this product",
         )
 
-    github_service = GitHubService(preferences.github_token)
+    github_service = GitHubService(github_token)
     refresher = DocumentRefresher(db, github_service)
 
     result = await refresher.refresh_document(doc, repos)
@@ -91,9 +91,10 @@ async def refresh_all_documents(
             detail="Product not found",
         )
 
-    # Get user's GitHub token
+    # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    if not preferences or not preferences.github_token:
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub token not configured. Please add your GitHub token in Settings.",
@@ -109,7 +110,7 @@ async def refresh_all_documents(
             detail="No GitHub repositories linked to this product",
         )
 
-    github_service = GitHubService(preferences.github_token)
+    github_service = GitHubService(github_token)
     refresher = DocumentRefresher(db, github_service)
 
     result = await refresher.refresh_all(
