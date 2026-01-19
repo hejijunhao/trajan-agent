@@ -13,7 +13,6 @@ from app.api.deps import (
     get_db_with_rls,
     get_subscription_context,
 )
-from app.core.database import get_db
 from app.domain import product_ops
 from app.domain.organization_operations import organization_ops
 from app.domain.product_access_operations import product_access_ops
@@ -105,13 +104,44 @@ async def get_product(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
-    """Get a single product with all related entities."""
-    product = await product_ops.get_with_relations(db, user_id=current_user.id, id=product_id)
+    """Get a single product with all related entities.
+
+    Access control: User must have at least viewer access to the product
+    through their organization membership.
+    """
+    # Fetch product by ID (without user_id filter for org-based access)
+    product = await product_ops.get_with_relations_by_id(db, id=product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
         )
+
+    # Check organization membership and product access
+    if not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    org_role = await organization_ops.get_member_role(db, product.organization_id, current_user.id)
+    if not org_role:
+        # User is not a member of this product's organization
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Verify user has at least viewer access to this product
+    access = await product_access_ops.get_effective_access(
+        db, product_id, current_user.id, org_role
+    )
+    if access == "none":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
     return {
         "id": str(product.id),
         "name": product.name,

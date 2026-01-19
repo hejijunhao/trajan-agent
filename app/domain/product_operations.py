@@ -79,10 +79,29 @@ class ProductOperations(BaseOperations[Product]):
         user_id: uuid_pkg.UUID,
         id: uuid_pkg.UUID,
     ) -> Product | None:
-        """Get product with all related entities."""
+        """Get product with all related entities (legacy user-scoped version)."""
         statement = (
             select(Product)
             .where(Product.id == id, Product.user_id == user_id)  # type: ignore[arg-type]
+            .options(
+                selectinload(Product.repositories),  # type: ignore[arg-type]
+                selectinload(Product.work_items),  # type: ignore[arg-type]
+                selectinload(Product.documents),  # type: ignore[arg-type]
+                selectinload(Product.app_info_entries),  # type: ignore[arg-type]
+            )
+        )
+        result = await db.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def get_with_relations_by_id(
+        self,
+        db: AsyncSession,
+        id: uuid_pkg.UUID,
+    ) -> Product | None:
+        """Get product with all related entities by ID only (for org-based access)."""
+        statement = (
+            select(Product)
+            .where(Product.id == id)  # type: ignore[arg-type]
             .options(
                 selectinload(Product.repositories),  # type: ignore[arg-type]
                 selectinload(Product.work_items),  # type: ignore[arg-type]
