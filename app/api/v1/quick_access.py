@@ -11,8 +11,10 @@ from sqlmodel import SQLModel
 from app.api.deps import get_current_user
 from app.config import settings
 from app.core.database import get_db
-from app.domain import product_ops
+from app.core.rate_limit import REVEAL_LIMIT, rate_limiter
+from app.domain import app_info_ops, product_ops
 from app.domain.organization_operations import organization_ops
+from app.domain.product_access_operations import product_access_ops
 from app.models.organization import MemberRole
 from app.models.product import Product
 from app.models.user import User
@@ -244,8 +246,6 @@ async def get_entries_by_token(
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, str | bool | None]]:
     """Get App Info entries for a product by quick access token. Requires org membership."""
-    from app.domain import app_info_ops
-
     product = await product_ops.get_by_quick_access_token(db, token)
     if not product:
         raise HTTPException(
@@ -294,9 +294,11 @@ async def reveal_entry_by_token(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str | None]:
-    """Reveal the actual value of a secret app info entry via quick access."""
-    from app.domain import app_info_ops
+    """Reveal the actual value of a secret app info entry via quick access.
 
+    **Authorization:** Requires editor or admin access to the product (not just org membership).
+    **Rate limited:** 30 requests per minute per user.
+    """
     product = await product_ops.get_by_quick_access_token(db, token)
     if not product:
         raise HTTPException(
@@ -305,13 +307,35 @@ async def reveal_entry_by_token(
         )
 
     # Verify user is a member of the product's organization
-    if product.organization_id:
-        is_member = await organization_ops.is_member(db, product.organization_id, current_user.id)
-        if not is_member:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You must be a member of this organization to access this page",
-            )
+    if not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Product is not associated with an organization",
+        )
+
+    org_role = await organization_ops.get_member_role(
+        db, product.organization_id, current_user.id
+    )
+    if not org_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be a member of this organization to access this page",
+        )
+
+    # Check for editor/admin access to reveal secrets
+    # Org admins/owners always have admin access; others need explicit product access
+    can_reveal = await product_access_ops.user_can_access_variables(
+        db, product.id, current_user.id, org_role
+    )
+    if not can_reveal:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You need editor or admin access to reveal secret values. "
+            "Please contact your project Admin to request Editor access.",
+        )
+
+    # Rate limiting
+    rate_limiter.check_rate_limit(current_user.id, "quick_access_reveal", REVEAL_LIMIT)
 
     # Get the specific entry
     entry = await app_info_ops.get_by_id_for_product(db, product_id=product.id, entry_id=entry_id)
@@ -321,4 +345,6 @@ async def reveal_entry_by_token(
             detail="App info entry not found",
         )
 
-    return {"value": entry.value}
+    # Decrypt the value before returning
+    decrypted_value = app_info_ops.decrypt_entry_value(entry)
+    return {"value": decrypted_value}

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_with_rls
-from app.core.database import get_db
+from app.core.rate_limit import EXPORT_LIMIT, REVEAL_LIMIT, rate_limiter
 from app.domain import app_info_ops
 from app.domain.organization_operations import organization_ops
 from app.domain.product_access_operations import product_access_ops
@@ -17,9 +17,15 @@ from app.models.app_info import (
     AppInfoExportResponse,
     AppInfoUpdate,
 )
+from app.models.organization import MemberRole
 from app.models.user import User
 
 router = APIRouter(prefix="/app-info", tags=["app info"])
+
+# Bulk import limits
+MAX_BULK_ENTRIES = 500  # Maximum entries in a single bulk import
+MAX_KEY_LENGTH = 255  # Maximum length of a key
+MAX_VALUE_LENGTH = 10000  # Maximum length of a value (10KB)
 
 
 async def _check_variables_access(
@@ -115,9 +121,30 @@ async def export_app_info(
 
     Returns all entries for a product with their actual values (secrets unmasked),
     ready for formatting as a .env file.
+
+    **Authorization:** Requires org admin or owner role (not just editor access).
+    **Rate limited:** 10 requests per minute per user.
     """
-    # Check variables access
+    # Check variables access (editor or above)
     await _check_variables_access(db, product_id, current_user.id)
+
+    # Additional authorization: export requires admin/owner role
+    product = await product_ops.get(db, product_id)
+    if not product or not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    org_role = await organization_ops.get_member_role(db, product.organization_id, current_user.id)
+    if org_role not in (MemberRole.OWNER.value, MemberRole.ADMIN.value):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Export requires organization admin or owner access",
+        )
+
+    # Rate limiting
+    rate_limiter.check_rate_limit(current_user.id, "app_info_export", EXPORT_LIMIT)
 
     entries = await app_info_ops.get_by_product(
         db,
@@ -130,7 +157,8 @@ async def export_app_info(
         entries=[
             AppInfoExportEntry(
                 key=e.key or "",
-                value=e.value or "",
+                # Decrypt the value for export
+                value=app_info_ops.decrypt_entry_value(e) or "",
                 category=e.category,
                 is_secret=e.is_secret or False,
                 description=e.description,
@@ -276,7 +304,10 @@ async def reveal_app_info_value(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
-    """Reveal the actual value of a secret app info entry for copying."""
+    """Reveal the actual value of a secret app info entry for copying.
+
+    **Rate limited:** 30 requests per minute per user.
+    """
     entry = await app_info_ops.get_by_user(db, user_id=current_user.id, id=app_info_id)
     if not entry:
         raise HTTPException(
@@ -288,7 +319,12 @@ async def reveal_app_info_value(
     if entry.product_id:
         await _check_variables_access(db, entry.product_id, current_user.id)
 
-    return {"value": entry.value}
+    # Rate limiting
+    rate_limiter.check_rate_limit(current_user.id, "app_info_reveal", REVEAL_LIMIT)
+
+    # Decrypt the value before returning
+    decrypted_value = app_info_ops.decrypt_entry_value(entry)
+    return {"value": decrypted_value}
 
 
 @router.post("/bulk", response_model=AppInfoBulkResponse, status_code=status.HTTP_201_CREATED)
@@ -302,9 +338,39 @@ async def bulk_create_app_info(
 
     Entries with duplicate keys (already existing in the product) are skipped.
     Duplicate keys within the request take the last occurrence.
+
+    **Validation limits:**
+    - Maximum 500 entries per request
+    - Key length: max 255 characters
+    - Value length: max 10,000 characters (10KB)
     """
     # Check variables access
     await _check_variables_access(db, data.product_id, current_user.id)
+
+    # Validate bulk import limits
+    if len(data.entries) > MAX_BULK_ENTRIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Too many entries. Maximum {MAX_BULK_ENTRIES} entries per request.",
+        )
+
+    # Validate each entry
+    validation_errors: list[str] = []
+    for i, entry in enumerate(data.entries):
+        if len(entry.key) > MAX_KEY_LENGTH:
+            validation_errors.append(f"Entry {i}: key exceeds {MAX_KEY_LENGTH} characters")
+        if len(entry.value) > MAX_VALUE_LENGTH:
+            validation_errors.append(f"Entry {i} ({entry.key}): value exceeds {MAX_VALUE_LENGTH} characters")
+        # Check for empty keys
+        if not entry.key.strip():
+            validation_errors.append(f"Entry {i}: key cannot be empty")
+
+    if validation_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Validation failed: {'; '.join(validation_errors[:5])}"
+            + (f" and {len(validation_errors) - 5} more errors" if len(validation_errors) > 5 else ""),
+        )
 
     created, skipped = await app_info_ops.bulk_create(
         db,

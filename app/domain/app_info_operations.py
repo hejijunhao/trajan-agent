@@ -3,6 +3,7 @@ import uuid as uuid_pkg
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.encryption import token_encryption
 from app.domain.base_operations import BaseOperations
 from app.models.app_info import AppInfo, AppInfoBulkEntry
 
@@ -12,6 +13,70 @@ class AppInfoOperations(BaseOperations[AppInfo]):
 
     def __init__(self) -> None:
         super().__init__(AppInfo)
+
+    def _encrypt_value(self, value: str, is_secret: bool) -> str:
+        """Encrypt value if it's marked as a secret."""
+        if is_secret and value:
+            return token_encryption.encrypt(value)
+        return value
+
+    def _decrypt_value(self, value: str | None) -> str | None:
+        """Decrypt value if it was encrypted."""
+        if value:
+            return token_encryption.decrypt(value)
+        return value
+
+    def decrypt_entry_value(self, entry: AppInfo) -> str | None:
+        """Decrypt the value of an app info entry for reveal operations."""
+        return self._decrypt_value(entry.value)
+
+    async def create(
+        self,
+        db: AsyncSession,
+        obj_in: dict[str, object],
+        user_id: uuid_pkg.UUID,
+    ) -> AppInfo:
+        """Create a new app info entry with encryption for secrets."""
+        # Encrypt value if marked as secret
+        value = obj_in.get("value")
+        if obj_in.get("is_secret") and value and isinstance(value, str):
+            obj_in = dict(obj_in)  # Don't mutate the input
+            obj_in["value"] = self._encrypt_value(value, True)
+
+        db_obj = AppInfo(**obj_in, user_id=user_id)
+        db.add(db_obj)
+        await db.flush()
+        await db.refresh(db_obj)
+        return db_obj
+
+    async def update(
+        self,
+        db: AsyncSession,
+        db_obj: AppInfo,
+        obj_in: dict[str, object],
+    ) -> AppInfo:
+        """Update an app info entry with encryption handling.
+
+        Encrypts the value if:
+        - The entry is being changed to a secret (is_secret=True)
+        - OR the entry is already a secret and value is being updated
+        """
+        # Determine if we need to encrypt the value
+        is_secret_input = obj_in.get("is_secret")
+        is_secret = is_secret_input if is_secret_input is not None else db_obj.is_secret
+        value = obj_in.get("value")
+
+        if value is not None and is_secret and isinstance(value, str):
+            obj_in = dict(obj_in)  # Don't mutate the input
+            obj_in["value"] = self._encrypt_value(value, True)
+
+        for field, field_value in obj_in.items():
+            if field_value is not None:
+                setattr(db_obj, field, field_value)
+        db.add(db_obj)
+        await db.flush()
+        await db.refresh(db_obj)
+        return db_obj
 
     async def get_by_product_for_org(
         self,
@@ -146,11 +211,14 @@ class AppInfoOperations(BaseOperations[AppInfo]):
                 skipped.append(key)
                 continue
 
+            # Encrypt value if marked as secret
+            encrypted_value = self._encrypt_value(entry.value, entry.is_secret)
+
             db_obj = AppInfo(
                 user_id=user_id,
                 product_id=product_id,
                 key=entry.key,
-                value=entry.value,
+                value=encrypted_value,
                 category=entry.category,
                 is_secret=entry.is_secret,
                 description=entry.description,
