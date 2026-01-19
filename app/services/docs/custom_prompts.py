@@ -205,30 +205,86 @@ def build_custom_prompt(request: CustomDocRequest, context: CodebaseContext) -> 
 
     # Relevant source files (if focus_paths specified, those are prioritized)
     if context.all_key_files:
+        # Determine which files to include and track focus status
+        files_to_include = context.all_key_files
+        focus_note = ""
+        fallback_warning = ""
+
+        if request.focus_paths:
+            focused_files = [
+                f
+                for f in context.all_key_files
+                if any(focus in f.path for focus in request.focus_paths)
+            ]
+            if focused_files:
+                files_to_include = focused_files
+                focus_note = (
+                    f"**Focus requested:** {', '.join(request.focus_paths)} "
+                    f"({len(focused_files)} matching files found)"
+                )
+            else:
+                # Fallback case - explicitly warn about this
+                files_to_include = context.all_key_files[:10]
+                focus_note = f"**Focus requested:** {', '.join(request.focus_paths)}"
+                fallback_warning = (
+                    "**WARNING: No files matched the requested focus paths.** "
+                    "Falling back to general codebase files. "
+                    "DO NOT document features implied by the focus paths unless you see "
+                    "explicit evidence in the files below."
+                )
+
+        # Limit files and track truncation
+        files_to_include = files_to_include[:15]
+        truncated_files = [f for f in files_to_include if len(f.content) > 5000]
+
         sections.extend(
             [
                 "---",
                 "",
                 "## Source Files",
                 "",
-                "Use these source files as reference for accurate, specific documentation:",
+            ]
+        )
+
+        # Add focus note if applicable
+        if focus_note:
+            sections.append(focus_note)
+            sections.append("")
+
+        # Add fallback warning if applicable
+        if fallback_warning:
+            sections.append(fallback_warning)
+            sections.append("")
+
+        # File transparency: list exactly what's being analyzed
+        sections.extend(
+            [
+                "**You are analyzing ONLY the following files.** If something is not in these "
+                "files, it is not visible to you and you should NOT document it as existing:",
+                "",
+                "```",
+                "\n".join(f.path for f in files_to_include),
+                "```",
                 "",
             ]
         )
 
-        # Filter files if focus_paths are specified
-        files_to_include = context.all_key_files
-        if request.focus_paths:
-            files_to_include = [
-                f
-                for f in context.all_key_files
-                if any(focus in f.path for focus in request.focus_paths)
-            ]
-            # Fall back to all files if no matches
-            if not files_to_include:
-                files_to_include = context.all_key_files[:10]  # Limit to avoid token overflow
+        # Truncation warning if applicable
+        if truncated_files:
+            sections.extend(
+                [
+                    f"**Note:** {len(truncated_files)} file(s) have been truncated to 5000 "
+                    "characters due to size limits. Some implementation details may not be "
+                    "visible. State this limitation when relevant rather than guessing at "
+                    "hidden content.",
+                    "",
+                ]
+            )
 
-        for file in files_to_include[:15]:  # Limit files to avoid token overflow
+        sections.append("---")
+        sections.append("")
+
+        for file in files_to_include:
             sections.extend(
                 [
                     f"### `{file.path}`",
@@ -240,15 +296,44 @@ def build_custom_prompt(request: CustomDocRequest, context: CodebaseContext) -> 
                 ]
             )
 
-    # Final instructions
+    # Final instructions with anti-hallucination rules
     sections.extend(
         [
             "---",
             "",
-            "## Instructions",
+            "## Critical Documentation Rules",
             "",
-            "Generate the documentation based on the user's request and the context provided.",
-            "Be accurate and only include information you can verify from the source files.",
+            "**IMPORTANT: Follow these rules strictly to ensure accuracy:**",
+            "",
+            "1. **ONLY document what exists in the provided source files.** Do not invent, "
+            "assume, or speculate about features, endpoints, models, or patterns that are "
+            "not explicitly visible in the code above.",
+            "",
+            "2. **If the user asks about something not in the code, say so.** Example: "
+            "'The provided source files do not appear to contain a payment processing system.' "
+            "Do not generate plausible-sounding documentation about non-existent features.",
+            "",
+            "3. **Flag uncertainty explicitly.** If you're inferring something rather than "
+            "seeing it directly in code, mark it clearly: '[Inferred from file structure]' or "
+            "'[Based on naming conventions - not verified in code]'.",
+            "",
+            "4. **Do not fill gaps with generic content.** If implementation details aren't "
+            "visible in the provided files, state: 'Implementation details not visible in "
+            "provided files' rather than inventing plausible implementations.",
+            "",
+            "5. **Avoid these common hallucination patterns:**",
+            "   - Inventing API endpoints not defined in the route files shown",
+            "   - Describing database tables/models not visible in the schema files",
+            "   - Adding features based on project name or description alone",
+            "   - Assuming standard patterns (auth, payments, caching) exist without code evidence",
+            "   - Describing configuration options not shown in the config files",
+            "",
+            "---",
+            "",
+            "## Output Instructions",
+            "",
+            "Generate the documentation based on the user's request and the source files above.",
+            "Be accurate and factual. When in doubt, be conservative rather than speculative.",
             "",
             "Use the `save_document` tool to output your documentation.",
             "Also suggest a title for this document using the tool.",

@@ -6,6 +6,7 @@ from app.models.billing import (
     ReferralStatus,
     UsageSnapshot,
 )
+from app.models.commit_stats_cache import CommitStatsCache
 from app.models.custom_doc_job import CustomDocJob, JobStatus
 from app.models.document import Document, DocumentCreate, DocumentUpdate
 from app.models.feedback import (
@@ -47,6 +48,7 @@ from app.models.user_preferences import UserPreferences
 from app.models.work_item import WorkItem, WorkItemCreate, WorkItemUpdate
 
 __all__ = [
+    "CommitStatsCache",
     "User",
     "UserPreferences",
     "Organization",

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_with_rls
-from app.domain import product_ops, repository_ops
+from app.domain import commit_stats_cache_ops, product_ops, repository_ops
 from app.domain.preferences_operations import preferences_ops
 from app.models import User
 from app.models.repository import Repository
@@ -147,7 +147,7 @@ async def get_product_timeline(
         last = events[-1]
         next_cursor = f"{last.timestamp}:{last.commit_sha}"
 
-    # 8. Fetch commit stats in parallel (with concurrency limit)
+    # 8. Fetch commit stats: cache-first, then GitHub API for misses
     # Build a map of repo full_name -> (owner, repo_name) for stat fetching
     repo_map: dict[str, tuple[str, str]] = {}
     for repo in repos:
@@ -155,27 +155,60 @@ async def get_product_timeline(
             owner_name, repo_name = repo.full_name.split("/")
             repo_map[repo.full_name] = (owner_name, repo_name)
 
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_STAT_FETCHES)
+    # 8a. Build lookup keys for all events
+    lookup_keys = [(e.repository_full_name, e.commit_sha) for e in events]
 
-    async def fetch_commit_stats(event: TimelineEvent) -> None:
-        """Fetch and populate stats for a single commit."""
-        repo_info = repo_map.get(event.repository_full_name)
-        if not repo_info:
-            return
-        owner_name, repo_name = repo_info
+    # 8b. Bulk fetch from cache
+    cached_stats = await commit_stats_cache_ops.get_bulk_by_repo_shas(db, lookup_keys)
 
-        async with semaphore:
-            stats = await github.get_commit_detail(owner_name, repo_name, event.commit_sha)
-            if stats:
-                event.additions = stats["additions"]
-                event.deletions = stats["deletions"]
-                event.files_changed = stats["files_changed"]
+    # 8c. Identify cache misses and populate hits
+    events_needing_fetch: list[TimelineEvent] = []
+    for event in events:
+        key = (event.repository_full_name, event.commit_sha)
+        if key in cached_stats:
+            cached = cached_stats[key]
+            event.additions = cached.additions
+            event.deletions = cached.deletions
+            event.files_changed = cached.files_changed
+        else:
+            events_needing_fetch.append(event)
 
-    # Fetch stats for all events in parallel (fire-and-forget failures)
-    await asyncio.gather(
-        *[fetch_commit_stats(e) for e in events],
-        return_exceptions=True,
-    )
+    # 8d. Fetch missing stats from GitHub (with concurrency limit)
+    if events_needing_fetch:
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_STAT_FETCHES)
+        stats_to_cache: list[dict[str, str | int]] = []
+
+        async def fetch_and_cache_stats(event: TimelineEvent) -> None:
+            """Fetch stats from GitHub and queue for caching."""
+            repo_info = repo_map.get(event.repository_full_name)
+            if not repo_info:
+                return
+            owner_name, repo_name = repo_info
+
+            async with semaphore:
+                stats = await github.get_commit_detail(
+                    owner_name, repo_name, event.commit_sha
+                )
+                if stats:
+                    event.additions = stats["additions"]
+                    event.deletions = stats["deletions"]
+                    event.files_changed = stats["files_changed"]
+                    stats_to_cache.append({
+                        "full_name": event.repository_full_name,
+                        "sha": event.commit_sha,
+                        "additions": stats["additions"],
+                        "deletions": stats["deletions"],
+                        "files_changed": stats["files_changed"],
+                    })
+
+        await asyncio.gather(
+            *[fetch_and_cache_stats(e) for e in events_needing_fetch],
+            return_exceptions=True,
+        )
+
+        # 8e. Bulk insert newly fetched stats into cache
+        if stats_to_cache:
+            await commit_stats_cache_ops.bulk_upsert(db, stats_to_cache)
 
     return {
         "events": [e.__dict__ for e in events],
