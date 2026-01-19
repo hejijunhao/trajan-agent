@@ -4,7 +4,7 @@ import uuid as uuid_pkg
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column
+from sqlalchemy import Column, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -60,7 +60,9 @@ class Feedback(UUIDMixin, TimestampMixin, SQLModel, table=True):
 
     # AI Interpretation
     ai_summary: str | None = Field(default=None)
-    ai_processed_at: datetime | None = Field(default=None)
+    ai_processed_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None, sa_type=DateTime(timezone=True)
+    )
 
     # Context
     page_url: str | None = Field(default=None, max_length=500)

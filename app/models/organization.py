@@ -42,13 +42,15 @@ class Organization(SQLModel, table=True):
     settings: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
 
     # Timestamps
-    created_at: datetime = Field(
+    created_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": text("now()")},
     )
-    updated_at: datetime | None = Field(
+    updated_at: datetime | None = Field(  # type: ignore[call-overload]
         default=None,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"onupdate": text("now()")},
     )
 

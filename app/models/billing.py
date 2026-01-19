@@ -104,9 +104,10 @@ class UsageSnapshot(SQLModel, table=True):
         sa_column_kwargs={"comment": "Repos over base limit (billable on paid plans)"},
     )
 
-    created_at: datetime = Field(
+    created_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": text("now()")},
     )
 
@@ -171,9 +172,10 @@ class BillingEvent(SQLModel, table=True):
         ),
     )
 
-    created_at: datetime = Field(
+    created_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": text("now()")},
     )
 
@@ -255,9 +257,10 @@ class Referral(SQLModel, table=True):
     )
 
     # Timestamps
-    created_at: datetime = Field(
+    created_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": text("now()")},
     )
     signed_up_at: datetime | None = Field(  # type: ignore[call-overload]

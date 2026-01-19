@@ -2,7 +2,7 @@ import uuid as uuid_pkg
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, ForeignKey, text
+from sqlalchemy import Column, DateTime, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -41,13 +41,15 @@ class UserPreferences(SQLModel, table=True):
     sidebar_default: str = Field(default="expanded", max_length=20)  # 'expanded', 'collapsed'
 
     # Timestamps
-    created_at: datetime = Field(
+    created_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": text("now()")},
     )
-    updated_at: datetime | None = Field(
+    updated_at: datetime | None = Field(  # type: ignore[call-overload]
         default=None,
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"onupdate": text("now()")},
     )
 
