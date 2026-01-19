@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config.settings import settings
 from app.models.organization import MemberRole, OrganizationMember
 from app.models.user import User
 from app.services.supabase import get_supabase_admin_client
@@ -185,9 +186,13 @@ class OrgMemberOperations:
 
         try:
             supabase = get_supabase_admin_client()
+            # Build redirect URL to our auth callback (not Supabase's default)
+            redirect_url = f"{settings.frontend_url}/auth/callback"
+            invite_options = {"redirect_to": redirect_url}
+
             # Use thread pool to avoid blocking the async event loop
             response = await asyncio.to_thread(
-                supabase.auth.admin.invite_user_by_email, email
+                supabase.auth.admin.invite_user_by_email, email, invite_options
             )
             supabase_user_id = uuid_pkg.UUID(response.user.id)
         except Exception as e:
@@ -216,9 +221,7 @@ class OrgMemberOperations:
 
             # Log and re-raise other errors with cleaner message
             logger.error(f"Supabase invite failed for {email}: {e}")
-            raise SupabaseInviteError(
-                "Failed to send invite email. Please try again later."
-            ) from e
+            raise SupabaseInviteError("Failed to send invite email. Please try again later.") from e
 
         # Create public.users record
         user = User(id=supabase_user_id, email=email)
