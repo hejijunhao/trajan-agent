@@ -43,6 +43,7 @@ class ProductUpdate(SQLModel):
     description: str | None = None
     icon: str | None = None
     color: str | None = None
+    lead_user_id: uuid_pkg.UUID | None = None
 
 
 class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True):
@@ -57,6 +58,16 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
         index=True,
         sa_column_kwargs={
             "comment": "Organization that owns this product (nullable during migration)"
+        },
+    )
+
+    # Project Lead - designated team member responsible for the product
+    lead_user_id: uuid_pkg.UUID | None = Field(
+        default=None,
+        foreign_key="users.id",
+        index=True,
+        sa_column_kwargs={
+            "comment": "Designated project lead (org member responsible for the product)"
         },
     )
 
@@ -139,6 +150,9 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     user: Optional["User"] = Relationship(
         back_populates="products",
         sa_relationship_kwargs={"foreign_keys": "[Product.user_id]"},
+    )
+    lead_user: Optional["User"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[Product.lead_user_id]"},
     )
     organization: Optional["Organization"] = Relationship(back_populates="products")
     repositories: list["Repository"] = Relationship(

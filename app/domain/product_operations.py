@@ -107,6 +107,7 @@ class ProductOperations(BaseOperations[Product]):
                 selectinload(Product.work_items),  # type: ignore[arg-type]
                 selectinload(Product.documents),  # type: ignore[arg-type]
                 selectinload(Product.app_info_entries),  # type: ignore[arg-type]
+                selectinload(Product.lead_user),  # type: ignore[arg-type]
             )
         )
         result = await db.execute(statement)
@@ -131,10 +132,11 @@ class ProductOperations(BaseOperations[Product]):
         db: AsyncSession,
         organization_id: uuid_pkg.UUID,
     ) -> list[Product]:
-        """Get all products in an organization."""
+        """Get all products in an organization (with lead_user for list display)."""
         statement = (
             select(Product)
             .where(Product.organization_id == organization_id)  # type: ignore[arg-type]
+            .options(selectinload(Product.lead_user))  # type: ignore[arg-type]
             .order_by(Product.created_at.desc())  # type: ignore[attr-defined]
         )
         result = await db.execute(statement)

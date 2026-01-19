@@ -90,6 +90,16 @@ async def list_products(
             if top_contributors and len(top_contributors) > 0:
                 top_contributor = top_contributors[0]
 
+        # Extract lead_user info if assigned
+        lead_user = None
+        if p.lead_user:
+            lead_user = {
+                "id": str(p.lead_user.id),
+                "email": p.lead_user.email,
+                "display_name": p.lead_user.display_name,
+                "avatar_url": p.lead_user.avatar_url,
+            }
+
         result.append(
             {
                 "id": str(p.id),
@@ -102,6 +112,8 @@ async def list_products(
                 "updated_at": p.updated_at.isoformat(),
                 "collaborator_count": collab_count,
                 "top_contributor": top_contributor,
+                "lead_user_id": str(p.lead_user_id) if p.lead_user_id else None,
+                "lead_user": lead_user,
             }
         )
 
@@ -152,6 +164,16 @@ async def get_product(
             detail="Product not found",
         )
 
+    # Extract lead_user info if assigned
+    lead_user = None
+    if product.lead_user:
+        lead_user = {
+            "id": str(product.lead_user.id),
+            "email": product.lead_user.email,
+            "display_name": product.lead_user.display_name,
+            "avatar_url": product.lead_user.avatar_url,
+        }
+
     return {
         "id": str(product.id),
         "name": product.name,
@@ -167,6 +189,8 @@ async def get_product(
         "repositories_count": len(product.repositories),
         "work_items_count": len(product.work_items),
         "documents_count": len(product.documents),
+        "lead_user_id": str(product.lead_user_id) if product.lead_user_id else None,
+        "lead_user": lead_user,
     }
 
 
