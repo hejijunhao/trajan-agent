@@ -4,8 +4,9 @@ import uuid as uuid_pkg
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, SQLModel
 
 from app.models.base import TimestampMixin, UUIDMixin
@@ -41,16 +42,20 @@ class Feedback(UUIDMixin, TimestampMixin, SQLModel, table=True):
     """User feedback submission (bug report or feature request)."""
 
     __tablename__ = "feedback"
+    __table_args__ = (Index("ix_feedback_created_at", "created_at"),)
 
     # User who submitted
     user_id: uuid_pkg.UUID = Field(
-        foreign_key="users.id",
-        nullable=False,
-        index=True,
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
     )
 
     # Type & Categories
-    type: str = Field(max_length=20, nullable=False)
+    type: str = Field(max_length=20, nullable=False, index=True)
     tags: list[str] = Field(default=[], sa_column=Column(JSONB, server_default="[]"))
     severity: str | None = Field(default=None, max_length=20)
 
@@ -69,7 +74,7 @@ class Feedback(UUIDMixin, TimestampMixin, SQLModel, table=True):
     user_agent: str | None = Field(default=None, max_length=500)
 
     # Status Tracking
-    status: str = Field(default="new", max_length=20)
+    status: str = Field(default="new", max_length=20, index=True)
     admin_notes: str | None = Field(default=None)
 
 

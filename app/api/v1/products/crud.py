@@ -77,10 +77,19 @@ async def list_products(
     # Apply pagination
     paginated = accessible_products[skip : skip + limit]
 
-    # Build response with collaborator counts
+    # Build response with collaborator counts and top contributors
     result = []
     for p in paginated:
         collab_count = await product_access_ops.get_product_collaborators_count(db, p.id)
+
+        # Extract top contributor from product_overview if available
+        top_contributor = None
+        if p.product_overview and isinstance(p.product_overview, dict):
+            stats = p.product_overview.get("stats", {})
+            top_contributors = stats.get("top_contributors", [])
+            if top_contributors and len(top_contributors) > 0:
+                top_contributor = top_contributors[0]
+
         result.append(
             {
                 "id": str(p.id),
@@ -92,6 +101,7 @@ async def list_products(
                 "created_at": p.created_at.isoformat(),
                 "updated_at": p.updated_at.isoformat(),
                 "collaborator_count": collab_count,
+                "top_contributor": top_contributor,
             }
         )
 
