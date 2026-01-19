@@ -28,6 +28,11 @@ from app.config import settings
 from app.models.document import Document
 from app.models.product import Product
 from app.models.repository import Repository
+from app.services.docs.assessment_prompts import (
+    ASSESSMENT_SUBSECTIONS,
+    ASSESSMENT_TITLES,
+    build_assessment_prompt,
+)
 from app.services.docs.codebase_analyzer import CodebaseAnalyzer
 from app.services.docs.content_validator import ContentValidator
 from app.services.docs.custom_prompts import build_custom_prompt
@@ -208,6 +213,103 @@ class CustomDocGenerator:
 
         except Exception as e:
             logger.error(f"Failed to generate custom document: {e}")
+            return CustomDocResult(
+                success=False,
+                error=str(e),
+                generation_time_seconds=time.time() - start_time,
+            )
+
+    async def generate_assessment(
+        self,
+        assessment_type: str,
+        product: Product,
+        repositories: list[Repository],
+        user_id: str | UUID,
+        progress_callback: Callable[[str], Awaitable[None]] | None = None,
+    ) -> CustomDocResult:
+        """
+        Generate a critical assessment of the codebase.
+
+        Assessments are always saved immediately (not previewed) and are placed
+        in the appropriate technical subsection.
+
+        Args:
+            assessment_type: One of "code-quality", "security", "performance"
+            product: The product this assessment belongs to
+            repositories: Repositories to analyze
+            user_id: User who owns this document
+            progress_callback: Optional async callback for progress updates
+
+        Returns:
+            CustomDocResult with generated assessment content and saved Document
+        """
+        start_time = time.time()
+
+        async def report_progress(stage: str) -> None:
+            """Report progress if callback provided."""
+            if progress_callback:
+                await progress_callback(stage)
+
+        try:
+            # Step 1: Analyze codebase
+            await report_progress(STAGE_ANALYZING)
+            logger.info(f"Analyzing codebase for {assessment_type} assessment...")
+            context = await self._get_codebase_context(repositories)
+
+            # Step 2: Plan assessment
+            await report_progress(STAGE_PLANNING)
+
+            # Step 3: Generate assessment using Opus (complex reasoning)
+            await report_progress(STAGE_GENERATING)
+            prompt = build_assessment_prompt(assessment_type, context)
+
+            # Always use Opus for assessments - they require deep analysis
+            response = await self.client.messages.create(
+                model=MODEL_OPUS,
+                max_tokens=MAX_TOKENS_GENERATION,
+                tools=cast(Any, [self._build_tool_schema()]),
+                tool_choice=cast(Any, {"type": "tool", "name": "save_document"}),
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            content, suggested_title = self._parse_response(response)
+
+            # Step 4: Save the assessment document
+            await report_progress(STAGE_FINALIZING)
+
+            # Use predefined title for consistency
+            final_title = ASSESSMENT_TITLES.get(assessment_type, suggested_title)
+            subsection = ASSESSMENT_SUBSECTIONS.get(assessment_type, assessment_type)
+
+            doc = Document(
+                product_id=product.id,
+                created_by_user_id=str(user_id),
+                title=final_title,
+                content=content,
+                type="note",  # Assessments are technical notes
+                folder={"path": "blueprints"},
+                section="technical",
+                subsection=subsection,
+            )
+            self.db.add(doc)
+            await self.db.commit()
+            await self.db.refresh(doc)
+
+            generation_time = time.time() - start_time
+            logger.info(
+                f"{assessment_type} assessment generated in {generation_time:.2f}s"
+            )
+
+            return CustomDocResult(
+                success=True,
+                content=content,
+                suggested_title=final_title,
+                document=doc,
+                generation_time_seconds=generation_time,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to generate {assessment_type} assessment: {e}")
             return CustomDocResult(
                 success=False,
                 error=str(e),

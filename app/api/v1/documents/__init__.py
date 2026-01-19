@@ -23,6 +23,7 @@ from app.api.v1.documents.crud import (
 )
 from app.api.v1.documents.custom import (
     cancel_custom_doc_job,
+    generate_assessment,
     generate_custom_document,
     get_custom_doc_status,
 )
@@ -101,6 +102,13 @@ router.add_api_route(
     "/products/{product_id}/custom/cancel/{job_id}",
     cancel_custom_doc_job,
     methods=["DELETE"],
+)
+
+# Assessment generation route
+router.add_api_route(
+    "/products/{product_id}/assessment/{assessment_type}/generate",
+    generate_assessment,
+    methods=["POST"],
 )
 
 __all__ = ["router", "serialize_document"]

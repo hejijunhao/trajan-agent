@@ -4,7 +4,7 @@ import uuid as uuid_pkg
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, SQLModel
@@ -61,10 +61,10 @@ class Feedback(UUIDMixin, TimestampMixin, SQLModel, table=True):
 
     # User Input
     title: str = Field(max_length=200, nullable=False)
-    description: str = Field(nullable=False)
+    description: str = Field(nullable=False, sa_type=Text())
 
     # AI Interpretation
-    ai_summary: str | None = Field(default=None)
+    ai_summary: str | None = Field(default=None, sa_type=Text())
     ai_processed_at: datetime | None = Field(  # type: ignore[call-overload]
         default=None, sa_type=DateTime(timezone=True)
     )
@@ -75,7 +75,7 @@ class Feedback(UUIDMixin, TimestampMixin, SQLModel, table=True):
 
     # Status Tracking
     status: str = Field(default="new", max_length=20, index=True)
-    admin_notes: str | None = Field(default=None)
+    admin_notes: str | None = Field(default=None, sa_type=Text())
 
 
 class FeedbackCreate(SQLModel):

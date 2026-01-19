@@ -104,12 +104,8 @@ class Subscription(SQLModel, table=True):
     )
 
     # Stripe references (nullable for manually assigned subscriptions)
-    stripe_customer_id: str | None = Field(
-        default=None, max_length=255, nullable=True, index=True
-    )
-    stripe_subscription_id: str | None = Field(
-        default=None, max_length=255, nullable=True
-    )
+    stripe_customer_id: str | None = Field(default=None, max_length=255, nullable=True, index=True)
+    stripe_subscription_id: str | None = Field(default=None, max_length=255, nullable=True)
     stripe_metered_item_id: str | None = Field(
         default=None,
         max_length=255,

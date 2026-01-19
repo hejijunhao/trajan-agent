@@ -8,6 +8,51 @@ prompt for Claude when generating custom documentation.
 from app.services.docs.types import CodebaseContext, CustomDocRequest
 
 # ─────────────────────────────────────────────────────────────
+# Markdown Style Rules (for consistent formatting)
+# ─────────────────────────────────────────────────────────────
+
+MARKDOWN_STYLE_RULES = """
+## Markdown Formatting Requirements
+
+**IMPORTANT: Follow these formatting rules precisely for clean, consistent output:**
+
+### Lists
+- Use `-` (hyphen) for all unordered lists, never `*` or `+`
+- Use `1.` `2.` `3.` for ordered lists (actual sequential numbers, not all `1.`)
+- Indent nested lists with exactly 2 spaces
+- Add a blank line before and after every list
+
+### Code
+- Always specify the language after triple backticks: ```python, ```typescript, ```bash, ```sql
+- Use inline `code` for: file names, function names, variable names, CLI commands
+- Use code blocks for: multi-line code, command output, configuration files
+- Never use bare triple backticks without a language hint
+
+### Headers
+- Use `##` for main sections (not `#` which is reserved for the document title)
+- Use `###` for subsections
+- Use `####` sparingly for sub-subsections
+- Add a blank line after every header
+
+### Spacing
+- One blank line between paragraphs
+- Two blank lines before `##` headers
+- No trailing spaces at end of lines
+- No multiple consecutive blank lines
+
+### Tables
+- Align columns with proper padding
+- Use `|` separators consistently
+- Include header separator row: `| --- | --- |`
+- Keep table content concise
+
+### Emphasis
+- Use **bold** for key terms and important concepts
+- Use *italics* for introducing new terms or emphasis
+- Use `code` for technical terms, not bold
+"""
+
+# ─────────────────────────────────────────────────────────────
 # Document Type Instructions
 # ─────────────────────────────────────────────────────────────
 
@@ -295,6 +340,16 @@ def build_custom_prompt(request: CustomDocRequest, context: CodebaseContext) -> 
                     "",
                 ]
             )
+
+    # Markdown style rules for consistent formatting
+    sections.extend(
+        [
+            "---",
+            "",
+            MARKDOWN_STYLE_RULES,
+            "",
+        ]
+    )
 
     # Final instructions with anti-hallucination rules
     sections.extend(

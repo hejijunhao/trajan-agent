@@ -36,6 +36,9 @@ def serialize_document(d) -> dict:
         "repository_id": str(d.repository_id) if d.repository_id else None,
         "created_at": d.created_at.isoformat(),
         "updated_at": d.updated_at.isoformat(),
+        # Section-based organization (for Trajan Docs sectioned view)
+        "section": d.section,
+        "subsection": d.subsection,
         # Sync tracking fields (Phase 2)
         "github_sha": d.github_sha,
         "github_path": d.github_path,
@@ -133,9 +136,7 @@ async def update_document(
     if doc.product_id:
         await check_product_editor_access(db, doc.product_id, current_user.id)
 
-    updated = await document_ops.update(
-        db, db_obj=doc, obj_in=data.model_dump(exclude_unset=True)
-    )
+    updated = await document_ops.update(db, db_obj=doc, obj_in=data.model_dump(exclude_unset=True))
     return serialize_document(updated)
 
 
@@ -196,6 +197,8 @@ async def get_documents_grouped(
                 folder=d.folder,
                 created_at=d.created_at.isoformat(),
                 updated_at=d.updated_at.isoformat(),
+                section=d.section,
+                subsection=d.subsection,
             )
             for d in docs
         ]
@@ -228,9 +231,7 @@ async def add_changelog_entry(
         )
 
     # Convert request entries to ChangeEntry dataclasses
-    changes = [
-        ChangeEntry(category=c.category, description=c.description) for c in data.changes
-    ]
+    changes = [ChangeEntry(category=c.category, description=c.description) for c in data.changes]
 
     changelog_agent = ChangelogAgent(db, product, current_user.id)
     updated_doc = await changelog_agent.add_entry(data.version, changes)

@@ -361,6 +361,85 @@ async def cancel_custom_doc_job(
     return {"cancelled": cancelled}
 
 
+async def generate_assessment(
+    product_id: uuid_pkg.UUID,
+    assessment_type: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+    _rate_limit: None = Depends(rate_limiter),
+) -> dict[str, Any]:
+    """
+    Generate a critical assessment of the codebase.
+
+    This endpoint generates honest, scored assessments of code quality,
+    security, or performance. Assessments are saved automatically to the
+    appropriate technical documentation subsection.
+
+    Args:
+        product_id: The product to assess
+        assessment_type: One of "code-quality", "security", "performance"
+        current_user: The authenticated user
+        db: Database session
+
+    Returns:
+        The saved assessment document
+    """
+    # Validate assessment type
+    valid_types = ["code-quality", "security", "performance"]
+    if assessment_type not in valid_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid assessment type. Must be one of: {', '.join(valid_types)}",
+        )
+
+    # Get the product (RLS enforces access)
+    product = await product_ops.get(db, id=product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Get user's GitHub token (decrypted)
+    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub token not configured. Please add your GitHub token in Settings.",
+        )
+
+    # Get repositories for the product
+    repositories = await repository_ops.get_by_product(db, product_id=product_id)
+    if not repositories:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No repositories linked to this product. Add a repository first.",
+        )
+
+    # Generate the assessment
+    github_service = GitHubService(github_token)
+    generator = CustomDocGenerator(db, github_service)
+
+    result = await generator.generate_assessment(
+        assessment_type=assessment_type,
+        product=product,
+        repositories=repositories,
+        user_id=current_user.id,
+    )
+
+    if result.success and result.document:
+        # Import serialize_document from crud module
+        from app.api.v1.documents.crud import serialize_document
+
+        return serialize_document(result.document)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.error or "Assessment generation failed",
+        )
+
+
 async def save_custom_document(
     product_id: uuid_pkg.UUID,
     title: str,

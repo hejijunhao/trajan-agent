@@ -47,9 +47,7 @@ class UsageSnapshot(SQLModel, table=True):
     """
 
     __tablename__ = "usage_snapshots"
-    __table_args__ = (
-        Index("ix_usage_snapshots_period", "organization_id", "period_start"),
-    )
+    __table_args__ = (Index("ix_usage_snapshots_period", "organization_id", "period_start"),)
 
     id: uuid_pkg.UUID = Field(
         default_factory=uuid_pkg.uuid4,

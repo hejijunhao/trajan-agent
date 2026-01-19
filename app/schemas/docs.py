@@ -41,6 +41,9 @@ class DocumentGrouped(BaseModel):
     folder: dict | None
     created_at: str
     updated_at: str
+    # Section-based organization (for Trajan Docs sectioned view)
+    section: str | None = None
+    subsection: str | None = None
 
 
 class DocumentsGroupedResponse(BaseModel):

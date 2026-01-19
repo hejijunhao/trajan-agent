@@ -2,8 +2,9 @@ import uuid as uuid_pkg
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.base import TimestampMixin, UserOwnedMixin, UUIDMixin
@@ -64,11 +65,13 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     # Project Lead - designated team member responsible for the product
     lead_user_id: uuid_pkg.UUID | None = Field(
         default=None,
-        foreign_key="users.id",
-        index=True,
-        sa_column_kwargs={
-            "comment": "Designated project lead (org member responsible for the product)"
-        },
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+            comment="Designated project lead (org member responsible for the product)",
+        ),
     )
 
     # Analysis fields
