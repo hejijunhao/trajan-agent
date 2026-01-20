@@ -225,5 +225,32 @@ class ProductAccessOperations:
         access = await self.get_effective_access(db, product_id, user_id, org_role)
         return access == ProductAccessLevel.ADMIN.value
 
+    async def get_user_access_for_org_products(
+        self,
+        db: AsyncSession,
+        org_id: uuid_pkg.UUID,
+        user_id: uuid_pkg.UUID,
+    ) -> dict[uuid_pkg.UUID, str]:
+        """
+        Get all explicit product access for a user within an organization.
+
+        Returns a dict mapping product_id -> access_level for all products
+        where the user has explicit access.
+        """
+        from app.models.product import Product
+
+        statement = (
+            select(ProductAccess)
+            .join(Product, ProductAccess.product_id == Product.id)  # type: ignore[arg-type]
+            .where(
+                Product.organization_id == org_id,  # type: ignore[arg-type]
+                ProductAccess.user_id == user_id,  # type: ignore[arg-type]
+            )
+        )
+        result = await db.execute(statement)
+        access_records = result.scalars().all()
+
+        return {record.product_id: record.access_level for record in access_records}
+
 
 product_access_ops = ProductAccessOperations()

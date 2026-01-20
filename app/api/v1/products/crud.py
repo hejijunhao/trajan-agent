@@ -114,6 +114,9 @@ async def list_products(
                 "top_contributor": top_contributor,
                 "lead_user_id": str(p.lead_user_id) if p.lead_user_id else None,
                 "lead_user": lead_user,
+                "repository_count": len(p.repositories),
+                "work_item_count": len(p.work_items),
+                "document_count": len(p.documents),
             }
         )
 

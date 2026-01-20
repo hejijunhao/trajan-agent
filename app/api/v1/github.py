@@ -134,13 +134,18 @@ async def list_github_repos(
     per_page: int = Query(30, ge=1, le=100, description="Items per page"),
     sort: str = Query("updated", description="Sort by: updated, created, pushed, full_name"),
     visibility: str = Query("all", description="Visibility filter: all, public, private"),
+    product_id: uuid_pkg.UUID | None = Query(
+        None, description="Product ID to check import status against (product-specific check)"
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GitHubReposListResponse:
     """
     List the authenticated user's GitHub repositories.
 
-    Returns repos with their import status for this user.
+    Returns repos with their import status. When product_id is provided,
+    marks repos as 'already_imported' only if they exist in THAT specific product.
+    Without product_id, checks globally across all accessible products.
     Requires a GitHub token to be configured in user preferences.
     """
     token = await get_github_token(db, current_user.id)
@@ -166,11 +171,17 @@ async def list_github_repos(
             detail=detail,
         ) from None
 
-    # Check which repos are already imported (in any accessible product)
-    # RLS ensures we only see repos in products we have access to
+    # Check which repos are already imported
+    # When product_id is provided, check only that specific product (fixes cross-project import bug)
+    # When product_id is not provided, check globally across all accessible products
     repos_with_status: list[GitHubRepoPreview] = []
     for repo in result.repos:
-        existing = await repository_ops.find_by_github_id(db, repo.github_id)
+        if product_id:
+            # Product-specific check: only mark as imported if in THIS product
+            existing = await repository_ops.get_by_github_id(db, product_id, repo.github_id)
+        else:
+            # Global check: mark as imported if in ANY accessible product
+            existing = await repository_ops.find_by_github_id(db, repo.github_id)
         repos_with_status.append(
             GitHubRepoPreview(
                 **asdict(repo),

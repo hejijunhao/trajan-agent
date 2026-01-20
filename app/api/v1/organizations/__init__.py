@@ -5,6 +5,7 @@ Modules:
 - helpers.py — Shared helper functions
 - crud.py — Organization CRUD operations
 - members.py — Member management endpoints
+- member_access.py — Member product access endpoints
 - subscriptions.py — Subscription endpoints
 """
 
@@ -19,6 +20,7 @@ from app.api.v1.organizations.crud import (
     list_plans,
     update_organization,
 )
+from app.api.v1.organizations.member_access import get_member_product_access
 from app.api.v1.organizations.members import (
     add_member,
     list_members,
@@ -45,11 +47,14 @@ router.add_api_route("/{org_id}/members/{member_id}", update_member_role, method
 router.add_api_route(
     "/{org_id}/members/{member_id}", remove_member, methods=["DELETE"], status_code=204
 )
-router.add_api_route(
-    "/{org_id}/members/{member_id}/resend-invite", resend_invite, methods=["POST"]
-)
+router.add_api_route("/{org_id}/members/{member_id}/resend-invite", resend_invite, methods=["POST"])
 
 # Subscription routes
 router.add_api_route("/{org_id}/subscription", get_subscription, methods=["GET"])
+
+# Member product access routes
+router.add_api_route(
+    "/{org_id}/members/{member_id}/product-access", get_member_product_access, methods=["GET"]
+)
 
 __all__ = ["router"]
