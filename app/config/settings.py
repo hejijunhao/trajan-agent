@@ -33,5 +33,26 @@ class Settings(BaseSettings):
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str = ""
 
+    # Stripe - Payment processing
+    # Use sk_test_*/pk_test_* for development, sk_live_*/pk_live_* for production
+    # Empty string = Stripe disabled (feature gating still works, just no payments)
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""  # From `stripe listen` (dev) or Stripe Dashboard (prod)
+
+    # Stripe Price IDs - Create these in Stripe Dashboard (test mode for dev, live for prod)
+    # Each tier has a base subscription price and a metered overage price
+    stripe_price_foundations_base: str = ""
+    stripe_price_core_base: str = ""
+    stripe_price_autonomous_base: str = ""
+    stripe_price_foundations_overage: str = ""
+    stripe_price_core_overage: str = ""
+    stripe_price_autonomous_overage: str = ""
+
+    @property
+    def stripe_enabled(self) -> bool:
+        """Check if Stripe is configured (has secret key)."""
+        return bool(self.stripe_secret_key)
+
 
 settings = Settings()

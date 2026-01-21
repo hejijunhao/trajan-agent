@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_with_rls
 from app.domain import preferences_ops, product_ops, repository_ops
+from app.domain.organization_operations import organization_ops
+from app.domain.product_access_operations import product_access_ops
 from app.models.user import User
 from app.schemas.repo_docs import (
     RepoDocContent,
@@ -109,8 +111,31 @@ async def get_repo_docs_tree(
     - Location (docs/, documentation/, doc/ directories)
     - Known names (README, CHANGELOG, CONTRIBUTING, etc.)
     """
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    product = await product_ops.get(db, product_id)
     if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Check org membership and product access (at least viewer)
+    if not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    org_role = await organization_ops.get_member_role(db, product.organization_id, current_user.id)
+    if not org_role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    access = await product_access_ops.get_effective_access(
+        db, product_id, current_user.id, org_role
+    )
+    if access == "none":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",

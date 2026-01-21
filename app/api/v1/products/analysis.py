@@ -7,14 +7,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
-    require_agent_enabled,
+    get_subscription_context_for_product,
 )
 from app.domain import product_ops
 from app.domain.preferences_operations import preferences_ops
+from app.domain.repository_operations import repository_ops
+from app.domain.subscription_operations import subscription_ops
 from app.models.user import User
 from app.schemas.product_overview import AnalyzeProductResponse
 from app.services.analysis import run_analysis_task
@@ -34,7 +35,6 @@ async def analyze_product(
     product_id: uuid_pkg.UUID,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-    sub_ctx: SubscriptionContext = Depends(require_agent_enabled),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> AnalyzeProductResponse:
     """
@@ -52,15 +52,31 @@ async def analyze_product(
     - "completed" when done (product_overview will contain results)
     - "failed" if an error occurred
     """
-    # Check product access first
+    # Check product access first (verifies user has editor access via org membership)
     await check_product_editor_access(db, product_id, current_user.id)
 
-    # Get product
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    # Get product (no user_id filter since access is checked above)
+    product = await product_ops.get(db, product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
+        )
+
+    # Get subscription context for the product's organization (not user's default org)
+    sub_ctx = await get_subscription_context_for_product(db, product_id)
+
+    # Check if agent features are enabled for this organization
+    repo_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)
+    is_agent_enabled = await subscription_ops.is_agent_enabled(
+        db, sub_ctx.organization.id, repo_count
+    )
+    if not is_agent_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Agent disabled. The organization has {repo_count} repositories but the "
+            f"{sub_ctx.plan.display_name} plan only allows {sub_ctx.plan.base_repo_limit}. "
+            "Remove repositories or upgrade to re-enable.",
         )
 
     # Check if already analyzing

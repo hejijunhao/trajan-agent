@@ -111,12 +111,52 @@ class ProductAccessOperations:
         db: AsyncSession,
         product_id: uuid_pkg.UUID,
     ) -> int:
-        """Count collaborators with explicit access to a product."""
-        statement = select(func.count(ProductAccess.id)).where(  # type: ignore[arg-type]
-            ProductAccess.product_id == product_id,  # type: ignore[arg-type]
-            ProductAccess.access_level != ProductAccessLevel.NONE.value,  # type: ignore[arg-type]
+        """
+        Count all users with access to a product.
+
+        Includes:
+        - Organization owners and admins (implicit access)
+        - Explicit collaborators via ProductAccess (editors, viewers, admins)
+
+        Users are deduplicated (e.g., an org admin with explicit access is counted once).
+        """
+        from app.models.organization import OrganizationMember
+        from app.models.product import Product
+
+        # First, get the product's organization_id
+        product_stmt = select(Product.organization_id).where(  # type: ignore[call-overload]
+            Product.id == product_id
         )
-        result = await db.execute(statement)
+        product_result = await db.execute(product_stmt)
+        org_id = product_result.scalar_one_or_none()
+
+        if org_id is None:
+            # Fallback: product has no org, just count explicit collaborators
+            statement = select(func.count(ProductAccess.id)).where(  # type: ignore[arg-type]
+                ProductAccess.product_id == product_id,  # type: ignore[arg-type]
+                ProductAccess.access_level != ProductAccessLevel.NONE.value,  # type: ignore[arg-type]
+            )
+            result = await db.execute(statement)
+            return result.scalar() or 0
+
+        # Count distinct users: org owners/admins + explicit collaborators
+        # Using a union of user_ids and counting distinct
+        org_admins_subq = select(OrganizationMember.user_id).where(  # type: ignore[call-overload]
+            OrganizationMember.organization_id == org_id,
+            OrganizationMember.role.in_(  # type: ignore[attr-defined]
+                [MemberRole.OWNER.value, MemberRole.ADMIN.value]
+            ),
+        )
+
+        explicit_collabs_subq = select(ProductAccess.user_id).where(  # type: ignore[call-overload]
+            ProductAccess.product_id == product_id,
+            ProductAccess.access_level != ProductAccessLevel.NONE.value,
+        )
+
+        # Union the two sets and count distinct user_ids
+        combined = org_admins_subq.union(explicit_collabs_subq).subquery()
+        count_stmt = select(func.count()).select_from(combined)
+        result = await db.execute(count_stmt)
         return result.scalar() or 0
 
     async def set_access(

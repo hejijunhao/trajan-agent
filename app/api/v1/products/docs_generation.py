@@ -7,9 +7,15 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import check_product_editor_access, get_current_user, get_db_with_rls
+from app.api.deps import (
+    check_product_editor_access,
+    get_current_user,
+    get_db_with_rls,
+)
 from app.domain import product_ops
+from app.domain.organization_operations import organization_ops
 from app.domain.preferences_operations import preferences_ops
+from app.domain.product_access_operations import product_access_ops
 from app.models.user import User
 from app.schemas.docs import DocsStatusResponse, GenerateDocsRequest, GenerateDocsResponse
 
@@ -41,10 +47,11 @@ async def generate_documentation(
     Runs as a background task with progress updates. Poll GET /products/{id}/docs-status
     for real-time progress.
     """
-    # Check product access first
+    # Check product access first (verifies user has editor access via org membership)
     await check_product_editor_access(db, product_id, current_user.id)
 
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    # Get product (no user_id filter since access is checked above)
+    product = await product_ops.get(db, product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -102,8 +109,31 @@ async def get_docs_generation_status(
     Includes stale job detection: if a job has been "generating" for longer than
     DOCS_GENERATION_TIMEOUT_MINUTES, it's automatically marked as failed.
     """
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    product = await product_ops.get(db, product_id)
     if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Check org membership and product access (at least viewer)
+    if not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    org_role = await organization_ops.get_member_role(db, product.organization_id, current_user.id)
+    if not org_role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    access = await product_access_ops.get_effective_access(
+        db, product_id, current_user.id, org_role
+    )
+    if access == "none":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
@@ -150,7 +180,6 @@ async def get_docs_generation_status(
 
 async def _mark_generation_failed(
     product_id: str,
-    user_id: str,
     error_message: str,
 ) -> None:
     """
@@ -163,8 +192,8 @@ async def _mark_generation_failed(
     try:
         async with async_session_maker() as db:
             product_uuid = uuid_pkg.UUID(product_id)
-            user_uuid = uuid_pkg.UUID(user_id)
-            product = await product_ops.get_by_user(db, user_id=user_uuid, id=product_uuid)
+            # Access was already verified when the task was started
+            product = await product_ops.get(db, product_uuid)
             if product:
                 product.docs_generation_status = "failed"
                 product.docs_generation_error = error_message[:500]
@@ -203,7 +232,8 @@ async def run_document_orchestrator(
             product_uuid = uuid_pkg.UUID(product_id)
             user_uuid = uuid_pkg.UUID(user_id)
 
-            product = await product_ops.get_by_user(db, user_id=user_uuid, id=product_uuid)
+            # Access was already verified when the task was started
+            product = await product_ops.get(db, product_uuid)
             if not product:
                 logger.warning(f"Product {product_id} not found for docs generation")
                 return
@@ -236,4 +266,4 @@ async def run_document_orchestrator(
         except Exception as e:
             logger.error(f"Documentation generation failed for product {product_id}: {e}")
             # Use a fresh session for error handling to avoid stale session issues
-            await _mark_generation_failed(product_id, user_id, str(e))
+            await _mark_generation_failed(product_id, str(e))

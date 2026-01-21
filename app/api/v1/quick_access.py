@@ -59,13 +59,41 @@ async def get_product_for_quick_access_management(
     current_user: User,
     db: AsyncSession,
 ) -> Product:
-    """Get a product and verify user has access to manage quick access."""
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    """Get a product and verify user has access to manage quick access.
+
+    Requires at least viewer access via org membership.
+    Individual endpoints may require higher access (admin/owner).
+    """
+    product = await product_ops.get(db, product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
         )
+
+    # Check org membership and product access (at least viewer)
+    if not product.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    org_role = await organization_ops.get_member_role(db, product.organization_id, current_user.id)
+    if not org_role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    access = await product_access_ops.get_effective_access(
+        db, product_id, current_user.id, org_role
+    )
+    if access == "none":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
     return product
 
 
