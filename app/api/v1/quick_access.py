@@ -270,10 +270,18 @@ async def get_entries_by_token(
     token: str,
     skip: int = 0,
     limit: int = 100,
+    tags: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[dict[str, str | bool | None]]:
-    """Get App Info entries for a product by quick access token. Requires org membership."""
+) -> list[dict[str, str | bool | list[str] | None]]:
+    """Get App Info entries for a product by quick access token.
+
+    Requires org membership.
+
+    Args:
+        tags: Optional comma-separated list of tags to filter by.
+              Returns entries that have ALL specified tags (AND logic).
+    """
     product = await product_ops.get_by_quick_access_token(db, token)
     if not product:
         raise HTTPException(
@@ -290,10 +298,16 @@ async def get_entries_by_token(
                 detail="You must be a member of this organization to access this page",
             )
 
+    # Parse tags filter
+    tags_list: list[str] | None = None
+    if tags:
+        tags_list = [t.strip() for t in tags.split(",") if t.strip()]
+
     # Get entries for the product (org-level access, not user-scoped)
     entries = await app_info_ops.get_by_product_for_org(
         db,
         product_id=product.id,
+        tags=tags_list,
         skip=skip,
         limit=limit,
     )
@@ -307,6 +321,7 @@ async def get_entries_by_token(
             "is_secret": e.is_secret,
             "description": e.description,
             "target_file": e.target_file,
+            "tags": e.tags or [],
             "product_id": str(e.product_id) if e.product_id else None,
             "created_at": e.created_at.isoformat() if e.created_at else None,
             "updated_at": e.updated_at.isoformat() if e.updated_at else None,

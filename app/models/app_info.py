@@ -1,6 +1,8 @@
 import uuid as uuid_pkg
 from typing import TYPE_CHECKING, Any, Optional
 
+from sqlalchemy import Column, String
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.base import TimestampMixin, UserOwnedMixin, UUIDMixin
@@ -18,6 +20,10 @@ class AppInfoBase(SQLModel):
     is_secret: bool | None = Field(default=False)
     description: str | None = Field(default=None, max_length=500)
     target_file: str | None = Field(default=None, max_length=100)  # e.g. .env, .env.local
+    tags: list[str] = Field(
+        default=[],
+        sa_column=Column(ARRAY(String(50)), nullable=False, server_default="{}"),
+    )  # User-defined tags for organizing variables (e.g. "production", "auth")
 
 
 class AppInfoCreate(SQLModel):
@@ -30,6 +36,7 @@ class AppInfoCreate(SQLModel):
     is_secret: bool = False
     description: str | None = None
     target_file: str | None = None
+    tags: list[str] = []
 
 
 class AppInfoUpdate(SQLModel):
@@ -41,6 +48,7 @@ class AppInfoUpdate(SQLModel):
     is_secret: bool | None = None
     description: str | None = None
     target_file: str | None = None
+    tags: list[str] | None = None
 
 
 class AppInfoBulkEntry(SQLModel):
@@ -52,6 +60,7 @@ class AppInfoBulkEntry(SQLModel):
     is_secret: bool = False
     description: str | None = None
     target_file: str | None = None
+    tags: list[str] = []
 
 
 class AppInfoBulkCreate(SQLModel):
@@ -59,6 +68,7 @@ class AppInfoBulkCreate(SQLModel):
 
     product_id: uuid_pkg.UUID
     entries: list[AppInfoBulkEntry]
+    default_tags: list[str] = []  # Tags to apply to all entries without their own tags
 
 
 class AppInfoBulkResponse(SQLModel):
@@ -77,12 +87,19 @@ class AppInfoExportEntry(SQLModel):
     is_secret: bool = False
     description: str | None = None
     target_file: str | None = None
+    tags: list[str] = []
 
 
 class AppInfoExportResponse(SQLModel):
     """Response schema for export operation."""
 
     entries: list[AppInfoExportEntry]
+
+
+class AppInfoTagsResponse(SQLModel):
+    """Response schema for getting all tags for a product."""
+
+    tags: list[str]
 
 
 class AppInfo(AppInfoBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True):

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db_with_rls
 from app.core.rate_limit import EXPORT_LIMIT, REVEAL_LIMIT, rate_limiter
 from app.domain import app_info_ops
+from app.domain.app_info_operations import validate_tags
 from app.domain.organization_operations import organization_ops
 from app.domain.product_access_operations import product_access_ops
 from app.domain.product_operations import product_ops
@@ -15,6 +16,7 @@ from app.models.app_info import (
     AppInfoCreate,
     AppInfoExportEntry,
     AppInfoExportResponse,
+    AppInfoTagsResponse,
     AppInfoUpdate,
 )
 from app.models.organization import MemberRole
@@ -76,20 +78,25 @@ async def _check_variables_access(
 async def list_app_info(
     product_id: uuid_pkg.UUID = Query(..., description="Filter by product"),
     category: str | None = Query(None, description="Filter by category"),
+    tags: str | None = Query(None, description="Filter by tags (comma-separated). Returns entries with ALL tags."),
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
-    """List app info entries for a product."""
+    """List app info entries for a product with optional tag filtering."""
     # Check variables access
     await _check_variables_access(db, product_id, current_user.id)
+
+    # Parse tags from comma-separated string
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
 
     entries = await app_info_ops.get_by_product(
         db,
         user_id=current_user.id,
         product_id=product_id,
         category=category,
+        tags=tag_list,
         skip=skip,
         limit=limit,
     )
@@ -102,12 +109,34 @@ async def list_app_info(
             "is_secret": e.is_secret,
             "description": e.description,
             "target_file": e.target_file,
+            "tags": e.tags or [],
             "product_id": str(e.product_id) if e.product_id else None,
             "created_at": e.created_at.isoformat(),
             "updated_at": e.updated_at.isoformat(),
         }
         for e in entries
     ]
+
+
+@router.get("/tags", response_model=AppInfoTagsResponse)
+async def get_product_tags(
+    product_id: uuid_pkg.UUID = Query(..., description="Product to get tags for"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+):
+    """Get all unique tags used across app info entries for a product.
+
+    Returns a sorted list of unique tags for use in autocomplete/suggestions.
+    """
+    # Check variables access
+    await _check_variables_access(db, product_id, current_user.id)
+
+    tags = await app_info_ops.get_all_tags(
+        db,
+        user_id=current_user.id,
+        product_id=product_id,
+    )
+    return AppInfoTagsResponse(tags=tags)
 
 
 @router.get("/export", response_model=AppInfoExportResponse)
@@ -163,6 +192,7 @@ async def export_app_info(
                 is_secret=e.is_secret or False,
                 description=e.description,
                 target_file=e.target_file,
+                tags=e.tags or [],
             )
             for e in entries
         ]
@@ -195,6 +225,7 @@ async def get_app_info(
         "is_secret": entry.is_secret,
         "description": entry.description,
         "target_file": entry.target_file,
+        "tags": entry.tags or [],
         "product_id": str(entry.product_id) if entry.product_id else None,
         "created_at": entry.created_at.isoformat(),
         "updated_at": entry.updated_at.isoformat(),
@@ -210,6 +241,14 @@ async def create_app_info(
     """Create a new app info entry."""
     # Check variables access
     await _check_variables_access(db, data.product_id, current_user.id)
+
+    # Validate tags
+    tag_errors = validate_tags(data.tags)
+    if tag_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid tags: {'; '.join(tag_errors)}",
+        )
 
     # Check for duplicate key in product
     existing = await app_info_ops.get_by_key(
@@ -234,6 +273,7 @@ async def create_app_info(
         "is_secret": entry.is_secret,
         "description": entry.description,
         "target_file": entry.target_file,
+        "tags": entry.tags or [],
         "product_id": str(entry.product_id) if entry.product_id else None,
         "created_at": entry.created_at.isoformat(),
         "updated_at": entry.updated_at.isoformat(),
@@ -259,6 +299,15 @@ async def update_app_info(
     if entry.product_id:
         await _check_variables_access(db, entry.product_id, current_user.id)
 
+    # Validate tags if provided
+    if data.tags is not None:
+        tag_errors = validate_tags(data.tags)
+        if tag_errors:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid tags: {'; '.join(tag_errors)}",
+            )
+
     updated = await app_info_ops.update(
         db, db_obj=entry, obj_in=data.model_dump(exclude_unset=True)
     )
@@ -270,6 +319,7 @@ async def update_app_info(
         "is_secret": updated.is_secret,
         "description": updated.description,
         "target_file": updated.target_file,
+        "tags": updated.tags or [],
         "product_id": str(updated.product_id) if updated.product_id else None,
         "created_at": updated.created_at.isoformat(),
         "updated_at": updated.updated_at.isoformat(),
@@ -343,6 +393,7 @@ async def bulk_create_app_info(
     - Maximum 500 entries per request
     - Key length: max 255 characters
     - Value length: max 10,000 characters (10KB)
+    - Maximum 10 tags per entry
     """
     # Check variables access
     await _check_variables_access(db, data.product_id, current_user.id)
@@ -354,6 +405,15 @@ async def bulk_create_app_info(
             detail=f"Too many entries. Maximum {MAX_BULK_ENTRIES} entries per request.",
         )
 
+    # Validate default tags
+    if data.default_tags:
+        tag_errors = validate_tags(data.default_tags)
+        if tag_errors:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid default tags: {'; '.join(tag_errors)}",
+            )
+
     # Validate each entry
     validation_errors: list[str] = []
     for i, entry in enumerate(data.entries):
@@ -364,6 +424,11 @@ async def bulk_create_app_info(
         # Check for empty keys
         if not entry.key.strip():
             validation_errors.append(f"Entry {i}: key cannot be empty")
+        # Validate entry-specific tags
+        if entry.tags:
+            entry_tag_errors = validate_tags(entry.tags)
+            if entry_tag_errors:
+                validation_errors.append(f"Entry {i} ({entry.key}): {'; '.join(entry_tag_errors)}")
 
     if validation_errors:
         raise HTTPException(
@@ -377,6 +442,7 @@ async def bulk_create_app_info(
         user_id=current_user.id,
         product_id=data.product_id,
         entries=data.entries,
+        default_tags=data.default_tags,
     )
 
     return AppInfoBulkResponse(
@@ -389,6 +455,7 @@ async def bulk_create_app_info(
                 "is_secret": e.is_secret,
                 "description": e.description,
                 "target_file": e.target_file,
+                "tags": e.tags or [],
                 "product_id": str(e.product_id) if e.product_id else None,
                 "created_at": e.created_at.isoformat(),
                 "updated_at": e.updated_at.isoformat(),
