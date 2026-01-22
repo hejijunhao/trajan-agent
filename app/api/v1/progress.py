@@ -140,11 +140,12 @@ async def get_progress_summary(
         if not repos:
             return _empty_summary_response()
 
-    # 3. Get GitHub token
+    # 3. Get GitHub token (optional - return empty data if not configured)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
     github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
     if not github_token:
-        raise HTTPException(status_code=400, detail="GitHub token required")
+        # No token = return empty data gracefully (user can still view the tab)
+        return _empty_summary_response()
 
     # 4. Calculate period bounds
     period_start = get_period_start(period)
@@ -469,11 +470,12 @@ async def get_progress_contributors(
         if not repos:
             return {"contributors": []}
 
-    # 3. Get GitHub token
+    # 3. Get GitHub token (optional - return empty data if not configured)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
     github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
     if not github_token:
-        raise HTTPException(status_code=400, detail="GitHub token required")
+        # No token = return empty data gracefully (user can still view the tab)
+        return {"contributors": []}
 
     # 4. Calculate period bounds
     period_start = get_period_start(period)
@@ -911,11 +913,12 @@ async def get_active_code(
         if not repos:
             return _empty_active_code_response()
 
-    # 3. Get GitHub token
+    # 3. Get GitHub token (optional - return empty data if not configured)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
     github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
     if not github_token:
-        raise HTTPException(status_code=400, detail="GitHub token required")
+        # No token = return empty data gracefully (user can still view the tab)
+        return _empty_active_code_response()
 
     # 4. Calculate period bounds
     period_start = get_period_start(period)
@@ -1170,11 +1173,12 @@ async def get_velocity(
         if not repos:
             return _empty_velocity_response()
 
-    # 3. Get GitHub token
+    # 3. Get GitHub token (optional - return empty data if not configured)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
     github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
     if not github_token:
-        raise HTTPException(status_code=400, detail="GitHub token required")
+        # No token = return empty data gracefully (user can still view the tab)
+        return _empty_velocity_response()
 
     # 4. Calculate period bounds (fetch extra for comparison)
     period_start = get_period_start(period)

@@ -50,11 +50,12 @@ async def get_product_timeline(
         if not repos:
             return {"events": [], "has_more": False, "next_cursor": None}
 
-    # 3. Get GitHub token (decrypted)
+    # 3. Get GitHub token (optional - return empty data if not configured)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
     github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
     if not github_token:
-        raise HTTPException(status_code=400, detail="GitHub token required")
+        # No token = return empty data gracefully (user can still view the tab)
+        return {"events": [], "has_more": False, "next_cursor": None}
 
     # 4. Fetch commits from all repos in parallel
     github = GitHubReadOperations(github_token)
