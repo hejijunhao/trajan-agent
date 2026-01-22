@@ -4,14 +4,14 @@ import asyncio
 import uuid as uuid_pkg
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db_with_rls
-from app.domain import commit_stats_cache_ops, product_ops, repository_ops
+from app.api.deps import ProductAccessContext, get_current_user, get_db_with_rls, get_product_access
+from app.domain import commit_stats_cache_ops, repository_ops
 from app.domain.preferences_operations import preferences_ops
 from app.models import User
 from app.models.repository import Repository
@@ -92,7 +92,7 @@ def get_period_start(period: str) -> datetime:
     Returns:
         UTC datetime for the start of the period
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     period_map = {
         "24h": timedelta(hours=24),
@@ -113,6 +113,7 @@ async def get_progress_summary(
     product_id: uuid_pkg.UUID,
     period: str = Query("7d", description="Time period: 24h, 48h, 7d, 14d, 30d, 90d, 365d"),
     repo_ids: str | None = Query(None, description="Comma-separated repository IDs to filter"),
+    _access_ctx: ProductAccessContext = Depends(get_product_access),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
@@ -125,11 +126,7 @@ async def get_progress_summary(
     - Daily activity breakdown (for sparkline)
     - Recent commits preview
     """
-
-    # 1. Verify product access
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    # access_ctx verifies product access (raises 404 if not found, 403 if no access)
 
     # 2. Get GitHub-linked repositories
     repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
@@ -266,13 +263,15 @@ async def _fetch_commit_stats(
                     event.additions = stats["additions"]
                     event.deletions = stats["deletions"]
                     event.files_changed = stats["files_changed"]
-                    stats_to_cache.append({
-                        "full_name": event.repository_full_name,
-                        "sha": event.commit_sha,
-                        "additions": stats["additions"],
-                        "deletions": stats["deletions"],
-                        "files_changed": stats["files_changed"],
-                    })
+                    stats_to_cache.append(
+                        {
+                            "full_name": event.repository_full_name,
+                            "sha": event.commit_sha,
+                            "additions": stats["additions"],
+                            "deletions": stats["deletions"],
+                            "files_changed": stats["files_changed"],
+                        }
+                    )
 
         await asyncio.gather(
             *[fetch_and_cache_stats(e) for e in events_needing_fetch],
@@ -372,9 +371,7 @@ def _compute_summary(events: list[TimelineEvent], period: str) -> dict[str, Any]
     }
 
 
-def _generate_daily_activity(
-    daily_counts: dict[str, int], period: str
-) -> list[dict[str, Any]]:
+def _generate_daily_activity(daily_counts: dict[str, int], period: str) -> list[dict[str, Any]]:
     """Generate daily activity list with all days in period."""
 
     period_days = {
@@ -388,16 +385,18 @@ def _generate_daily_activity(
     }
 
     days = period_days.get(period, 7)
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
 
     activity = []
     for i in range(days - 1, -1, -1):  # Oldest to newest
         date = today - timedelta(days=i)
         date_str = date.strftime("%Y-%m-%d")
-        activity.append({
-            "date": date_str,
-            "commits": daily_counts.get(date_str, 0),
-        })
+        activity.append(
+            {
+                "date": date_str,
+                "commits": daily_counts.get(date_str, 0),
+            }
+        )
 
     return activity
 
@@ -443,6 +442,7 @@ async def get_progress_contributors(
     period: str = Query("7d", description="Time period: 24h, 48h, 7d, 14d, 30d, 90d, 365d"),
     repo_ids: str | None = Query(None, description="Comma-separated repository IDs to filter"),
     sort_by: str = Query("commits", description="Sort by: commits, additions, last_active"),
+    _access_ctx: ProductAccessContext = Depends(get_product_access),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
@@ -455,11 +455,7 @@ async def get_progress_contributors(
     - Activity sparkline (daily commits)
     - Recent commits (last 3)
     """
-
-    # 1. Verify product access
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    # access_ctx verifies product access (raises 404 if not found, 403 if no access)
 
     # 2. Get GitHub-linked repositories
     repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
@@ -653,7 +649,7 @@ class AISummaryResponse:
 async def get_ai_summary(
     product_id: uuid_pkg.UUID,
     period: str = Query("7d", description="Time period: 24h, 48h, 7d, 14d, 30d, 90d, 365d"),
-    current_user: User = Depends(get_current_user),
+    _access_ctx: ProductAccessContext = Depends(get_product_access),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
     """Get existing AI-generated summary for a product and period.
@@ -662,11 +658,7 @@ async def get_ai_summary(
     Does NOT generate a new summary - use POST /ai-summary/generate for that.
     """
     from app.domain import progress_summary_ops
-
-    # Verify product access
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    # access_ctx verifies product access (raises 404 if not found, 403 if no access)
 
     # Fetch existing summary
     summary = await progress_summary_ops.get_by_product_period(db, product_id, period)
@@ -693,6 +685,7 @@ async def generate_ai_summary(
     product_id: uuid_pkg.UUID,
     period: str = Query("7d", description="Time period: 24h, 48h, 7d, 14d, 30d, 90d, 365d"),
     repo_ids: str | None = Query(None, description="Comma-separated repository IDs to filter"),
+    _access_ctx: ProductAccessContext = Depends(get_product_access),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
@@ -706,11 +699,7 @@ async def generate_ai_summary(
     """
     from app.domain import progress_summary_ops
     from app.services.progress.summarizer import ProgressData, progress_summarizer
-
-    # Verify product access
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    # access_ctx verifies product access (raises 404 if not found, 403 if no access)
 
     # Get GitHub-linked repositories
     repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
@@ -896,6 +885,7 @@ async def get_active_code(
     product_id: uuid_pkg.UUID,
     period: str = Query("7d", description="Time period: 24h, 48h, 7d, 14d, 30d, 90d, 365d"),
     repo_ids: str | None = Query(None, description="Comma-separated repository IDs to filter"),
+    _access_ctx: ProductAccessContext = Depends(get_product_access),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
@@ -907,11 +897,7 @@ async def get_active_code(
     - Quiet areas (directories with no recent changes)
     - Total unique files changed
     """
-
-    # 1. Verify product access
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    # access_ctx verifies product access (raises 404 if not found, 403 if no access)
 
     # 2. Get GitHub-linked repositories
     repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
@@ -1157,6 +1143,7 @@ async def get_velocity(
     product_id: uuid_pkg.UUID,
     period: str = Query("30d", description="Time period: 24h, 48h, 7d, 14d, 30d, 90d, 365d"),
     repo_ids: str | None = Query(None, description="Comma-separated repository IDs to filter"),
+    _access_ctx: ProductAccessContext = Depends(get_product_access),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
@@ -1169,11 +1156,7 @@ async def get_velocity(
 
     Default period is 30d for velocity to show meaningful trends.
     """
-
-    # 1. Verify product access
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    # access_ctx verifies product access (raises 404 if not found, 403 if no access)
 
     # 2. Get GitHub-linked repositories
     repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
@@ -1320,9 +1303,7 @@ def _compute_velocity(
     ]
 
     # Compute insights
-    insights = _compute_velocity_insights(
-        velocity_data, current_totals, previous_totals, period
-    )
+    insights = _compute_velocity_insights(velocity_data, current_totals, previous_totals, period)
 
     return {
         "velocity_data": velocity_data,
@@ -1334,9 +1315,7 @@ def _compute_velocity(
     }
 
 
-def _compute_daily_velocity(
-    events: list[TimelineEvent], period: str
-) -> list[dict[str, Any]]:
+def _compute_daily_velocity(events: list[TimelineEvent], period: str) -> list[dict[str, Any]]:
     """Compute daily velocity data points."""
 
     # Get period days
@@ -1352,7 +1331,7 @@ def _compute_daily_velocity(
     days = period_days.get(period, 30)
 
     # Initialize daily buckets
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     daily_data: dict[str, dict[str, Any]] = {}
 
     for i in range(days - 1, -1, -1):
@@ -1379,13 +1358,15 @@ def _compute_daily_velocity(
     result = []
     for date_str in sorted(daily_data.keys()):
         data = daily_data[date_str]
-        result.append({
-            "date": data["date"],
-            "commits": data["commits"],
-            "additions": data["additions"],
-            "deletions": data["deletions"],
-            "contributors": len(data["contributors"]),
-        })
+        result.append(
+            {
+                "date": data["date"],
+                "commits": data["commits"],
+                "additions": data["additions"],
+                "deletions": data["deletions"],
+                "contributors": len(data["contributors"]),
+            }
+        )
 
     return result
 
@@ -1477,9 +1458,7 @@ def _compute_velocity_insights(
 
         # Calculate averages
         day_averages = {
-            day: day_totals[day] / day_counts[day]
-            for day in day_totals
-            if day_counts[day] > 0
+            day: day_totals[day] / day_counts[day] for day in day_totals if day_counts[day] > 0
         }
 
         if day_averages:

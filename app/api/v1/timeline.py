@@ -7,8 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db_with_rls
-from app.domain import commit_stats_cache_ops, product_ops, repository_ops
+from app.api.deps import ProductAccessContext, get_current_user, get_db_with_rls, get_product_access
+from app.domain import commit_stats_cache_ops, repository_ops
 from app.domain.preferences_operations import preferences_ops
 from app.models import User
 from app.models.repository import Repository
@@ -31,15 +31,12 @@ async def get_product_timeline(
     since: str | None = Query(None, description="Filter commits since date (ISO 8601)"),
     until: str | None = Query(None, description="Filter commits until date (ISO 8601)"),
     file_path: str | None = Query(None, description="Filter commits touching this file path"),
+    _access_ctx: ProductAccessContext = Depends(get_product_access),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
     """Get development timeline for a product with optional filters."""
-
-    # 1. Verify product access
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    # access_ctx verifies product access (raises 404 if not found, 403 if no access)
 
     # 2. Get GitHub-linked repositories (RLS enforces product access)
     repos = await repository_ops.get_github_repos_by_product(db, product_id=product_id)
@@ -185,20 +182,20 @@ async def get_product_timeline(
             owner_name, repo_name = repo_info
 
             async with semaphore:
-                stats = await github.get_commit_detail(
-                    owner_name, repo_name, event.commit_sha
-                )
+                stats = await github.get_commit_detail(owner_name, repo_name, event.commit_sha)
                 if stats:
                     event.additions = stats["additions"]
                     event.deletions = stats["deletions"]
                     event.files_changed = stats["files_changed"]
-                    stats_to_cache.append({
-                        "full_name": event.repository_full_name,
-                        "sha": event.commit_sha,
-                        "additions": stats["additions"],
-                        "deletions": stats["deletions"],
-                        "files_changed": stats["files_changed"],
-                    })
+                    stats_to_cache.append(
+                        {
+                            "full_name": event.repository_full_name,
+                            "sha": event.commit_sha,
+                            "additions": stats["additions"],
+                            "deletions": stats["deletions"],
+                            "files_changed": stats["files_changed"],
+                        }
+                    )
 
         await asyncio.gather(
             *[fetch_and_cache_stats(e) for e in events_needing_fetch],
