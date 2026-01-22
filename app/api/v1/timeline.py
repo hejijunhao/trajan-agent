@@ -30,6 +30,7 @@ async def get_product_timeline(
     author: str | None = Query(None, description="Filter by commit author name (partial match)"),
     since: str | None = Query(None, description="Filter commits since date (ISO 8601)"),
     until: str | None = Query(None, description="Filter commits until date (ISO 8601)"),
+    file_path: str | None = Query(None, description="Filter commits touching this file path"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ) -> dict[str, Any]:
@@ -68,7 +69,7 @@ async def get_product_timeline(
             return []
         owner, name = repo.full_name.split("/")
         commits, _ = await github.get_commits_for_timeline(
-            owner, name, repo.default_branch, per_page=limit
+            owner, name, repo.default_branch, per_page=limit, path=file_path
         )
         return [(repo, c) for c in commits]
 
@@ -213,3 +214,38 @@ async def get_product_timeline(
         "has_more": has_more,
         "next_cursor": next_cursor,
     }
+
+
+@router.get("/commits/{repo_full_name:path}/{sha}/files")
+async def get_commit_files(
+    repo_full_name: str,
+    sha: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+) -> dict[str, Any]:
+    """
+    Get file changes for a specific commit.
+
+    Used by the expandable commit details in the Commits tab.
+    Returns the list of files changed in the commit with their stats.
+    """
+    # 1. Get GitHub token
+    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
+    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if not github_token:
+        raise HTTPException(status_code=400, detail="GitHub token required")
+
+    # 2. Parse repo full name
+    if "/" not in repo_full_name:
+        raise HTTPException(status_code=400, detail="Invalid repository format")
+
+    owner, repo = repo_full_name.split("/", 1)
+
+    # 3. Fetch commit files from GitHub
+    github = GitHubReadOperations(github_token)
+    files = await github.get_commit_files(owner, repo, sha)
+
+    if files is None:
+        raise HTTPException(status_code=404, detail="Commit not found or fetch failed")
+
+    return {"files": files}

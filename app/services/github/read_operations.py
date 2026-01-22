@@ -530,6 +530,7 @@ class GitHubReadOperations:
         branch: str | None = None,
         per_page: int = 50,
         sha_cursor: str | None = None,
+        path: str | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """
         Fetch commits for timeline display.
@@ -540,6 +541,7 @@ class GitHubReadOperations:
             branch: Branch name (default: repo's default branch)
             per_page: Number of commits per page
             sha_cursor: SHA to start from (for pagination)
+            path: Optional file path to filter commits (partial match)
 
         Returns:
             Tuple of (commits list, has_more flag)
@@ -549,6 +551,8 @@ class GitHubReadOperations:
             params["sha"] = branch
         if sha_cursor:
             params["sha"] = sha_cursor
+        if path:
+            params["path"] = path
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -563,6 +567,52 @@ class GitHubReadOperations:
             commits: list[dict[str, Any]] = response.json()
             has_more = len(commits) > per_page
             return commits[:per_page], has_more
+
+    async def get_commit_files(
+        self,
+        owner: str,
+        repo: str,
+        sha: str,
+        timeout: float = 10.0,
+    ) -> list[dict[str, Any]] | None:
+        """
+        Fetch detailed file changes for a single commit.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            sha: Commit SHA
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of file change dicts with filename, status, additions, deletions,
+            or None if fetch fails
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.BASE_URL}/repos/{owner}/{repo}/commits/{sha}",
+                    headers=self._headers,
+                    timeout=timeout,
+                )
+
+                if response.status_code != 200:
+                    return None
+
+                data = response.json()
+                files = data.get("files", [])
+
+                return [
+                    {
+                        "filename": f.get("filename", ""),
+                        "status": f.get("status", "modified"),
+                        "additions": f.get("additions", 0),
+                        "deletions": f.get("deletions", 0),
+                    }
+                    for f in files
+                ]
+        except (httpx.TimeoutException, httpx.RequestError):
+            return None
 
     async def get_key_files(
         self,

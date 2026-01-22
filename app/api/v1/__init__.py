@@ -5,6 +5,7 @@ from app.api.v1 import (
     organizations,
     preferences,
     products,
+    progress,
     quick_access,
     repositories,
     timeline,
@@ -23,5 +24,6 @@ __all__ = [
     "github",
     "organizations",
     "timeline",
+    "progress",
     "quick_access",
 ]

@@ -9,6 +9,7 @@ from app.api.v1 import (
     organizations,
     preferences,
     products,
+    progress,
     quick_access,
     repositories,
     timeline,
@@ -30,4 +31,5 @@ api_router.include_router(organizations.router)
 api_router.include_router(admin.router)
 api_router.include_router(feedback.router)
 api_router.include_router(timeline.router)
+api_router.include_router(progress.router)
 api_router.include_router(quick_access.router)
