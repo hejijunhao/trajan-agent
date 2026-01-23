@@ -186,6 +186,47 @@ class GitHubReadOperations:
 
             return self._normalize_repo(response.json())
 
+    async def get_repo_by_id(self, repo_id: int) -> GitHubRepo:
+        """
+        Fetch repository details by GitHub repository ID.
+
+        This is useful when GitHub redirects to a repository ID-based URL
+        after a rename/transfer, and we need to resolve the current owner/repo.
+
+        Args:
+            repo_id: GitHub repository ID (immutable, doesn't change on rename)
+
+        Returns:
+            GitHubRepo with full repository details including current owner/name
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.BASE_URL}/repositories/{repo_id}",
+                headers=self._headers,
+                timeout=30.0,
+            )
+
+            rate_info = RateLimitInfo(response)
+
+            if response.status_code == 401:
+                raise GitHubAPIError("Invalid or expired GitHub token", 401)
+            elif response.status_code == 404:
+                raise GitHubAPIError(f"Repository with ID {repo_id} not found", 404)
+            elif response.status_code == 403:
+                if rate_info.is_exhausted:
+                    raise GitHubAPIError(
+                        "GitHub API rate limit exceeded",
+                        403,
+                        rate_limit_reset=rate_info.reset_timestamp,
+                    )
+                raise GitHubAPIError("GitHub API forbidden", 403)
+            elif response.status_code != 200:
+                raise GitHubAPIError(
+                    f"GitHub API error: {response.status_code}", response.status_code
+                )
+
+            return self._normalize_repo(response.json())
+
     async def get_authenticated_user(self) -> dict[str, Any]:
         """
         Fetch authenticated user info.

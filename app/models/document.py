@@ -17,8 +17,17 @@ class DocumentBase(SQLModel):
 
     title: str | None = Field(default=None, max_length=500, index=True)
     content: str | None = Field(default=None)
-    type: str | None = Field(default=None, max_length=50)  # e.g. blueprint, architecture, note, plan, changelog
+    type: str | None = Field(
+        default=None, max_length=50
+    )  # e.g. blueprint, architecture, note, plan, changelog
     is_pinned: bool | None = Field(default=False)
+
+    # Document origin tracking
+    is_generated: bool = Field(
+        default=False,
+        index=True,
+        description="True if AI-generated, False if imported from repository",
+    )
 
     # Section-based organization (for Trajan Docs sectioned view)
     section: str | None = Field(

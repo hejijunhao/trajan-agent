@@ -31,6 +31,7 @@ from app.services.docs.types import (
     TechStack,
 )
 from app.services.github import GitHubService
+from app.services.github.exceptions import GitHubRepoRenamed
 from app.services.github.types import RepoTree
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,9 @@ class CodebaseAnalyzer:
                 analysis = await self._analyze_repo(repo, per_repo_budget)
                 all_analyses.append(analysis)
                 total_tokens += sum(f.token_estimate for f in analysis.key_files)
+            except GitHubRepoRenamed:
+                # Let rename exceptions bubble up so orchestrator can handle them
+                raise
             except Exception as e:
                 error_msg = f"Failed to analyze {repo.full_name}: {e}"
                 logger.error(error_msg)

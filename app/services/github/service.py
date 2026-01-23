@@ -106,6 +106,10 @@ class GitHubService(GitHubReadOperations, GitHubWriteOperations):
         """Fetch detailed information for a specific repository."""
         return await GitHubReadOperations.get_repo_details(self, owner, repo)
 
+    async def get_repo_by_id(self, repo_id: int) -> GitHubRepo:
+        """Fetch repository details by GitHub repository ID."""
+        return await GitHubReadOperations.get_repo_by_id(self, repo_id)
+
     async def get_authenticated_user(self) -> dict[str, Any]:
         """Fetch authenticated user info."""
         return await GitHubReadOperations.get_authenticated_user(self)

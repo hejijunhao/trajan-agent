@@ -16,6 +16,7 @@ from app.domain.preferences_operations import preferences_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.user import User
 from app.services.github import GitHubAPIError, GitHubService
+from app.services.github.exceptions import GitHubRepoRenamed
 
 router = APIRouter(prefix="/github", tags=["github"])
 
@@ -364,6 +365,36 @@ async def refresh_repository_metadata(
     try:
         owner, repo_name = repo.full_name.split("/", 1)
         fresh_data = await github.get_repo_details(owner, repo_name)
+    except GitHubRepoRenamed as e:
+        # Repository was renamed - resolve the new name and update
+        new_full_name = e.new_full_name
+        if not new_full_name and e.repo_id:
+            # Resolve repo ID to get current name
+            try:
+                resolved = await github.get_repo_by_id(e.repo_id)
+                new_full_name = resolved.full_name
+            except GitHubAPIError:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Repository was renamed but couldn't resolve new name (ID: {e.repo_id})",
+                ) from None
+
+        if not new_full_name:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Repository was renamed but couldn't determine new name",
+            ) from None
+
+        # Fetch fresh data with the new name
+        new_owner, new_repo_name = new_full_name.split("/", 1)
+        try:
+            fresh_data = await github.get_repo_details(new_owner, new_repo_name)
+        except GitHubAPIError as retry_error:
+            raise HTTPException(
+                status_code=retry_error.status_code or status.HTTP_502_BAD_GATEWAY,
+                detail=f"Repository renamed to {new_full_name} but fetch failed: {retry_error.message}",
+            ) from None
+
     except GitHubAPIError as e:
         if e.status_code == 404:
             raise HTTPException(
@@ -382,19 +413,19 @@ async def refresh_repository_metadata(
             detail=detail,
         ) from None
 
-    # Update the repository with fresh data
-    updated = await repository_ops.update(
-        db,
-        db_obj=repo,
-        obj_in={
-            "description": fresh_data.description,
-            "default_branch": fresh_data.default_branch,
-            "stars_count": fresh_data.stars_count,
-            "forks_count": fresh_data.forks_count,
-            "language": fresh_data.language,
-            "is_private": fresh_data.is_private,
-        },
-    )
+    # Update the repository with fresh data (including name if renamed)
+    update_data = {
+        "name": fresh_data.name,
+        "full_name": fresh_data.full_name,
+        "url": fresh_data.url,
+        "description": fresh_data.description,
+        "default_branch": fresh_data.default_branch,
+        "stars_count": fresh_data.stars_count,
+        "forks_count": fresh_data.forks_count,
+        "language": fresh_data.language,
+        "is_private": fresh_data.is_private,
+    }
+    updated = await repository_ops.update(db, db_obj=repo, obj_in=update_data)
 
     return {
         "id": str(updated.id),
@@ -460,26 +491,46 @@ async def bulk_refresh_github_repos(
         try:
             owner, repo_name = repo.full_name.split("/", 1)
             fresh_data = await github.get_repo_details(owner, repo_name)
+        except GitHubRepoRenamed as e:
+            # Repository was renamed - resolve new name and fetch fresh data
+            new_full_name = e.new_full_name
+            if not new_full_name and e.repo_id:
+                try:
+                    resolved = await github.get_repo_by_id(e.repo_id)
+                    new_full_name = resolved.full_name
+                except GitHubAPIError:
+                    failed.append(
+                        FailedRefresh(
+                            repository_id=str(repo.id),
+                            name=repo.name or "Unknown",
+                            reason=f"Renamed but couldn't resolve new name (ID: {e.repo_id})",
+                        )
+                    )
+                    continue
 
-            await repository_ops.update(
-                db,
-                db_obj=repo,
-                obj_in={
-                    "description": fresh_data.description,
-                    "default_branch": fresh_data.default_branch,
-                    "stars_count": fresh_data.stars_count,
-                    "forks_count": fresh_data.forks_count,
-                    "language": fresh_data.language,
-                    "is_private": fresh_data.is_private,
-                },
-            )
-
-            refreshed.append(
-                RefreshedRepo(
-                    repository_id=str(repo.id),
-                    name=repo.name or fresh_data.name,
+            if not new_full_name:
+                failed.append(
+                    FailedRefresh(
+                        repository_id=str(repo.id),
+                        name=repo.name or "Unknown",
+                        reason="Renamed but couldn't determine new name",
+                    )
                 )
-            )
+                continue
+
+            # Fetch with new name
+            new_owner, new_repo_name = new_full_name.split("/", 1)
+            try:
+                fresh_data = await github.get_repo_details(new_owner, new_repo_name)
+            except GitHubAPIError as retry_error:
+                failed.append(
+                    FailedRefresh(
+                        repository_id=str(repo.id),
+                        name=repo.name or "Unknown",
+                        reason=f"Renamed to {new_full_name} but fetch failed: {retry_error.message}",
+                    )
+                )
+                continue
         except GitHubAPIError as e:
             reason = e.message
             if e.status_code == 404:
@@ -497,5 +548,30 @@ async def bulk_refresh_github_repos(
                     reason=reason,
                 )
             )
+            continue
+
+        # Update repository with fresh data (including name/full_name if renamed)
+        await repository_ops.update(
+            db,
+            db_obj=repo,
+            obj_in={
+                "name": fresh_data.name,
+                "full_name": fresh_data.full_name,
+                "url": fresh_data.url,
+                "description": fresh_data.description,
+                "default_branch": fresh_data.default_branch,
+                "stars_count": fresh_data.stars_count,
+                "forks_count": fresh_data.forks_count,
+                "language": fresh_data.language,
+                "is_private": fresh_data.is_private,
+            },
+        )
+
+        refreshed.append(
+            RefreshedRepo(
+                repository_id=str(repo.id),
+                name=fresh_data.name,
+            )
+        )
 
     return BulkRefreshResponse(refreshed=refreshed, failed=failed)

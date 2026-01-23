@@ -77,8 +77,9 @@ async def _check_variables_access(
 @router.get("", response_model=list[dict])
 async def list_app_info(
     product_id: uuid_pkg.UUID = Query(..., description="Filter by product"),
-    category: str | None = Query(None, description="Filter by category"),
-    tags: str | None = Query(None, description="Filter by tags (comma-separated). Returns entries with ALL tags."),
+    tags: str | None = Query(
+        None, description="Filter by tags (comma-separated). Returns entries with ALL tags."
+    ),
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
@@ -91,11 +92,9 @@ async def list_app_info(
     # Parse tags from comma-separated string
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
 
-    entries = await app_info_ops.get_by_product(
+    entries = await app_info_ops.get_by_product_for_org(
         db,
-        user_id=current_user.id,
         product_id=product_id,
-        category=category,
         tags=tag_list,
         skip=skip,
         limit=limit,
@@ -131,9 +130,8 @@ async def get_product_tags(
     # Check variables access
     await _check_variables_access(db, product_id, current_user.id)
 
-    tags = await app_info_ops.get_all_tags(
+    tags = await app_info_ops.get_all_tags_for_org(
         db,
-        user_id=current_user.id,
         product_id=product_id,
     )
     return AppInfoTagsResponse(tags=tags)
@@ -175,9 +173,8 @@ async def export_app_info(
     # Rate limiting
     rate_limiter.check_rate_limit(current_user.id, "app_info_export", EXPORT_LIMIT)
 
-    entries = await app_info_ops.get_by_product(
+    entries = await app_info_ops.get_by_product_for_org(
         db,
-        user_id=current_user.id,
         product_id=product_id,
         limit=1000,  # Reasonable limit for export
     )
@@ -420,7 +417,9 @@ async def bulk_create_app_info(
         if len(entry.key) > MAX_KEY_LENGTH:
             validation_errors.append(f"Entry {i}: key exceeds {MAX_KEY_LENGTH} characters")
         if len(entry.value) > MAX_VALUE_LENGTH:
-            validation_errors.append(f"Entry {i} ({entry.key}): value exceeds {MAX_VALUE_LENGTH} characters")
+            validation_errors.append(
+                f"Entry {i} ({entry.key}): value exceeds {MAX_VALUE_LENGTH} characters"
+            )
         # Check for empty keys
         if not entry.key.strip():
             validation_errors.append(f"Entry {i}: key cannot be empty")
@@ -434,7 +433,11 @@ async def bulk_create_app_info(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Validation failed: {'; '.join(validation_errors[:5])}"
-            + (f" and {len(validation_errors) - 5} more errors" if len(validation_errors) > 5 else ""),
+            + (
+                f" and {len(validation_errors) - 5} more errors"
+                if len(validation_errors) > 5
+                else ""
+            ),
         )
 
     created, skipped = await app_info_ops.bulk_create(

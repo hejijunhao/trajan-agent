@@ -31,6 +31,7 @@ def serialize_document(d) -> dict:
         "content": d.content,
         "type": d.type,
         "is_pinned": d.is_pinned,
+        "is_generated": d.is_generated,  # True = AI-generated, False = imported
         "folder": d.folder,
         "product_id": str(d.product_id) if d.product_id else None,
         "repository_id": str(d.repository_id) if d.repository_id else None,
@@ -51,12 +52,15 @@ async def list_documents(
     product_id: uuid_pkg.UUID | None = Query(None, description="Filter by product"),
     doc_type: str | None = Query(None, alias="type", description="Filter by type"),
     folder: str | None = Query(None, description="Filter by folder path"),
+    is_generated: bool | None = Query(
+        None, description="Filter by origin: true=AI-generated, false=imported"
+    ),
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
-    """List documents, optionally filtered by product, type, and folder."""
+    """List documents, optionally filtered by product, type, folder, and origin."""
     if not product_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -74,6 +78,7 @@ async def list_documents(
             db,
             product_id=product_id,
             doc_type=doc_type,
+            is_generated=is_generated,
             skip=skip,
             limit=limit,
         )
@@ -105,14 +110,22 @@ async def create_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
-    """Create a new document. Requires Editor or Admin access to the product."""
+    """Create a new document. Requires Editor or Admin access to the product.
+
+    Documents created via API are marked as is_generated=True since they're
+    created within Trajan (not imported from a repository).
+    """
     # Check product access
     if data.product_id:
         await check_product_editor_access(db, data.product_id, current_user.id)
 
+    # Documents created in Trajan are marked as generated
+    doc_data = data.model_dump()
+    doc_data["is_generated"] = True
+
     doc = await document_ops.create(
         db,
-        obj_in=data.model_dump(),
+        obj_in=doc_data,
         created_by_user_id=current_user.id,
     )
     return serialize_document(doc)

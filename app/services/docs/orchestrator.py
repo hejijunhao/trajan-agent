@@ -38,6 +38,7 @@ from app.services.docs.plans_agent import PlansAgent
 from app.services.docs.types import DocsInfo, OrchestratorResult
 from app.services.docs.utils import extract_title, infer_doc_type, map_path_to_folder
 from app.services.github import GitHubService
+from app.services.github.exceptions import GitHubRepoRenamed
 from app.services.github.types import RepoTreeItem
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,9 @@ class DocumentOrchestrator:
         self.github_service = github_service
 
         # V2 services
-        self.codebase_analyzer = CodebaseAnalyzer(github_service)
+        self.codebase_analyzer = CodebaseAnalyzer(
+            github_service, token_budget=DEFAULT_ANALYSIS_TOKEN_BUDGET
+        )
         self.documentation_planner = DocumentationPlanner()
         self.document_generator = DocumentGenerator(db)
 
@@ -124,12 +127,15 @@ class DocumentOrchestrator:
         This is the new Documentation Agent v2 flow that uses Claude Opus 4.5
         for planning and generates documents based on actual codebase analysis.
 
+        Note: Import from repositories is now a separate action (not part of generation).
+        Generation is purely additive — it only creates AI-generated docs.
+
         Args:
             mode: "full" to regenerate all docs, "additive" to only add new docs
         """
         results = OrchestratorResult()
 
-        # Map API mode to planner mode
+        # Map API mode to planner mode (always additive for generated docs)
         planner_mode = "expand" if mode == "additive" else "full"
 
         logger.info(
@@ -137,28 +143,15 @@ class DocumentOrchestrator:
             f"(mode: {mode}, planner_mode: {planner_mode})"
         )
 
-        # Stage 1: Import existing docs
-        await self._update_progress("importing", "Scanning repositories for documentation...")
+        # Get linked repos for codebase analysis
         repos = await self._get_linked_repos()
         logger.info(f"Found {len(repos)} linked repositories")
 
-        for repo in repos:
-            if not repo.full_name:
-                continue
-            try:
-                docs_info = await self._scan_repo_docs(repo)
-                if docs_info.has_docs_folder and docs_info.has_markdown_files:
-                    logger.info(f"Found {len(docs_info.files)} doc files in {repo.full_name}")
-                    imported = await self._import_existing_docs(repo, docs_info)
-                    results.imported.extend(imported)
-            except Exception as e:
-                logger.error(f"Failed to scan docs for {repo.full_name}: {e}")
-
-        # Stage 2: Deep codebase analysis (with timeout)
+        # Stage 1: Deep codebase analysis (with timeout)
         await self._update_progress("analyzing", "Analyzing codebase structure...")
         try:
             codebase_context = await self._run_with_timeout(
-                self.codebase_analyzer.analyze(repos, token_budget=DEFAULT_ANALYSIS_TOKEN_BUDGET),
+                self.codebase_analyzer.analyze(repos),
                 timeout=AGENT_TIMEOUT_HEAVY,
                 stage_name="Codebase analysis",
             )
@@ -166,6 +159,30 @@ class DocumentOrchestrator:
                 f"Codebase analysis complete: {codebase_context.total_files} files, "
                 f"{codebase_context.total_tokens} tokens analyzed"
             )
+        except GitHubRepoRenamed as e:
+            # Repository was renamed - find and update the affected repo, then retry once
+            for repo in repos:
+                if repo.full_name == e.old_full_name:
+                    await self._handle_repo_rename(
+                        repo, new_full_name=e.new_full_name, repo_id=e.repo_id
+                    )
+                    break
+            # Refresh repos list and retry analysis once
+            repos = await self._get_linked_repos()
+            try:
+                codebase_context = await self._run_with_timeout(
+                    self.codebase_analyzer.analyze(repos),
+                    timeout=AGENT_TIMEOUT_HEAVY,
+                    stage_name="Codebase analysis (retry after rename)",
+                )
+                logger.info(
+                    f"Codebase analysis complete after rename: {codebase_context.total_files} files, "
+                    f"{codebase_context.total_tokens} tokens analyzed"
+                )
+            except Exception as retry_error:
+                logger.error(f"Codebase analysis failed after rename: {retry_error}")
+                await self._update_progress("error", f"Analysis failed: {retry_error}")
+                return await self._run_v1()
         except TimeoutError:
             # Timeout already logged and progress updated, fall back to v1
             return await self._run_v1()
@@ -309,6 +326,25 @@ class DocumentOrchestrator:
                     # Import existing docs, structure into our folders
                     imported = await self._import_existing_docs(repo, docs_info)
                     results.imported.extend(imported)
+            except GitHubRepoRenamed as e:
+                # Repository was renamed - update DB and retry once
+                updated_repo = await self._handle_repo_rename(
+                    repo, new_full_name=e.new_full_name, repo_id=e.repo_id
+                )
+                if updated_repo:
+                    try:
+                        docs_info = await self._scan_repo_docs(updated_repo)
+                        if docs_info.has_docs_folder and docs_info.has_markdown_files:
+                            logger.info(
+                                f"Found {len(docs_info.files)} doc files in {updated_repo.full_name}"
+                            )
+                            imported = await self._import_existing_docs(updated_repo, docs_info)
+                            results.imported.extend(imported)
+                    except Exception as retry_error:
+                        logger.error(
+                            f"Failed to scan docs after rename for {updated_repo.full_name}: "
+                            f"{retry_error}"
+                        )
             except Exception as e:
                 logger.error(f"Failed to scan docs for {repo.full_name}: {e}")
                 # Continue with other repos
@@ -373,10 +409,14 @@ class DocumentOrchestrator:
         return results
 
     async def _get_existing_docs(self) -> list[Document]:
-        """Get all existing documents for this product."""
+        """Get existing GENERATED documents for this product (for gap analysis).
+
+        Only returns AI-generated docs, not imported ones. This ensures the planner
+        only considers Trajan-generated documentation when identifying gaps.
+        """
         if self.product.id is None:
             return []
-        return await document_ops.get_by_product(self.db, self.product.id)
+        return await document_ops.get_generated_by_product(self.db, self.product.id)
 
     async def _get_linked_repos(self) -> list[Repository]:
         """Get all GitHub-linked repositories for this product."""
@@ -447,6 +487,7 @@ class DocumentOrchestrator:
                     type=doc_type,
                     folder={"path": folder_path} if folder_path else None,
                     repository_id=repo.id,
+                    is_generated=False,  # Imported from repository, not AI-generated
                 )
                 self.db.add(doc)
                 imported.append(doc)
@@ -475,6 +516,56 @@ class DocumentOrchestrator:
         self.db.add(self.product)
         await self.db.commit()
         await self.db.refresh(self.product)
+
+    async def _handle_repo_rename(
+        self,
+        repo: Repository,
+        new_full_name: str | None = None,
+        repo_id: int | None = None,
+    ) -> Repository | None:
+        """Handle a GitHub repository rename by updating our database record.
+
+        When GitHub returns a 301 redirect, this method updates the Repository
+        record with the new name so future requests succeed.
+
+        Args:
+            repo: The Repository with the old name
+            new_full_name: The new full_name from GitHub's redirect (if available)
+            repo_id: GitHub repository ID to resolve if new_full_name is not available
+
+        Returns:
+            Updated Repository or None if update failed
+        """
+        if repo.id is None:
+            return None
+
+        old_full_name = repo.full_name
+
+        # If we only have repo_id, resolve it to get the new full_name
+        if not new_full_name and repo_id:
+            try:
+                logger.info(f"Resolving GitHub repo ID {repo_id} to get current name...")
+                github_repo = await self.github_service.get_repo_by_id(repo_id)
+                new_full_name = github_repo.full_name
+                logger.info(f"Resolved repo ID {repo_id} → {new_full_name}")
+            except Exception as e:
+                logger.error(f"Failed to resolve repo ID {repo_id}: {e}")
+                return None
+
+        if not new_full_name:
+            logger.error(f"Cannot update repo {old_full_name}: no new name available")
+            return None
+
+        logger.info(f"Repository renamed on GitHub: {old_full_name} → {new_full_name}")
+
+        updated_repo = await repository_ops.update_full_name(self.db, repo.id, new_full_name)
+        if updated_repo:
+            logger.info(f"Updated repository record: {old_full_name} → {new_full_name}")
+            await self.db.commit()
+        else:
+            logger.error(f"Failed to update repository record for {old_full_name}")
+
+        return updated_repo
 
     async def _run_with_timeout(
         self,

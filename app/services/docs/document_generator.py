@@ -103,6 +103,7 @@ class DocumentGenerator:
                 folder={"path": planned_doc.folder},
                 section=planned_doc.section,
                 subsection=planned_doc.subsection,
+                is_generated=True,  # AI-generated document
             )
             self.db.add(doc)
             await self.db.commit()
@@ -161,9 +162,7 @@ class DocumentGenerator:
                 result.total_generated += 1
             else:
                 result.failed.append(planned_doc.title)
-                logger.warning(
-                    f"Failed to generate '{planned_doc.title}': {gen_result.error}"
-                )
+                logger.warning(f"Failed to generate '{planned_doc.title}': {gen_result.error}")
 
         return result
 
@@ -264,9 +263,7 @@ class DocumentGenerator:
                     )
                     await asyncio.sleep(delay)
                 else:
-                    logger.error(
-                        f"Document generation failed after {MAX_RETRIES} attempts: {e}"
-                    )
+                    logger.error(f"Document generation failed after {MAX_RETRIES} attempts: {e}")
 
         raise last_error or RuntimeError("Document generation failed after retries")
 
@@ -310,12 +307,14 @@ class DocumentGenerator:
             sections.append("")
 
         # Tech stack context (brief)
-        sections.extend([
-            "---",
-            "",
-            "## Project Context",
-            "",
-        ])
+        sections.extend(
+            [
+                "---",
+                "",
+                "## Project Context",
+                "",
+            ]
+        )
 
         tech = context.combined_tech_stack
         if tech.languages:
@@ -330,24 +329,28 @@ class DocumentGenerator:
 
         # Relevant source files
         if relevant_files:
-            sections.extend([
-                "---",
-                "",
-                "## Source Files",
-                "",
-                "Use these source files as reference for accurate, specific documentation:",
-                "",
-            ])
+            sections.extend(
+                [
+                    "---",
+                    "",
+                    "## Source Files",
+                    "",
+                    "Use these source files as reference for accurate, specific documentation:",
+                    "",
+                ]
+            )
 
             for file in relevant_files:
-                sections.extend([
-                    f"### `{file.path}`",
-                    "",
-                    "```",
-                    file.content,
-                    "```",
-                    "",
-                ])
+                sections.extend(
+                    [
+                        f"### `{file.path}`",
+                        "",
+                        "```",
+                        file.content,
+                        "```",
+                        "",
+                    ]
+                )
 
         # Document type-specific instructions
         sections.extend(self._get_type_instructions(planned_doc))
@@ -411,19 +414,26 @@ class DocumentGenerator:
             ],
         }
 
-        instructions = type_specific.get(planned_doc.doc_type, [
-            "Write clear, well-structured documentation.",
-            "Be specific and accurate based on the source files.",
-        ])
+        instructions = type_specific.get(
+            planned_doc.doc_type,
+            [
+                "Write clear, well-structured documentation.",
+                "Be specific and accurate based on the source files.",
+            ],
+        )
 
-        return base_instructions + instructions + [
-            "",
-            "**Format:** Use markdown with clear headings, bullet points, and code blocks.",
-            "**Length:** Be thorough but concise. Quality over quantity.",
-            "**Accuracy:** Only document what you can verify from the source files.",
-            "",
-            "Use the save_document tool to output your documentation.",
-        ]
+        return (
+            base_instructions
+            + instructions
+            + [
+                "",
+                "**Format:** Use markdown with clear headings, bullet points, and code blocks.",
+                "**Length:** Be thorough but concise. Quality over quantity.",
+                "**Accuracy:** Only document what you can verify from the source files.",
+                "",
+                "Use the save_document tool to output your documentation.",
+            ]
+        )
 
     def _build_tool_schema(self, planned_doc: PlannedDocument) -> dict[str, Any]:
         """Build the tool schema for document generation."""

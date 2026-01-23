@@ -35,23 +35,47 @@ class DocumentOperations:
         db: AsyncSession,
         product_id: uuid_pkg.UUID,
         doc_type: str | None = None,
+        is_generated: bool | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> list[Document]:
-        """Get documents for a product. RLS enforces access control."""
+        """Get documents for a product. RLS enforces access control.
+
+        Args:
+            db: Database session
+            product_id: Product to get documents for
+            doc_type: Optional filter by document type
+            is_generated: Optional filter by origin (True=AI-generated, False=imported)
+            skip: Pagination offset
+            limit: Pagination limit
+        """
         statement = select(Document).where(Document.product_id == product_id)
 
         if doc_type:
             statement = statement.where(Document.type == doc_type)
 
-        statement = (
-            statement.order_by(Document.created_at.desc())
-            .offset(skip)
-            .limit(limit)
-        )
+        if is_generated is not None:
+            statement = statement.where(Document.is_generated == is_generated)
+
+        statement = statement.order_by(Document.created_at.desc()).offset(skip).limit(limit)
 
         result = await db.execute(statement)
         return list(result.scalars().all())
+
+    async def get_generated_by_product(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Document]:
+        """Get only AI-generated documents for a product.
+
+        This is a convenience method for filtering to is_generated=True,
+        used by the orchestrator to determine what docs already exist
+        when planning new documentation.
+        """
+        return await self.get_by_product(db, product_id, is_generated=True, skip=skip, limit=limit)
 
     async def get_by_product_grouped(
         self,

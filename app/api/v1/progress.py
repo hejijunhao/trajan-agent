@@ -1,6 +1,7 @@
 """Progress API endpoints (serves Progress tab Summary view)."""
 
 import asyncio
+import logging
 import uuid as uuid_pkg
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -16,12 +17,64 @@ from app.domain.preferences_operations import preferences_ops
 from app.models import User
 from app.models.repository import Repository
 from app.services.github import GitHubReadOperations
+from app.services.github.exceptions import GitHubRepoRenamed
 from app.services.github.timeline_types import TimelineEvent
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/progress", tags=["progress"])
 
 # Concurrency limit for fetching commit stats
 MAX_CONCURRENT_STAT_FETCHES = 10
+
+
+async def _handle_repo_rename(
+    db: AsyncSession,
+    github: GitHubReadOperations,
+    repo: Repository,
+    exc: GitHubRepoRenamed,
+) -> Repository | None:
+    """Handle a GitHub repository rename by resolving the new name and updating the database.
+
+    Args:
+        db: Database session
+        github: GitHub service for resolving repo ID to name
+        repo: The Repository with the old name
+        exc: The GitHubRepoRenamed exception with rename details
+
+    Returns:
+        Updated Repository with new full_name, or None if update failed
+    """
+    if repo.id is None:
+        return None
+
+    new_full_name = exc.new_full_name
+
+    # If we only have repo_id (GitHub redirected to ID-based URL), resolve it
+    if not new_full_name and exc.repo_id:
+        try:
+            logger.info(f"Resolving GitHub repo ID {exc.repo_id} to get current name...")
+            github_repo = await github.get_repo_by_id(exc.repo_id)
+            new_full_name = github_repo.full_name
+            logger.info(f"Resolved repo ID {exc.repo_id} → {new_full_name}")
+        except Exception as e:
+            logger.error(f"Failed to resolve repo ID {exc.repo_id}: {e}")
+            return None
+
+    if not new_full_name:
+        logger.error(f"Cannot update repo {repo.full_name}: no new name available")
+        return None
+
+    logger.info(f"Repository renamed on GitHub: {repo.full_name} → {new_full_name}")
+
+    updated_repo = await repository_ops.update_full_name(db, repo.id, new_full_name)
+    if updated_repo:
+        logger.info(f"Updated repository record: {repo.full_name} → {new_full_name}")
+        await db.commit()
+    else:
+        logger.error(f"Failed to update repository record for {repo.full_name}")
+
+    return updated_repo
 
 
 @dataclass
@@ -172,12 +225,35 @@ async def get_progress_summary(
         return_exceptions=True,
     )
 
-    # 6. Flatten and filter errors
+    # 6. Handle renames and flatten results
     all_commits: list[tuple[Repository, dict[str, Any]]] = []
-    for result in results:
-        if isinstance(result, BaseException):
+    repos_to_retry: list[Repository] = []
+
+    for i, result in enumerate(results):
+        if isinstance(result, GitHubRepoRenamed):
+            # Handle repository rename - update DB and retry
+            repo = repos[i]
+            updated_repo = await _handle_repo_rename(db, github, repo, result)
+            if updated_repo:
+                repos_to_retry.append(updated_repo)
+        elif isinstance(result, BaseException):
+            # Other errors - log and skip
+            logger.warning(f"Failed to fetch commits for repo: {result}")
             continue
-        all_commits.extend(result)
+        else:
+            all_commits.extend(result)
+
+    # Retry renamed repos
+    if repos_to_retry:
+        retry_results = await asyncio.gather(
+            *[fetch_repo_commits(r) for r in repos_to_retry],
+            return_exceptions=True,
+        )
+        for result in retry_results:
+            if isinstance(result, BaseException):
+                logger.warning(f"Retry failed for renamed repo: {result}")
+                continue
+            all_commits.extend(result)
 
     # 7. Convert to TimelineEvent and filter by date
     events: list[TimelineEvent] = []
@@ -501,12 +577,35 @@ async def get_progress_contributors(
         return_exceptions=True,
     )
 
-    # 6. Flatten and filter errors
+    # 6. Handle renames and flatten results
     all_commits: list[tuple[Repository, dict[str, Any]]] = []
-    for result in results:
-        if isinstance(result, BaseException):
+    repos_to_retry: list[Repository] = []
+
+    for i, result in enumerate(results):
+        if isinstance(result, GitHubRepoRenamed):
+            # Handle repository rename - update DB and retry
+            repo = repos[i]
+            updated_repo = await _handle_repo_rename(db, github, repo, result)
+            if updated_repo:
+                repos_to_retry.append(updated_repo)
+        elif isinstance(result, BaseException):
+            # Other errors - log and skip
+            logger.warning(f"Failed to fetch commits for repo: {result}")
             continue
-        all_commits.extend(result)
+        else:
+            all_commits.extend(result)
+
+    # Retry renamed repos
+    if repos_to_retry:
+        retry_results = await asyncio.gather(
+            *[fetch_repo_commits(r) for r in repos_to_retry],
+            return_exceptions=True,
+        )
+        for result in retry_results:
+            if isinstance(result, BaseException):
+                logger.warning(f"Retry failed for renamed repo: {result}")
+                continue
+            all_commits.extend(result)
 
     # 7. Convert to TimelineEvent and filter by date
     events: list[TimelineEvent] = []
@@ -751,12 +850,35 @@ async def generate_ai_summary(
         return_exceptions=True,
     )
 
-    # Flatten and filter errors
+    # Handle renames and flatten results
     all_commits: list[tuple[Repository, dict[str, Any]]] = []
-    for result in results:
-        if isinstance(result, BaseException):
+    repos_to_retry: list[Repository] = []
+
+    for i, result in enumerate(results):
+        if isinstance(result, GitHubRepoRenamed):
+            # Handle repository rename - update DB and retry
+            repo = repos[i]
+            updated_repo = await _handle_repo_rename(db, github, repo, result)
+            if updated_repo:
+                repos_to_retry.append(updated_repo)
+        elif isinstance(result, BaseException):
+            # Other errors - log and skip
+            logger.warning(f"Failed to fetch commits for repo: {result}")
             continue
-        all_commits.extend(result)
+        else:
+            all_commits.extend(result)
+
+    # Retry renamed repos
+    if repos_to_retry:
+        retry_results = await asyncio.gather(
+            *[fetch_repo_commits(r) for r in repos_to_retry],
+            return_exceptions=True,
+        )
+        for result in retry_results:
+            if isinstance(result, BaseException):
+                logger.warning(f"Retry failed for renamed repo: {result}")
+                continue
+            all_commits.extend(result)
 
     # Convert to TimelineEvent and filter by date
     events: list[TimelineEvent] = []
@@ -944,15 +1066,40 @@ async def get_active_code(
         return_exceptions=True,
     )
 
-    # 6. Flatten and filter by date
+    # 6. Handle renames and flatten, filter by date
     commits_in_period: list[tuple[Repository, dict[str, Any]]] = []
-    for result in results:
-        if isinstance(result, BaseException):
+    repos_to_retry: list[Repository] = []
+
+    for i, result in enumerate(results):
+        if isinstance(result, GitHubRepoRenamed):
+            # Handle repository rename - update DB and retry
+            repo = repos[i]
+            updated_repo = await _handle_repo_rename(db, github, repo, result)
+            if updated_repo:
+                repos_to_retry.append(updated_repo)
+        elif isinstance(result, BaseException):
+            logger.warning(f"Failed to fetch commits for repo: {result}")
             continue
-        for repo, commit in result:
-            timestamp = commit["commit"]["committer"]["date"]
-            if timestamp >= since_str:
-                commits_in_period.append((repo, commit))
+        else:
+            for repo, commit in result:
+                timestamp = commit["commit"]["committer"]["date"]
+                if timestamp >= since_str:
+                    commits_in_period.append((repo, commit))
+
+    # Retry renamed repos
+    if repos_to_retry:
+        retry_results = await asyncio.gather(
+            *[fetch_repo_commits(r) for r in repos_to_retry],
+            return_exceptions=True,
+        )
+        for result in retry_results:
+            if isinstance(result, BaseException):
+                logger.warning(f"Retry failed for renamed repo: {result}")
+                continue
+            for repo, commit in result:
+                timestamp = commit["commit"]["committer"]["date"]
+                if timestamp >= since_str:
+                    commits_in_period.append((repo, commit))
 
     if not commits_in_period:
         return _empty_active_code_response()
@@ -1207,12 +1354,35 @@ async def get_velocity(
         return_exceptions=True,
     )
 
-    # 6. Flatten and filter errors
+    # 6. Handle renames and flatten results
     all_commits: list[tuple[Repository, dict[str, Any]]] = []
-    for result in results:
-        if isinstance(result, BaseException):
+    repos_to_retry: list[Repository] = []
+
+    for i, result in enumerate(results):
+        if isinstance(result, GitHubRepoRenamed):
+            # Handle repository rename - update DB and retry
+            repo = repos[i]
+            updated_repo = await _handle_repo_rename(db, github, repo, result)
+            if updated_repo:
+                repos_to_retry.append(updated_repo)
+        elif isinstance(result, BaseException):
+            # Other errors - log and skip
+            logger.warning(f"Failed to fetch commits for repo: {result}")
             continue
-        all_commits.extend(result)
+        else:
+            all_commits.extend(result)
+
+    # Retry renamed repos
+    if repos_to_retry:
+        retry_results = await asyncio.gather(
+            *[fetch_repo_commits(r) for r in repos_to_retry],
+            return_exceptions=True,
+        )
+        for result in retry_results:
+            if isinstance(result, BaseException):
+                logger.warning(f"Retry failed for renamed repo: {result}")
+                continue
+            all_commits.extend(result)
 
     # 7. Convert to TimelineEvent and filter by extended date range
     events: list[TimelineEvent] = []

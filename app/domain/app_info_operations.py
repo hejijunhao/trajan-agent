@@ -70,7 +70,9 @@ def validate_tags(tags: list[str] | None) -> list[str]:
         if len(clean) > MAX_TAG_LENGTH:
             errors.append(f"Tag '{tag}' exceeds {MAX_TAG_LENGTH} characters")
         elif clean and not TAG_PATTERN.match(clean):
-            errors.append(f"Tag '{tag}' contains invalid characters (use a-z, 0-9, hyphens, underscores)")
+            errors.append(
+                f"Tag '{tag}' contains invalid characters (use a-z, 0-9, hyphens, underscores)"
+            )
 
     return errors
 
@@ -267,7 +269,7 @@ class AppInfoOperations(BaseOperations[AppInfo]):
         user_id: uuid_pkg.UUID,
         product_id: uuid_pkg.UUID,
     ) -> list[str]:
-        """Get all unique tags used across app info entries for a product.
+        """Get all unique tags used across app info entries for a product (user-scoped).
 
         Returns a sorted list of unique tags for use in autocomplete/suggestions.
         """
@@ -276,6 +278,28 @@ class AppInfoOperations(BaseOperations[AppInfo]):
             select(func.unnest(AppInfo.tags).label("tag"))
             .where(
                 AppInfo.user_id == user_id,  # type: ignore[arg-type]
+                AppInfo.product_id == product_id,  # type: ignore[arg-type]
+            )
+            .distinct()
+        )
+        result = await db.execute(statement)
+        tags = [row[0] for row in result.fetchall() if row[0]]
+        return sorted(tags)
+
+    async def get_all_tags_for_org(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+    ) -> list[str]:
+        """Get all unique tags used across app info entries for a product (org-level).
+
+        Does NOT filter by user_id - returns tags from all entries in the product.
+        Returns a sorted list of unique tags for use in autocomplete/suggestions.
+        """
+        # Use unnest to flatten all tag arrays, then get distinct values
+        statement = (
+            select(func.unnest(AppInfo.tags).label("tag"))
+            .where(
                 AppInfo.product_id == product_id,  # type: ignore[arg-type]
             )
             .distinct()

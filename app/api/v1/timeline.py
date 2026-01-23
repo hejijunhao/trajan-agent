@@ -1,6 +1,7 @@
 """Timeline API endpoints (serves Progress tab)."""
 
 import asyncio
+import logging
 import uuid as uuid_pkg
 from typing import Any
 
@@ -13,11 +14,55 @@ from app.domain.preferences_operations import preferences_ops
 from app.models import User
 from app.models.repository import Repository
 from app.services.github import GitHubReadOperations
+from app.services.github.exceptions import GitHubRepoRenamed
 from app.services.github.timeline_types import TimelineEvent
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/timeline", tags=["timeline"])
 
 # Concurrency limit for fetching commit stats (avoid rate limiting)
+
+
+async def _handle_repo_rename(
+    db: AsyncSession,
+    github: GitHubReadOperations,
+    repo: Repository,
+    exc: GitHubRepoRenamed,
+) -> Repository | None:
+    """Handle a GitHub repository rename by resolving the new name and updating the database."""
+    if repo.id is None:
+        return None
+
+    new_full_name = exc.new_full_name
+
+    # If we only have repo_id, resolve it to get the current name
+    if not new_full_name and exc.repo_id:
+        try:
+            logger.info(f"Resolving GitHub repo ID {exc.repo_id} to get current name...")
+            github_repo = await github.get_repo_by_id(exc.repo_id)
+            new_full_name = github_repo.full_name
+            logger.info(f"Resolved repo ID {exc.repo_id} → {new_full_name}")
+        except Exception as e:
+            logger.error(f"Failed to resolve repo ID {exc.repo_id}: {e}")
+            return None
+
+    if not new_full_name:
+        logger.error(f"Cannot update repo {repo.full_name}: no new name available")
+        return None
+
+    logger.info(f"Repository renamed on GitHub: {repo.full_name} → {new_full_name}")
+
+    updated_repo = await repository_ops.update_full_name(db, repo.id, new_full_name)
+    if updated_repo:
+        logger.info(f"Updated repository record: {repo.full_name} → {new_full_name}")
+        await db.commit()
+    else:
+        logger.error(f"Failed to update repository record for {repo.full_name}")
+
+    return updated_repo
+
+
 MAX_CONCURRENT_STAT_FETCHES = 10
 
 
@@ -76,12 +121,35 @@ async def get_product_timeline(
         return_exceptions=True,
     )
 
-    # 5. Flatten and filter errors
+    # 5. Handle renames and flatten results
     all_commits: list[tuple[Repository, dict[str, Any]]] = []
-    for result in results:
-        if isinstance(result, BaseException):
-            continue  # Skip failed repos
-        all_commits.extend(result)
+    repos_to_retry: list[Repository] = []
+
+    for i, result in enumerate(results):
+        if isinstance(result, GitHubRepoRenamed):
+            # Handle repository rename - update DB and retry
+            repo = repos[i]
+            updated_repo = await _handle_repo_rename(db, github, repo, result)
+            if updated_repo:
+                repos_to_retry.append(updated_repo)
+        elif isinstance(result, BaseException):
+            # Other errors - log and skip
+            logger.warning(f"Failed to fetch commits for repo: {result}")
+            continue
+        else:
+            all_commits.extend(result)
+
+    # Retry renamed repos
+    if repos_to_retry:
+        retry_results = await asyncio.gather(
+            *[fetch_repo_commits(r) for r in repos_to_retry],
+            return_exceptions=True,
+        )
+        for result in retry_results:
+            if isinstance(result, BaseException):
+                logger.warning(f"Retry failed for renamed repo: {result}")
+                continue
+            all_commits.extend(result)
 
     # 6. Convert to TimelineEvent and sort
     events = []

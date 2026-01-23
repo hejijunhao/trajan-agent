@@ -169,5 +169,51 @@ class RepositoryOperations:
             return True
         return False
 
+    async def get_by_full_name(
+        self,
+        db: AsyncSession,
+        full_name: str,
+    ) -> Repository | None:
+        """Find a repository by its full_name (owner/repo format).
+
+        RLS enforces product access - only returns if user can see the product.
+        """
+        statement = select(Repository).where(Repository.full_name == full_name).limit(1)
+        result = await db.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def update_full_name(
+        self,
+        db: AsyncSession,
+        repo_id: uuid_pkg.UUID,
+        new_full_name: str,
+    ) -> Repository | None:
+        """Update repository full_name after GitHub rename/transfer.
+
+        This is called when GitHub returns a 301 redirect indicating the
+        repository was renamed or transferred to a new owner.
+
+        Args:
+            db: Database session
+            repo_id: Repository ID to update
+            new_full_name: New full name in "owner/repo" format
+
+        Returns:
+            Updated Repository or None if not found
+        """
+        repo = await self.get(db, repo_id)
+        if not repo:
+            return None
+
+        # Extract new name from full_name
+        new_name = new_full_name.split("/")[-1] if "/" in new_full_name else new_full_name
+
+        repo.full_name = new_full_name
+        repo.name = new_name
+        db.add(repo)
+        await db.flush()
+        await db.refresh(repo)
+        return repo
+
 
 repository_ops = RepositoryOperations()
