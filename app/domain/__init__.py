@@ -2,6 +2,7 @@ from app.domain.app_info_operations import app_info_ops
 from app.domain.commit_stats_cache_operations import commit_stats_cache_ops
 from app.domain.progress_summary_operations import progress_summary_ops
 from app.domain.document_operations import document_ops
+from app.domain.section_operations import section_ops, subsection_ops
 from app.domain.feedback_operations import feedback_ops
 from app.domain.org_member_operations import org_member_ops
 from app.domain.organization_operations import organization_ops
@@ -21,6 +22,8 @@ __all__ = [
     "repository_ops",
     "work_item_ops",
     "document_ops",
+    "section_ops",
+    "subsection_ops",
     "app_info_ops",
     "user_ops",
     "preferences_ops",

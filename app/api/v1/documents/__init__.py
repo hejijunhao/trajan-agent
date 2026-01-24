@@ -6,6 +6,7 @@ Modules:
 - sync.py — GitHub synchronization endpoints
 - refresh.py — Document refresh endpoints
 - repo_docs.py — Repository documentation scanning endpoints
+- sections.py — Document sections management (custom sections, reordering)
 """
 
 from fastapi import APIRouter
@@ -14,6 +15,7 @@ from fastapi import APIRouter
 from app.api.v1.documents.crud import (
     add_changelog_entry,
     create_document,
+    delete_all_generated_documents,
     delete_document,
     get_document,
     get_documents_grouped,
@@ -40,6 +42,18 @@ from app.api.v1.documents.repo_docs import (
     get_repo_docs_tree,
     get_repo_file_content,
 )
+from app.api.v1.documents.sections import (
+    create_section,
+    create_subsection,
+    delete_section,
+    delete_subsection,
+    list_sections,
+    move_document_to_section,
+    reorder_sections,
+    reorder_subsections,
+    update_section,
+    update_subsection,
+)
 from app.api.v1.documents.sync import (
     get_docs_sync_status,
     import_docs_from_repo,
@@ -60,6 +74,12 @@ router.add_api_route("/{document_id}", delete_document, methods=["DELETE"], stat
 router.add_api_route("/products/{product_id}/grouped", get_documents_grouped, methods=["GET"])
 router.add_api_route(
     "/products/{product_id}/changelog/add-entry", add_changelog_entry, methods=["POST"]
+)
+router.add_api_route(
+    "/products/{product_id}/generated",
+    delete_all_generated_documents,
+    methods=["DELETE"],
+    status_code=200,
 )
 
 # Lifecycle routes
@@ -109,6 +129,42 @@ router.add_api_route(
     "/products/{product_id}/assessment/{assessment_type}/generate",
     generate_assessment,
     methods=["POST"],
+)
+
+# Section management routes
+router.add_api_route(
+    "/products/{product_id}/sections", list_sections, methods=["GET"]
+)
+router.add_api_route(
+    "/products/{product_id}/sections", create_section, methods=["POST"], status_code=201
+)
+router.add_api_route(
+    "/sections/{section_id}", update_section, methods=["PATCH"]
+)
+router.add_api_route(
+    "/sections/{section_id}", delete_section, methods=["DELETE"], status_code=204
+)
+router.add_api_route(
+    "/products/{product_id}/sections/reorder", reorder_sections, methods=["PATCH"]
+)
+
+# Subsection routes
+router.add_api_route(
+    "/sections/{section_id}/subsections", create_subsection, methods=["POST"], status_code=201
+)
+router.add_api_route(
+    "/subsections/{subsection_id}", update_subsection, methods=["PATCH"]
+)
+router.add_api_route(
+    "/subsections/{subsection_id}", delete_subsection, methods=["DELETE"], status_code=204
+)
+router.add_api_route(
+    "/sections/{section_id}/subsections/reorder", reorder_subsections, methods=["PATCH"]
+)
+
+# Document section movement
+router.add_api_route(
+    "/{document_id}/move-to-section", move_document_to_section, methods=["PATCH"]
 )
 
 __all__ = ["router", "serialize_document"]

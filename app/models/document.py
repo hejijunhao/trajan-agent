@@ -9,6 +9,7 @@ from sqlmodel import Field, Relationship, SQLModel
 from app.models.base import TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
+    from app.models.document_section import DocumentSection, DocumentSubsection
     from app.models.product import Product
 
 
@@ -134,5 +135,22 @@ class Document(DocumentBase, UUIDMixin, TimestampMixin, table=True):
         description="Sync state: synced | local_changes | remote_changes | conflict",
     )
 
+    # Section FK references (normalized - Phase 5)
+    # These coexist with the legacy string fields during migration
+    section_id: uuid_pkg.UUID | None = Field(
+        default=None,
+        foreign_key="document_sections.id",
+        index=True,
+        description="Reference to normalized DocumentSection",
+    )
+    subsection_id: uuid_pkg.UUID | None = Field(
+        default=None,
+        foreign_key="document_subsections.id",
+        index=True,
+        description="Reference to normalized DocumentSubsection",
+    )
+
     # Relationships
     product: Optional["Product"] = Relationship(back_populates="documents")
+    document_section: Optional["DocumentSection"] = Relationship(back_populates="documents")
+    document_subsection: Optional["DocumentSubsection"] = Relationship(back_populates="documents")

@@ -8,7 +8,7 @@ but does NOT control visibility.
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document
@@ -209,6 +209,27 @@ class DocumentOperations:
             await db.flush()
             return True
         return False
+
+    async def delete_by_product_generated(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+    ) -> int:
+        """Delete all AI-generated documents for a product.
+
+        This is a bulk delete operation for clearing all generated docs.
+        Does not affect imported/repository docs (is_generated=False).
+
+        Returns:
+            Number of documents deleted.
+        """
+        stmt = delete(Document).where(
+            Document.product_id == product_id,
+            Document.is_generated == True,  # noqa: E712
+        )
+        result = await db.execute(stmt)
+        await db.flush()
+        return result.rowcount
 
     async def move_to_folder(
         self,

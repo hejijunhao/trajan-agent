@@ -12,6 +12,7 @@ from app.models.base import TimestampMixin, UserOwnedMixin, UUIDMixin
 if TYPE_CHECKING:
     from app.models.app_info import AppInfo
     from app.models.document import Document
+    from app.models.document_section import DocumentSection
     from app.models.organization import Organization
     from app.models.product_access import ProductAccess
     from app.models.repository import Repository
@@ -177,4 +178,8 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     access_entries: list["ProductAccess"] = Relationship(
         back_populates="product",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    document_sections: list["DocumentSection"] = Relationship(
+        back_populates="product",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "DocumentSection.position"},
     )

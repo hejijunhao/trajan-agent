@@ -10,6 +10,14 @@ from app.models.commit_stats_cache import CommitStatsCache
 from app.models.progress_summary import ProgressSummary
 from app.models.custom_doc_job import CustomDocJob, JobStatus
 from app.models.document import Document, DocumentCreate, DocumentUpdate
+from app.models.document_section import (
+    DocumentSection,
+    DocumentSectionCreate,
+    DocumentSectionUpdate,
+    DocumentSubsection,
+    DocumentSubsectionCreate,
+    DocumentSubsectionUpdate,
+)
 from app.models.feedback import (
     Feedback,
     FeedbackCreate,
@@ -88,6 +96,12 @@ __all__ = [
     "Document",
     "DocumentCreate",
     "DocumentUpdate",
+    "DocumentSection",
+    "DocumentSectionCreate",
+    "DocumentSectionUpdate",
+    "DocumentSubsection",
+    "DocumentSubsectionCreate",
+    "DocumentSubsectionUpdate",
     "CustomDocJob",
     "JobStatus",
     "AppInfo",

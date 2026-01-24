@@ -249,3 +249,29 @@ async def add_changelog_entry(
     changelog_agent = ChangelogAgent(db, product, current_user.id)
     updated_doc = await changelog_agent.add_entry(data.version, changes)
     return serialize_document(updated_doc)
+
+
+async def delete_all_generated_documents(
+    product_id: uuid_pkg.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+) -> dict:
+    """Delete all AI-generated documents for a product.
+
+    This bulk operation removes all documents where is_generated=True.
+    Repository-imported documents are preserved.
+    Requires Editor or Admin access to the product.
+    """
+    # Check product access first
+    await check_product_editor_access(db, product_id, current_user.id)
+
+    # Verify product exists
+    product = await product_ops.get(db, id=product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    deleted_count = await document_ops.delete_by_product_generated(db, product_id)
+    return {"deleted_count": deleted_count}
