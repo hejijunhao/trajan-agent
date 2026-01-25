@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 class PlanTier(str, Enum):
     """Available subscription plan tiers."""
 
+    # Pending state (no plan selected yet)
+    NONE = "none"  # New signup, awaiting plan selection
+
     # New tier names (Indie/Pro/Scale pricing)
     INDIE = "indie"  # $49/mo - 5 repos
     PRO = "pro"  # $299/mo - 10 repos
@@ -32,6 +35,7 @@ class PlanTier(str, Enum):
 class SubscriptionStatus(str, Enum):
     """Subscription lifecycle states."""
 
+    PENDING = "pending"  # Awaiting plan selection (new signups)
     ACTIVE = "active"
     PAST_DUE = "past_due"
     CANCELED = "canceled"

@@ -42,8 +42,25 @@ class PlanConfig:
         }
 
 
-# Current plans (Indie/Pro/Scale)
+# Current plans (Indie/Pro/Scale) plus "none" for pending signups
 PLANS: dict[str, PlanConfig] = {
+    "none": PlanConfig(
+        tier="none",
+        display_name="No Plan",
+        price_monthly=0,
+        base_repo_limit=0,
+        overage_repo_price=0,
+        allows_overages=False,
+        priority_doc_generation=False,
+        cross_repo_linking=False,
+        team_collaboration=False,
+        api_access=False,
+        autonomous_creation=False,
+        long_horizon_memory=False,
+        custom_integrations=False,
+        dedicated_support=False,
+        analysis_frequency="none",
+    ),
     "indie": PlanConfig(
         tier="indie",
         display_name="Indie",
@@ -111,11 +128,15 @@ def get_plan(tier: str) -> PlanConfig:
     Get plan configuration by tier name.
 
     Handles legacy tier names by mapping them to current tiers.
-    Defaults to 'indie' if tier not found.
+    Defaults to 'indie' if tier not found (except for 'none' which is explicit).
     """
     # Check for legacy tier name
     if tier in LEGACY_TIER_MAP:
         tier = LEGACY_TIER_MAP[tier]
+
+    # "none" is a valid tier for pending subscriptions
+    if tier == "none":
+        return PLANS["none"]
 
     return PLANS.get(tier, PLANS["indie"])
 

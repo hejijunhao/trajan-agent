@@ -120,14 +120,19 @@ class OrganizationOperations:
         name: str,
         owner_id: uuid_pkg.UUID,
         slug: str | None = None,
-        plan_tier: str = PlanTier.OBSERVER.value,
+        plan_tier: str = PlanTier.NONE.value,
+        subscription_status: str = SubscriptionStatus.PENDING.value,
     ) -> Organization:
         """
         Create a new organization.
 
         Also creates:
         - An owner membership for the creator
-        - A subscription (defaults to free Observer tier)
+        - A subscription (defaults to pending "none" tier for new signups)
+
+        Args:
+            plan_tier: Defaults to "none" for new signups awaiting plan selection.
+            subscription_status: Defaults to "pending" for new signups.
         """
         if not slug:
             slug = generate_slug(name)
@@ -153,7 +158,7 @@ class OrganizationOperations:
         )
         db.add(member)
 
-        # Create subscription (defaults to free tier)
+        # Create subscription
         # Import get_plan here to avoid circular imports
         from app.config.plans import get_plan
 
@@ -161,7 +166,7 @@ class OrganizationOperations:
         subscription = Subscription(
             organization_id=org.id,
             plan_tier=plan_tier,
-            status=SubscriptionStatus.ACTIVE.value,
+            status=subscription_status,
             base_repo_limit=plan.base_repo_limit,
         )
         db.add(subscription)

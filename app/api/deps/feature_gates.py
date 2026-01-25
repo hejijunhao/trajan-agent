@@ -148,6 +148,38 @@ class FeatureGate:
         return True
 
 
+async def require_active_subscription(
+    ctx: SubscriptionContext = Depends(get_subscription_context),
+) -> SubscriptionContext:
+    """
+    Require an active (non-pending) subscription to access the app.
+
+    New users have plan_tier="none" and status="pending" until they select
+    and pay for a plan. This dependency blocks access until they do.
+
+    Returns 402 Payment Required with SUBSCRIPTION_REQUIRED code if pending.
+
+    Exempt endpoints (billing, user profile) should NOT use this dependency.
+    """
+    from app.models.subscription import SubscriptionStatus
+
+    is_pending = (
+        ctx.subscription.plan_tier == "none"
+        or ctx.subscription.status == SubscriptionStatus.PENDING.value
+    )
+
+    if is_pending:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "SUBSCRIPTION_REQUIRED",
+                "message": "Please select a plan to continue",
+            },
+        )
+
+    return ctx
+
+
 async def require_agent_enabled(
     ctx: SubscriptionContext = Depends(get_subscription_context),
     db: AsyncSession = Depends(get_db),

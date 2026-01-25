@@ -57,6 +57,7 @@ class CheckoutRequest(BaseModel):
 
     plan_tier: str
     organization_id: UUID
+    source: str = "billing"  # "billing" or "select-plan" — determines redirect URLs
 
 
 class CheckoutResponse(BaseModel):
@@ -191,9 +192,15 @@ async def create_checkout(
     else:
         customer_id = subscription.stripe_customer_id
 
-    # Create checkout session
-    success_url = f"{settings.frontend_url}/settings/billing?success=true"
-    cancel_url = f"{settings.frontend_url}/settings/billing?canceled=true"
+    # Determine redirect URLs based on source
+    if request.source == "select-plan":
+        # New user selecting a plan — redirect to dashboard on success
+        success_url = f"{settings.frontend_url}/dashboard?checkout=success"
+        cancel_url = f"{settings.frontend_url}/select-plan?checkout=canceled"
+    else:
+        # Existing user upgrading from billing settings
+        success_url = f"{settings.frontend_url}/settings/billing?success=true"
+        cancel_url = f"{settings.frontend_url}/settings/billing?canceled=true"
 
     checkout_url = stripe_service.create_checkout_session(
         customer_id=customer_id,
