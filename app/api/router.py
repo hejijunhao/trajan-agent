@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     admin,
     app_info,
+    billing,
     documents,
     feedback,
     github,
@@ -33,3 +34,4 @@ api_router.include_router(feedback.router)
 api_router.include_router(timeline.router)
 api_router.include_router(progress.router)
 api_router.include_router(quick_access.router)
+api_router.include_router(billing.router)

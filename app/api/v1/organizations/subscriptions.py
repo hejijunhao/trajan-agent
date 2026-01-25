@@ -41,15 +41,22 @@ async def get_subscription(
 
     plan = get_plan(subscription.plan_tier)
 
+    # Use plan config for non-manual subscriptions, respect DB value for manual assignments
+    effective_repo_limit = (
+        subscription.base_repo_limit
+        if subscription.is_manually_assigned
+        else plan.base_repo_limit
+    )
+
     return SubscriptionResponse(
         id=str(subscription.id),
         plan_tier=subscription.plan_tier,
         plan_display_name=plan.display_name,
         status=subscription.status,
-        base_repo_limit=subscription.base_repo_limit,
+        base_repo_limit=effective_repo_limit,
         is_manually_assigned=subscription.is_manually_assigned,
         created_at=subscription.created_at.isoformat(),
-        features=plan.to_features_dict(),
+        features=plan.features,
         analysis_frequency=plan.analysis_frequency,
         price_monthly=plan.price_monthly,
         allows_overages=plan.allows_overages,

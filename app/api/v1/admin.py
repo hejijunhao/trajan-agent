@@ -273,7 +273,7 @@ async def list_plans(
             base_repo_limit=plan.base_repo_limit,
             overage_repo_price=plan.overage_repo_price,
             allows_overages=plan.allows_overages,
-            features=plan.to_features_dict(),
+            features=plan.features,
         )
         for plan in PLANS.values()
     ]

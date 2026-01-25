@@ -1,5 +1,6 @@
 from app.api.v1 import (
     app_info,
+    billing,
     documents,
     github,
     organizations,
@@ -23,6 +24,7 @@ __all__ = [
     "preferences",
     "github",
     "organizations",
+    "billing",
     "timeline",
     "progress",
     "quick_access",

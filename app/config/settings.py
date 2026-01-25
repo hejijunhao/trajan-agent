@@ -41,13 +41,15 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""  # From `stripe listen` (dev) or Stripe Dashboard (prod)
 
     # Stripe Price IDs - Create these in Stripe Dashboard (test mode for dev, live for prod)
-    # Each tier has a base subscription price and a metered overage price
-    stripe_price_foundations_base: str = ""
-    stripe_price_core_base: str = ""
-    stripe_price_autonomous_base: str = ""
-    stripe_price_foundations_overage: str = ""
-    stripe_price_core_overage: str = ""
-    stripe_price_autonomous_overage: str = ""
+    # Tier base prices (monthly subscriptions)
+    stripe_price_indie_base: str = ""
+    stripe_price_pro_base: str = ""
+    stripe_price_scale_base: str = ""
+    # Single overage price for all tiers ($10/repo)
+    stripe_price_repo_overage: str = ""
+
+    # Stripe Meter ID for repo overage (from Stripe Dashboard)
+    stripe_meter_id: str = ""
 
     @property
     def stripe_enabled(self) -> bool:

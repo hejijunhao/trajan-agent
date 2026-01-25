@@ -17,10 +17,16 @@ if TYPE_CHECKING:
 class PlanTier(str, Enum):
     """Available subscription plan tiers."""
 
-    OBSERVER = "observer"  # Free - $0
-    FOUNDATIONS = "foundations"  # $149/mo
-    CORE = "core"  # $299/mo
-    AUTONOMOUS = "autonomous"  # $499/mo
+    # New tier names (Indie/Pro/Scale pricing)
+    INDIE = "indie"  # $49/mo - 5 repos
+    PRO = "pro"  # $299/mo - 10 repos
+    SCALE = "scale"  # $499/mo - 50 repos
+
+    # Legacy tier names (for backwards compatibility with existing data)
+    OBSERVER = "observer"  # Free - $0 (no longer offered, but may exist in DB)
+    FOUNDATIONS = "foundations"  # Legacy: renamed to Indie
+    CORE = "core"  # Legacy: renamed to Pro
+    AUTONOMOUS = "autonomous"  # Legacy: renamed to Scale
 
 
 class SubscriptionStatus(str, Enum):
@@ -30,7 +36,7 @@ class SubscriptionStatus(str, Enum):
     PAST_DUE = "past_due"
     CANCELED = "canceled"
     UNPAID = "unpaid"
-    # Note: No TRIALING - we don't do free trials
+    TRIALING = "trialing"  # 14-day free trial
 
 
 class Subscription(SQLModel, table=True):
