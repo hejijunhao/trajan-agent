@@ -20,6 +20,7 @@ class PreferencesRead(BaseModel):
     github_token_set: bool  # Don't expose actual token
     default_view: str
     sidebar_default: str
+    github_setup_dismissed: bool
 
     class Config:
         from_attributes = True
@@ -34,6 +35,7 @@ class PreferencesUpdate(BaseModel):
     github_token: str | None = None
     default_view: str | None = None
     sidebar_default: str | None = None
+    github_setup_dismissed: bool | None = None
 
 
 class GitHubTokenTest(BaseModel):
@@ -63,6 +65,7 @@ def prefs_to_response(prefs: UserPreferences) -> dict:
         "github_token_set": prefs.github_token is not None and len(prefs.github_token) > 0,
         "default_view": prefs.default_view,
         "sidebar_default": prefs.sidebar_default,
+        "github_setup_dismissed": prefs.github_setup_dismissed,
     }
 
 

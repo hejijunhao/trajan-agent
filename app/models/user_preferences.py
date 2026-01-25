@@ -40,6 +40,9 @@ class UserPreferences(SQLModel, table=True):
     default_view: str = Field(default="grid", max_length=20)  # 'grid', 'list'
     sidebar_default: str = Field(default="expanded", max_length=20)  # 'expanded', 'collapsed'
 
+    # Dismissals
+    github_setup_dismissed: bool = Field(default=False)
+
     # Timestamps
     created_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
