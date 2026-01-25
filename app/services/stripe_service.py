@@ -152,7 +152,7 @@ class StripeService:
         try:
             # Create a meter event to report current overage
             stripe.billing.MeterEvent.create(
-                event_name="repo_overage",
+                event_name="repository_overage",
                 payload={
                     "stripe_customer_id": subscription.stripe_customer_id,
                     "value": str(overage_count),
