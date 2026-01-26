@@ -9,6 +9,7 @@ from app.domain.organization_operations import organization_ops
 from app.domain.preferences_operations import preferences_ops
 from app.domain.product_access_operations import product_access_ops
 from app.domain.product_operations import product_ops
+from app.domain.referral_operations import referral_ops
 from app.domain.repository_operations import repository_ops
 from app.domain.subscription_operations import subscription_ops
 from app.domain.user_operations import user_ops
@@ -19,6 +20,7 @@ __all__ = [
     "progress_summary_ops",
     "product_ops",
     "product_access_ops",
+    "referral_ops",
     "repository_ops",
     "work_item_ops",
     "document_ops",

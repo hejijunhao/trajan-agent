@@ -10,6 +10,8 @@ from app.api.v1.organizations.helpers import require_org_access
 from app.api.v1.organizations.schemas import (
     OrganizationDetailResponse,
     OrganizationResponse,
+    OwnershipTransferRequest,
+    OwnershipTransferResponse,
     PlanResponse,
 )
 from app.config.plans import PLANS
@@ -198,3 +200,64 @@ async def delete_organization(
 
     await organization_ops.delete(db, org_id)
     await db.commit()
+
+
+async def transfer_ownership(
+    org_id: uuid_pkg.UUID,
+    data: OwnershipTransferRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+) -> OwnershipTransferResponse:
+    """
+    Transfer organization ownership to an existing member.
+
+    Only the current owner can transfer ownership. The new owner must be
+    an existing member of the organization.
+
+    After transfer:
+    - New owner has OWNER role
+    - Previous owner is downgraded to ADMIN role
+
+    Use this before account deletion when the organization has other members
+    who need to retain access.
+    """
+    # Verify user is the owner (this also checks membership)
+    await require_org_access(db, org_id, user, min_role=MemberRole.OWNER)
+
+    # Parse and validate new_owner_id
+    try:
+        new_owner_uuid = uuid_pkg.UUID(data.new_owner_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid new_owner_id format",
+        ) from e
+
+    # Store previous owner ID before transfer
+    previous_owner_id = str(user.id)
+
+    # Perform the transfer
+    try:
+        org = await organization_ops.transfer_ownership(
+            db,
+            org_id=org_id,
+            current_owner_id=user.id,
+            new_owner_id=new_owner_uuid,
+            remove_previous_owner=False,  # Keep as admin by default
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+    await db.commit()
+
+    return OwnershipTransferResponse(
+        id=str(org.id),
+        name=org.name,
+        slug=org.slug,
+        owner_id=str(org.owner_id),
+        previous_owner_id=previous_owner_id,
+        message=f"Ownership transferred successfully. You are now an admin of {org.name}.",
+    )

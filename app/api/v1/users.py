@@ -48,6 +48,63 @@ class InvitedOrgInfo(BaseModel):
     invited_at: str | None
 
 
+# --- Deletion Preview Schemas ---
+
+
+class OrgMemberInfoResponse(BaseModel):
+    """Info about an organization member (for ownership transfer selection)."""
+
+    id: str
+    email: str | None
+    name: str | None
+    role: str
+
+
+class OrgDeletionPreviewResponse(BaseModel):
+    """Preview of what happens to an owned organization during account deletion."""
+
+    org_id: str
+    org_name: str
+    is_sole_member: bool
+    member_count: int
+    other_members: list[OrgMemberInfoResponse]
+    product_count: int
+    work_item_count: int
+    document_count: int
+    has_active_subscription: bool
+
+
+class BasicOrgInfoResponse(BaseModel):
+    """Minimal info about an org where user is just a member."""
+
+    id: str
+    name: str
+
+
+class DeletionPreviewResponse(BaseModel):
+    """Complete deletion preview - shows what will happen if user deletes their account."""
+
+    owned_orgs: list[OrgDeletionPreviewResponse]
+    member_only_orgs: list[BasicOrgInfoResponse]
+    total_products_affected: int
+    total_work_items_affected: int
+    total_documents_affected: int
+
+
+class AccountDeletionRequest(BaseModel):
+    """Request to delete user account with explicit org handling."""
+
+    orgs_to_delete: list[str] = []  # UUIDs of orgs where user is sole member, choosing to delete
+    confirm_deletion: bool = False  # Must be True to proceed
+
+    @classmethod
+    def validate_confirmation(cls, v: bool) -> bool:
+        """Ensure deletion is explicitly confirmed."""
+        if not v:
+            raise ValueError("Must confirm deletion by setting confirm_deletion to true")
+        return v
+
+
 class OnboardingContext(BaseModel):
     """Context for frontend to determine which onboarding flow to show."""
 
@@ -106,23 +163,112 @@ async def update_current_user_profile(
     return user_to_response(updated_user)
 
 
+@router.get("/me/deletion-preview", response_model=DeletionPreviewResponse)
+async def get_deletion_preview(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+):
+    """
+    Get a preview of what will happen when the user deletes their account.
+
+    Returns detailed information about:
+    - Organizations the user owns (with member counts and whether transfer is required)
+    - Organizations where the user is just a member (membership will be removed)
+    - Total counts of products, work items, and documents that will be deleted
+
+    For owned organizations:
+    - If sole member: organization and all data will be deleted
+    - If has other members: must transfer ownership before deletion
+    """
+    preview = await user_ops.get_deletion_preview(db, current_user.id)
+
+    # Convert dataclass results to response format
+    return DeletionPreviewResponse(
+        owned_orgs=[
+            OrgDeletionPreviewResponse(
+                org_id=str(org.org_id),
+                org_name=org.org_name,
+                is_sole_member=org.is_sole_member,
+                member_count=org.member_count,
+                other_members=[
+                    OrgMemberInfoResponse(
+                        id=str(m.id),
+                        email=m.email,
+                        name=m.name,
+                        role=m.role,
+                    )
+                    for m in org.other_members
+                ],
+                product_count=org.product_count,
+                work_item_count=org.work_item_count,
+                document_count=org.document_count,
+                has_active_subscription=org.has_active_subscription,
+            )
+            for org in preview.owned_orgs
+        ],
+        member_only_orgs=[
+            BasicOrgInfoResponse(id=str(org.id), name=org.name) for org in preview.member_only_orgs
+        ],
+        total_products_affected=preview.total_products_affected,
+        total_work_items_affected=preview.total_work_items_affected,
+        total_documents_affected=preview.total_documents_affected,
+    )
+
+
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_current_user(
+    request: AccountDeletionRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
     """
     Delete the current user's account and all associated data.
 
-    This action is irreversible. All products, work items, documents,
-    and other user data will be permanently deleted.
+    This action is irreversible and requires explicit handling for owned organizations:
+
+    - **orgs_to_delete**: List of org IDs where user is sole member. These orgs
+      and all their data (products, work items, documents) will be permanently deleted.
+    - **confirm_deletion**: Must be `true` to proceed.
+
+    **Validation rules:**
+    - All owned orgs with other members must be transferred first (via /transfer-ownership)
+    - All sole-member orgs must be explicitly listed in orgs_to_delete
+    - Memberships in other orgs (where user is not owner) are removed automatically
+
+    **Cascade behavior:**
+    - Sole-member orgs → deleted with all products, work items, documents
+    - User preferences → deleted
+    - Organization memberships → deleted
+    - Product access entries → deleted
     """
-    deleted = await user_ops.delete(db, current_user.id)
-    if not deleted:
+    # Validate confirmation
+    if not request.confirm_deletion:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must confirm deletion by setting confirm_deletion to true",
         )
+
+    # Parse org IDs
+    import uuid as uuid_pkg
+
+    try:
+        orgs_to_delete = [uuid_pkg.UUID(org_id) for org_id in request.orgs_to_delete]
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid org_id format in orgs_to_delete",
+        ) from e
+
+    # Perform deletion with validation
+    try:
+        await user_ops.delete_with_cascade(db, current_user.id, orgs_to_delete)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+    await db.commit()
 
 
 @router.post("/me/complete-onboarding", response_model=UserRead)

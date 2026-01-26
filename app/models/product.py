@@ -56,11 +56,13 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     # Organization ownership (nullable during migration, required after)
     organization_id: uuid_pkg.UUID | None = Field(
         default=None,
-        foreign_key="organizations.id",
-        index=True,
-        sa_column_kwargs={
-            "comment": "Organization that owns this product (nullable during migration)"
-        },
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+            comment="Organization that owns this product",
+        ),
     )
 
     # Project Lead - designated team member responsible for the product
@@ -181,5 +183,8 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     )
     document_sections: list["DocumentSection"] = Relationship(
         back_populates="product",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "DocumentSection.position"},
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "order_by": "DocumentSection.position",
+        },
     )

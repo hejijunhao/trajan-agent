@@ -43,9 +43,7 @@ async def get_subscription(
 
     # Use plan config for non-manual subscriptions, respect DB value for manual assignments
     effective_repo_limit = (
-        subscription.base_repo_limit
-        if subscription.is_manually_assigned
-        else plan.base_repo_limit
+        subscription.base_repo_limit if subscription.is_manually_assigned else plan.base_repo_limit
     )
 
     return SubscriptionResponse(

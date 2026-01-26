@@ -97,10 +97,7 @@ class OrganizationOperations:
     ) -> list[Organization]:
         """Get all organizations (admin only)."""
         statement = (
-            select(Organization)
-            .offset(skip)
-            .limit(limit)
-            .order_by(Organization.created_at.desc())
+            select(Organization).offset(skip).limit(limit).order_by(Organization.created_at.desc())
         )
         result = await db.execute(statement)
         return list(result.scalars().all())
@@ -253,6 +250,87 @@ class OrganizationOperations:
         )
         result = await db.execute(statement)
         return result.scalar_one_or_none()
+
+    async def get_member(
+        self,
+        db: AsyncSession,
+        organization_id: uuid_pkg.UUID,
+        user_id: uuid_pkg.UUID,
+    ) -> OrganizationMember | None:
+        """Get a specific membership record."""
+        statement = select(OrganizationMember).where(
+            OrganizationMember.organization_id == organization_id,
+            OrganizationMember.user_id == user_id,
+        )
+        result = await db.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def transfer_ownership(
+        self,
+        db: AsyncSession,
+        org_id: uuid_pkg.UUID,
+        current_owner_id: uuid_pkg.UUID,
+        new_owner_id: uuid_pkg.UUID,
+        remove_previous_owner: bool = False,
+    ) -> Organization:
+        """
+        Transfer ownership of an organization to an existing member.
+
+        Args:
+            org_id: The organization to transfer
+            current_owner_id: The current owner (for verification)
+            new_owner_id: The user to become the new owner (must be existing member)
+            remove_previous_owner: If True, remove previous owner's membership entirely.
+                                   If False, downgrade to ADMIN role.
+
+        Returns:
+            The updated organization
+
+        Raises:
+            ValueError: If validation fails (not owner, target not a member, etc.)
+        """
+        # 1. Verify org exists and current user is owner
+        org = await self.get(db, org_id)
+        if not org:
+            raise ValueError("Organization not found")
+        if org.owner_id != current_owner_id:
+            raise ValueError("Only the owner can transfer ownership")
+
+        # 2. Prevent transferring to yourself
+        if new_owner_id == current_owner_id:
+            raise ValueError("Cannot transfer ownership to yourself")
+
+        # 3. Verify new owner is an existing member
+        new_owner_membership = await self.get_member(db, org_id, new_owner_id)
+        if not new_owner_membership:
+            raise ValueError("New owner must be an existing member of the organization")
+
+        # 4. Get current owner's membership
+        current_owner_membership = await self.get_member(db, org_id, current_owner_id)
+        if not current_owner_membership:
+            raise ValueError("Current owner membership not found")
+
+        # 5. Update org.owner_id
+        org.owner_id = new_owner_id
+
+        # 6. Update new owner's role to OWNER
+        new_owner_membership.role = MemberRole.OWNER.value
+
+        # 7. Handle previous owner's membership
+        if remove_previous_owner:
+            await db.delete(current_owner_membership)
+        else:
+            current_owner_membership.role = MemberRole.ADMIN.value
+
+        db.add(org)
+        db.add(new_owner_membership)
+        if not remove_previous_owner:
+            db.add(current_owner_membership)
+
+        await db.flush()
+        await db.refresh(org)
+
+        return org
 
 
 organization_ops = OrganizationOperations()

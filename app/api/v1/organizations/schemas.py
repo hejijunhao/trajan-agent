@@ -76,3 +76,23 @@ class PlanResponse(BaseModel):
     allows_overages: bool
     features: dict[str, bool]
     analysis_frequency: str
+
+
+# --- Ownership Transfer Schemas ---
+
+
+class OwnershipTransferRequest(BaseModel):
+    """Request to transfer organization ownership to an existing member."""
+
+    new_owner_id: str  # UUID of existing member to become new owner
+
+
+class OwnershipTransferResponse(BaseModel):
+    """Response after successful ownership transfer."""
+
+    id: str
+    name: str
+    slug: str
+    owner_id: str  # New owner's ID
+    previous_owner_id: str  # Previous owner's ID
+    message: str

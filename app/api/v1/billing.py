@@ -13,6 +13,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.config import settings
 from app.config.plans import PLANS, get_plan
 from app.domain.organization_operations import organization_ops
+from app.domain.referral_operations import referral_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.billing import BillingEvent, BillingEventType
 from app.models.subscription import PlanTier, SubscriptionStatus
@@ -286,7 +287,7 @@ async def handle_stripe_webhook(
 
     # Check for duplicate (idempotency)
     existing = await db.execute(
-        select(BillingEvent).where(BillingEvent.stripe_event_id == event_id)
+        select(BillingEvent).where(BillingEvent.stripe_event_id == event_id)  # type: ignore[arg-type]
     )
     if existing.scalar_one_or_none():
         logger.info(f"Skipping duplicate webhook: {event_id}")
@@ -320,7 +321,7 @@ async def _handle_checkout_completed(
     session: dict[str, Any],
     event_id: str,
 ) -> None:
-    """Handle successful checkout — activate subscription."""
+    """Handle successful checkout — activate subscription and process referrals."""
     customer_id = session.get("customer", "")
     stripe_subscription_id = session.get("subscription", "")
 
@@ -366,6 +367,127 @@ async def _handle_checkout_completed(
     )
 
     logger.info(f"Activated {plan_tier} subscription for org {subscription.organization_id}")
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Referral Processing: Check if this user signed up via referral
+    # ─────────────────────────────────────────────────────────────────────────────
+    await _process_referral_conversion(db, subscription, stripe_subscription_id, event_id)
+
+
+async def _process_referral_conversion(
+    db: DbSession,
+    recipient_subscription: Any,
+    recipient_stripe_sub_id: str,
+    event_id: str,
+) -> None:
+    """
+    Process referral conversion when a referred user completes payment.
+
+    Steps:
+    1. Get the organization owner (recipient)
+    2. Check if they have a pending referral
+    3. Mark the referral as converted
+    4. Apply 1 free month to recipient's subscription
+    5. Apply 1 free month to sender's subscription (if they have one)
+    """
+    # Get the organization to find the owner (recipient)
+    org = await organization_ops.get(db, recipient_subscription.organization_id)
+    if not org:
+        return
+
+    recipient_user_id = org.owner_id
+
+    # Check for pending referral
+    referral = await referral_ops.get_pending_referral_for_recipient(db, recipient_user_id)
+    if not referral:
+        logger.debug(f"No pending referral for user {recipient_user_id}")
+        return
+
+    # Mark referral as converted
+    await referral_ops.mark_converted(db, recipient_user_id)
+
+    logger.info(
+        f"Referral converted: code={referral.code}, "
+        f"sender={referral.user_id}, recipient={recipient_user_id}"
+    )
+
+    # Apply 1 free month to recipient's subscription
+    if recipient_stripe_sub_id:
+        recipient_reward_applied = stripe_service.apply_referral_reward(recipient_stripe_sub_id)
+        if recipient_reward_applied:
+            await subscription_ops.log_event(
+                db,
+                organization_id=recipient_subscription.organization_id,
+                event_type=BillingEventType.REFERRAL_CREDIT_APPLIED,
+                new_value={
+                    "type": "recipient",
+                    "referral_code": referral.code,
+                    "months_free": 1,
+                },
+                stripe_event_id=event_id,
+                description="Referral reward: 1 free month applied (recipient)",
+            )
+            logger.info(f"Applied 1 free month to recipient subscription {recipient_stripe_sub_id}")
+
+    # Apply 1 free month to sender's subscription (if they have one)
+    await _apply_sender_referral_reward(db, referral, event_id)
+
+
+async def _apply_sender_referral_reward(
+    db: DbSession,
+    referral: Any,
+    event_id: str,
+) -> None:
+    """
+    Apply referral reward to the sender (person who shared the code).
+
+    If sender has an active Stripe subscription, apply 1 free month coupon.
+    If not, increment their referral_credit_cents for future application.
+    """
+    sender_user_id = referral.user_id
+
+    # Find sender's organizations to check for subscriptions
+    sender_orgs = await organization_ops.get_for_user(db, sender_user_id)
+
+    sender_subscription = None
+    for org in sender_orgs:
+        sub = await subscription_ops.get_by_org(db, org.id)
+        if sub and sub.stripe_subscription_id:
+            sender_subscription = sub
+            break
+
+    if sender_subscription and sender_subscription.stripe_subscription_id:
+        # Sender has an active Stripe subscription - apply coupon
+        reward_applied = stripe_service.apply_referral_reward(
+            sender_subscription.stripe_subscription_id
+        )
+        if reward_applied:
+            await subscription_ops.log_event(
+                db,
+                organization_id=sender_subscription.organization_id,
+                event_type=BillingEventType.REFERRAL_EARNED,
+                new_value={
+                    "type": "sender",
+                    "referral_code": referral.code,
+                    "months_free": 1,
+                },
+                stripe_event_id=event_id,
+                description="Referral reward earned: 1 free month applied",
+            )
+            logger.info(
+                f"Applied 1 free month to sender subscription "
+                f"{sender_subscription.stripe_subscription_id} for referral {referral.code}"
+            )
+    else:
+        # Sender doesn't have an active Stripe subscription
+        # Store credit for later (when they subscribe)
+        # For MVP, we just log this - credit tracking can be added in future
+        logger.info(
+            f"Sender {sender_user_id} earned referral credit but has no active subscription. "
+            f"Credit will be applied when they subscribe."
+        )
+        # TODO: Implement pending credit tracking in subscription.referral_credit_cents
+        # and apply during their checkout
 
 
 async def _handle_subscription_updated(

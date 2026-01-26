@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from app.models.organization import Organization, OrganizationMember
     from app.models.product import Product
     from app.models.product_access import ProductAccess
+    from app.models.referral_code import ReferralCode
     from app.models.user_preferences import UserPreferences
 
 
@@ -41,6 +42,16 @@ class User(SQLModel, table=True):
         sa_column_kwargs={"comment": "Admin flag for manual plan assignment and admin operations"},
     )
 
+    # Referral system
+    invite_limit: int = Field(
+        default=3,
+        nullable=False,
+        sa_column_kwargs={
+            "server_default": text("3"),
+            "comment": "Number of referral invites user can generate (adjustable by admin)",
+        },
+    )
+
     # Onboarding state
     onboarding_completed_at: datetime | None = Field(
         default=None,
@@ -65,7 +76,10 @@ class User(SQLModel, table=True):
         back_populates="user",
         sa_relationship_kwargs={"foreign_keys": "[Product.user_id]"},
     )
-    preferences: Optional["UserPreferences"] = Relationship(back_populates="user")
+    preferences: Optional["UserPreferences"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
     # Organization relationships
     owned_organizations: list["Organization"] = Relationship(
@@ -81,4 +95,13 @@ class User(SQLModel, table=True):
     product_access_entries: list["ProductAccess"] = Relationship(
         back_populates="user",
         sa_relationship_kwargs={"foreign_keys": "[ProductAccess.user_id]"},
+    )
+
+    # Referral codes owned by this user
+    referral_codes: list["ReferralCode"] = Relationship(
+        back_populates="owner",
+        sa_relationship_kwargs={
+            "foreign_keys": "[ReferralCode.user_id]",
+            "cascade": "all, delete-orphan",
+        },
     )

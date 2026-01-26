@@ -9,12 +9,27 @@ from sqlmodel import SQLModel
 
 from app.config import settings
 # Import all models to ensure they're registered with SQLModel.metadata
-from app.models import (
+# Using wildcard import to ensure all table models are in SQLModel.metadata
+from app.models import (  # noqa: F401
     AppInfo,
+    BillingEvent,
+    CommitStatsCache,
+    CustomDocJob,
     Document,
+    DocumentSection,
+    DocumentSubsection,
+    Feedback,
+    Organization,
+    OrganizationMember,
     Product,
+    ProductAccess,
+    ProgressSummary,
+    ReferralCode,
     Repository,
+    Subscription,
+    UsageSnapshot,
     User,
+    UserPreferences,
     WorkItem,
 )
 

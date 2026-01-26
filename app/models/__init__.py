@@ -2,12 +2,9 @@ from app.models.app_info import AppInfo, AppInfoCreate, AppInfoUpdate
 from app.models.billing import (
     BillingEvent,
     BillingEventType,
-    Referral,
-    ReferralStatus,
     UsageSnapshot,
 )
 from app.models.commit_stats_cache import CommitStatsCache
-from app.models.progress_summary import ProgressSummary
 from app.models.custom_doc_job import CustomDocJob, JobStatus
 from app.models.document import Document, DocumentCreate, DocumentUpdate
 from app.models.document_section import (
@@ -45,6 +42,8 @@ from app.models.product_access import (
     ProductAccessWithUser,
     UserBasicInfo,
 )
+from app.models.progress_summary import ProgressSummary
+from app.models.referral_code import ReferralCode
 from app.models.repository import Repository, RepositoryCreate, RepositoryUpdate
 from app.models.subscription import (
     PlanTier,
@@ -75,8 +74,7 @@ __all__ = [
     "UsageSnapshot",
     "BillingEvent",
     "BillingEventType",
-    "Referral",
-    "ReferralStatus",
+    "ReferralCode",
     "Product",
     "ProductCreate",
     "ProductUpdate",

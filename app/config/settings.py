@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # Stripe Meter ID for repo overage (from Stripe Dashboard)
     stripe_meter_id: str = ""
 
+    # Stripe Coupon ID for referral program (100% off for 1 month)
+    # If empty, will be created automatically on first use
+    stripe_referral_coupon_id: str = ""
+
     @property
     def stripe_enabled(self) -> bool:
         """Check if Stripe is configured (has secret key)."""

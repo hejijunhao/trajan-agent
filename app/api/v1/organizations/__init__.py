@@ -18,6 +18,7 @@ from app.api.v1.organizations.crud import (
     get_organization,
     list_organizations,
     list_plans,
+    transfer_ownership,
     update_organization,
 )
 from app.api.v1.organizations.member_access import get_member_product_access
@@ -39,6 +40,7 @@ router.add_api_route("/plans", list_plans, methods=["GET"])
 router.add_api_route("/{org_id}", get_organization, methods=["GET"])
 router.add_api_route("/{org_id}", update_organization, methods=["PATCH"])
 router.add_api_route("/{org_id}", delete_organization, methods=["DELETE"], status_code=204)
+router.add_api_route("/{org_id}/transfer-ownership", transfer_ownership, methods=["POST"])
 
 # Member management routes
 router.add_api_route("/{org_id}/members", list_members, methods=["GET"])

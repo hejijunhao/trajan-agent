@@ -266,6 +266,103 @@ class StripeService:
             logger.error(f"Failed to retrieve subscription: {e}")
             return None
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Referral Coupon Management
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def get_or_create_referral_coupon() -> str:
+        """
+        Get or create a referral coupon for 1 free month.
+
+        Returns the coupon ID. Creates the coupon if it doesn't exist.
+        """
+        # Check if coupon ID is configured
+        if settings.stripe_referral_coupon_id:
+            try:
+                # Verify coupon exists
+                stripe.Coupon.retrieve(settings.stripe_referral_coupon_id)
+                return settings.stripe_referral_coupon_id
+            except StripeError:
+                logger.warning(
+                    f"Configured coupon {settings.stripe_referral_coupon_id} not found, creating new one"
+                )
+
+        # Create a new coupon: 100% off for 1 month
+        try:
+            coupon = stripe.Coupon.create(
+                id="REFERRAL_1_MONTH_FREE",  # Idempotent ID
+                percent_off=100,
+                duration="once",  # Applies once (to one invoice)
+                name="Referral Reward - 1 Month Free",
+                metadata={
+                    "type": "referral",
+                    "description": "1 free month for referral program participants",
+                },
+            )
+            logger.info(f"Created referral coupon: {coupon.id}")
+            return coupon.id
+        except StripeError as e:
+            # If coupon already exists with that ID, retrieve it
+            if "already exists" in str(e).lower():
+                return "REFERRAL_1_MONTH_FREE"
+            logger.error(f"Failed to create referral coupon: {e}")
+            raise
+
+    @staticmethod
+    def apply_coupon_to_subscription(
+        stripe_subscription_id: str,
+        coupon_id: str,
+    ) -> bool:
+        """
+        Apply a coupon to an existing subscription.
+
+        Returns True if successful, False otherwise.
+        Uses the discounts parameter which is the modern Stripe API.
+        """
+        try:
+            stripe.Subscription.modify(
+                stripe_subscription_id,
+                discounts=[{"coupon": coupon_id}],
+            )
+            logger.info(f"Applied coupon {coupon_id} to subscription {stripe_subscription_id}")
+            return True
+        except StripeError as e:
+            logger.error(f"Failed to apply coupon to subscription: {e}")
+            return False
+
+    @staticmethod
+    def apply_referral_reward(stripe_subscription_id: str) -> bool:
+        """
+        Apply referral reward (1 free month) to a subscription.
+
+        Convenience wrapper around get_or_create_referral_coupon + apply_coupon_to_subscription.
+        """
+        try:
+            coupon_id = StripeService.get_or_create_referral_coupon()
+            return StripeService.apply_coupon_to_subscription(stripe_subscription_id, coupon_id)
+        except StripeError as e:
+            logger.error(f"Failed to apply referral reward: {e}")
+            return False
+
+    @staticmethod
+    def get_customer_subscriptions(stripe_customer_id: str) -> list[dict[str, object]]:
+        """
+        Get all subscriptions for a Stripe customer.
+
+        Returns list of subscription dicts.
+        """
+        try:
+            subscriptions = stripe.Subscription.list(
+                customer=stripe_customer_id,
+                status="all",
+                limit=10,
+            )
+            return [dict(sub) for sub in subscriptions.data]
+        except StripeError as e:
+            logger.error(f"Failed to list customer subscriptions: {e}")
+            return []
+
 
 # Singleton instance
 stripe_service = StripeService()

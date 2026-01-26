@@ -79,10 +79,9 @@ async def add_member(
     caller_role = await require_org_access(db, org_id, user, min_role=MemberRole.ADMIN)
 
     # Admins can only assign member/viewer roles
-    if (
-        caller_role == MemberRole.ADMIN.value
-        and ROLE_HIERARCHY.get(data.role, 0) >= ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0)
-    ):
+    if caller_role == MemberRole.ADMIN.value and ROLE_HIERARCHY.get(
+        data.role, 0
+    ) >= ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admins can only assign member or viewer roles",
@@ -189,9 +188,8 @@ async def update_member_role(
 
     # Changing to/from owner requires owner role
     if (
-        (data.role == MemberRole.OWNER.value or member.role == MemberRole.OWNER.value)
-        and caller_role != MemberRole.OWNER.value
-    ):
+        data.role == MemberRole.OWNER.value or member.role == MemberRole.OWNER.value
+    ) and caller_role != MemberRole.OWNER.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only owners can assign or revoke owner role",
@@ -222,9 +220,7 @@ async def update_member_role(
         joined_at=member.joined_at.isoformat(),
         invited_by=str(member.invited_by) if member.invited_by else None,
         invited_at=member.invited_at.isoformat() if member.invited_at else None,
-        has_signed_in=(
-            member.user.onboarding_completed_at is not None if member.user else False
-        ),
+        has_signed_in=(member.user.onboarding_completed_at is not None if member.user else False),
     )
 
 
@@ -269,10 +265,9 @@ async def remove_member(
             )
 
         # Admins can only remove member/viewer
-        if (
-            caller_role == MemberRole.ADMIN.value
-            and ROLE_HIERARCHY.get(member.role, 0) >= ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0)
-        ):
+        if caller_role == MemberRole.ADMIN.value and ROLE_HIERARCHY.get(
+            member.role, 0
+        ) >= ROLE_HIERARCHY.get(MemberRole.ADMIN.value, 0):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only owners can remove admins or other owners",
