@@ -63,6 +63,9 @@ class SubscriptionResponse(BaseModel):
     price_monthly: int
     allows_overages: bool
     overage_repo_price: int
+    # Cancellation fields
+    cancel_at_period_end: bool
+    current_period_end: str | None
 
 
 class PlanResponse(BaseModel):
@@ -96,3 +99,38 @@ class OwnershipTransferResponse(BaseModel):
     owner_id: str  # New owner's ID
     previous_owner_id: str  # Previous owner's ID
     message: str
+
+
+# --- Organization Repository Schemas ---
+
+
+class OrgRepositoryResponse(BaseModel):
+    """Repository response with product context for downgrade selection."""
+
+    id: str
+    name: str
+    full_name: str | None
+    description: str | None
+    default_branch: str | None
+    product_id: str
+    product_name: str
+    updated_at: str | None
+
+
+class OrgRepositoriesListResponse(BaseModel):
+    """List of repositories across all products in an organization."""
+
+    repositories: list[OrgRepositoryResponse]
+    total_count: int
+
+
+# --- Repo Limit Status Schemas ---
+
+
+class RepoLimitStatusResponse(BaseModel):
+    """Repository limit status for overage confirmation UI."""
+
+    current_count: int  # Current number of repos in the organization
+    base_limit: int  # Repos included in plan
+    allows_overages: bool  # Whether plan allows adding beyond limit
+    overage_price_cents: int  # Cost per additional repo (e.g., 1000 = $10)

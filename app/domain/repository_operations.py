@@ -9,6 +9,7 @@ import uuid as uuid_pkg
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.product import Product
 from app.models.repository import Repository
@@ -59,6 +60,26 @@ class RepositoryOperations:
             .order_by(Repository.created_at.desc())
             .offset(skip)
             .limit(limit)
+        )
+        result = await db.execute(statement)
+        return list(result.scalars().all())
+
+    async def get_by_org_with_products(
+        self,
+        db: AsyncSession,
+        organization_id: uuid_pkg.UUID,
+    ) -> list[Repository]:
+        """Get all repositories with their products eager-loaded.
+
+        Used for downgrade flows where we need to display repos grouped by product.
+        Orders by product name, then by most recently updated within each product.
+        """
+        statement = (
+            select(Repository)
+            .join(Product, Repository.product_id == Product.id)
+            .where(Product.organization_id == organization_id)
+            .options(selectinload(Repository.product))
+            .order_by(Product.name, Repository.updated_at.desc())
         )
         result = await db.execute(statement)
         return list(result.scalars().all())
@@ -168,6 +189,29 @@ class RepositoryOperations:
             await db.flush()
             return True
         return False
+
+    async def bulk_delete_except(
+        self,
+        db: AsyncSession,
+        organization_id: uuid_pkg.UUID,
+        keep_ids: list[uuid_pkg.UUID],
+    ) -> int:
+        """Delete all repositories in an org EXCEPT those in keep_ids.
+
+        Used for subscription downgrade flows.
+        Returns the count of deleted repositories.
+        """
+        # Get all repos for this org
+        all_repos = await self.get_by_org(db, organization_id, limit=1000)
+
+        # Filter to ones we should delete
+        to_delete = [r for r in all_repos if r.id not in keep_ids]
+
+        for repo in to_delete:
+            await db.delete(repo)
+
+        await db.flush()
+        return len(to_delete)
 
     async def get_by_full_name(
         self,

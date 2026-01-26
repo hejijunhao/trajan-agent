@@ -7,6 +7,7 @@ Modules:
 - members.py — Member management endpoints
 - member_access.py — Member product access endpoints
 - subscriptions.py — Subscription endpoints
+- repositories.py — Organization-wide repository listing
 """
 
 from fastapi import APIRouter
@@ -29,7 +30,8 @@ from app.api.v1.organizations.members import (
     resend_invite,
     update_member_role,
 )
-from app.api.v1.organizations.subscriptions import get_subscription
+from app.api.v1.organizations.repositories import list_org_repositories
+from app.api.v1.organizations.subscriptions import get_repo_limit_status, get_subscription
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
@@ -53,6 +55,10 @@ router.add_api_route("/{org_id}/members/{member_id}/resend-invite", resend_invit
 
 # Subscription routes
 router.add_api_route("/{org_id}/subscription", get_subscription, methods=["GET"])
+router.add_api_route("/{org_id}/repo-limit-status", get_repo_limit_status, methods=["GET"])
+
+# Repository routes (for downgrade flows)
+router.add_api_route("/{org_id}/repositories", list_org_repositories, methods=["GET"])
 
 # Member product access routes
 router.add_api_route(

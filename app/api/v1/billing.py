@@ -14,6 +14,7 @@ from app.config import settings
 from app.config.plans import PLANS, get_plan
 from app.domain.organization_operations import organization_ops
 from app.domain.referral_operations import referral_ops
+from app.domain.repository_operations import repository_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.billing import BillingEvent, BillingEventType
 from app.models.subscription import PlanTier, SubscriptionStatus
@@ -77,6 +78,47 @@ class PortalResponse(BaseModel):
     """Response with portal URL."""
 
     portal_url: str
+
+
+class CancelRequest(BaseModel):
+    """Request to cancel a subscription at period end."""
+
+    organization_id: UUID
+
+
+class CancelResponse(BaseModel):
+    """Response after scheduling cancellation."""
+
+    message: str
+    cancel_at: str  # ISO date when subscription ends
+
+
+class ReactivateRequest(BaseModel):
+    """Request to reactivate a subscription that was set to cancel."""
+
+    organization_id: UUID
+
+
+class ReactivateResponse(BaseModel):
+    """Response after reactivating subscription."""
+
+    message: str
+
+
+class DowngradeRequest(BaseModel):
+    """Request to downgrade to a lower plan tier."""
+
+    organization_id: UUID
+    target_plan_tier: str
+    repos_to_keep: list[UUID]  # IDs of repositories to keep; others will be deleted
+
+
+class DowngradeResponse(BaseModel):
+    """Response after successful downgrade."""
+
+    success: bool
+    message: str
+    deleted_repo_count: int
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -250,6 +292,267 @@ async def create_portal(
     )
 
     return PortalResponse(portal_url=portal_url)
+
+
+@router.post("/cancel", response_model=CancelResponse)
+async def cancel_subscription(
+    request: CancelRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> CancelResponse:
+    """
+    Cancel a subscription at the end of the current billing period.
+
+    User must be owner or admin of the organization.
+    The subscription remains active until the period end, then the organization
+    and all its data will be permanently deleted.
+    """
+    if not settings.stripe_enabled:
+        raise HTTPException(400, "Payments not configured")
+
+    # Verify user is owner/admin
+    role = await organization_ops.get_member_role(db, request.organization_id, current_user.id)
+    if not role or role not in ("owner", "admin"):
+        raise HTTPException(403, "Only owners and admins can manage billing")
+
+    # Get subscription
+    subscription = await subscription_ops.get_by_org(db, request.organization_id)
+    if not subscription:
+        raise HTTPException(404, "Subscription not found")
+
+    # Check if manually assigned (can't cancel via API)
+    if subscription.is_manually_assigned:
+        raise HTTPException(400, "Subscription is manually managed — contact support to cancel")
+
+    # Check if already canceling
+    if subscription.cancel_at_period_end:
+        raise HTTPException(400, "Subscription is already scheduled for cancellation")
+
+    # Must have a Stripe subscription to cancel
+    if not subscription.stripe_subscription_id:
+        raise HTTPException(400, "No active Stripe subscription to cancel")
+
+    # Cancel in Stripe (at period end)
+    stripe_service.cancel_subscription(subscription.stripe_subscription_id)
+
+    # Update local subscription record
+    await subscription_ops.update(
+        db,
+        subscription,
+        {"cancel_at_period_end": True},
+    )
+
+    # Log billing event
+    await subscription_ops.log_event(
+        db,
+        organization_id=subscription.organization_id,
+        event_type=BillingEventType.SUBSCRIPTION_UPDATED,
+        new_value={"cancel_at_period_end": True},
+        description="Subscription scheduled for cancellation at period end",
+    )
+
+    await db.commit()
+
+    # Get period end date for response
+    cancel_at = (
+        subscription.current_period_end.isoformat()
+        if subscription.current_period_end
+        else datetime.now(UTC).isoformat()
+    )
+
+    logger.info(f"Subscription canceled for org {subscription.organization_id}, ends {cancel_at}")
+
+    return CancelResponse(
+        message="Subscription will be canceled at the end of the billing period",
+        cancel_at=cancel_at,
+    )
+
+
+@router.post("/reactivate", response_model=ReactivateResponse)
+async def reactivate_subscription(
+    request: ReactivateRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ReactivateResponse:
+    """
+    Reactivate a subscription that was set to cancel at period end.
+
+    User must be owner or admin of the organization.
+    Removes the pending cancellation and the subscription continues normally.
+    """
+    if not settings.stripe_enabled:
+        raise HTTPException(400, "Payments not configured")
+
+    # Verify user is owner/admin
+    role = await organization_ops.get_member_role(db, request.organization_id, current_user.id)
+    if not role or role not in ("owner", "admin"):
+        raise HTTPException(403, "Only owners and admins can manage billing")
+
+    # Get subscription
+    subscription = await subscription_ops.get_by_org(db, request.organization_id)
+    if not subscription:
+        raise HTTPException(404, "Subscription not found")
+
+    # Check if manually assigned
+    if subscription.is_manually_assigned:
+        raise HTTPException(400, "Subscription is manually managed — contact support")
+
+    # Check if actually pending cancellation
+    if not subscription.cancel_at_period_end:
+        raise HTTPException(400, "Subscription is not scheduled for cancellation")
+
+    # Must have a Stripe subscription to reactivate
+    if not subscription.stripe_subscription_id:
+        raise HTTPException(400, "No active Stripe subscription")
+
+    # Reactivate in Stripe
+    stripe_service.reactivate_subscription(subscription.stripe_subscription_id)
+
+    # Update local subscription record
+    await subscription_ops.update(
+        db,
+        subscription,
+        {"cancel_at_period_end": False},
+    )
+
+    # Log billing event
+    await subscription_ops.log_event(
+        db,
+        organization_id=subscription.organization_id,
+        event_type=BillingEventType.SUBSCRIPTION_UPDATED,
+        new_value={"cancel_at_period_end": False},
+        description="Subscription reactivated (cancellation removed)",
+    )
+
+    await db.commit()
+
+    logger.info(f"Subscription reactivated for org {subscription.organization_id}")
+
+    return ReactivateResponse(message="Subscription reactivated successfully")
+
+
+@router.post("/downgrade", response_model=DowngradeResponse)
+async def downgrade_subscription(
+    request: DowngradeRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> DowngradeResponse:
+    """
+    Downgrade a subscription to a lower plan tier.
+
+    User must be owner or admin of the organization.
+
+    If the target plan has fewer repo slots than current usage, the caller must
+    specify which repos to keep. Repos not in the keep list will be deleted.
+
+    Steps:
+    1. Validate user permissions and plan tier
+    2. Validate repos_to_keep matches target plan limit (if repo reduction needed)
+    3. Delete repositories not in the keep list
+    4. Change Stripe subscription to new plan
+    5. Update local subscription record
+    """
+    if not settings.stripe_enabled:
+        raise HTTPException(400, "Payments not configured")
+
+    # Verify user is owner/admin
+    role = await organization_ops.get_member_role(db, request.organization_id, current_user.id)
+    if not role or role not in ("owner", "admin"):
+        raise HTTPException(403, "Only owners and admins can manage billing")
+
+    # Validate plan tier is a valid downgrade target
+    valid_tiers = [PlanTier.INDIE.value, PlanTier.PRO.value, PlanTier.SCALE.value]
+    if request.target_plan_tier not in valid_tiers:
+        raise HTTPException(400, f"Invalid plan tier. Must be one of: {valid_tiers}")
+
+    target_plan = get_plan(request.target_plan_tier)
+
+    # Get current subscription
+    subscription = await subscription_ops.get_by_org(db, request.organization_id)
+    if not subscription:
+        raise HTTPException(404, "Subscription not found")
+
+    # Check if manually assigned (can't use Stripe)
+    if subscription.is_manually_assigned:
+        raise HTTPException(400, "Subscription is manually managed — contact support to change")
+
+    # Must have a Stripe subscription
+    if not subscription.stripe_subscription_id:
+        raise HTTPException(400, "No active Stripe subscription")
+
+    # Verify this is actually a downgrade
+    current_plan = get_plan(subscription.plan_tier)
+    plan_order = {"indie": 1, "pro": 2, "scale": 3}
+    if plan_order.get(request.target_plan_tier, 0) >= plan_order.get(subscription.plan_tier, 0):
+        raise HTTPException(400, "This is not a downgrade. Use checkout for upgrades.")
+
+    # Get current repo count
+    current_repo_count = await repository_ops.count_by_org(db, request.organization_id)
+
+    # Validate repos_to_keep if reduction is needed
+    deleted_count = 0
+    if current_repo_count > target_plan.base_repo_limit:
+        # Must specify exactly target_plan.base_repo_limit repos to keep
+        if len(request.repos_to_keep) != target_plan.base_repo_limit:
+            raise HTTPException(
+                400,
+                f"Must specify exactly {target_plan.base_repo_limit} repositories to keep. "
+                f"Got {len(request.repos_to_keep)}.",
+            )
+
+        # Delete repos not in the keep list
+        deleted_count = await repository_ops.bulk_delete_except(
+            db, request.organization_id, request.repos_to_keep
+        )
+
+    # Change Stripe subscription plan (handles proration)
+    try:
+        stripe_service.change_subscription_plan(
+            subscription.stripe_subscription_id, request.target_plan_tier
+        )
+    except Exception as e:
+        # If Stripe fails, we need to rollback the repo deletions
+        await db.rollback()
+        logger.error(f"Stripe plan change failed: {e}")
+        raise HTTPException(500, "Failed to update subscription in Stripe") from None
+
+    # Update local subscription record
+    previous_tier = subscription.plan_tier
+    await subscription_ops.update(
+        db,
+        subscription,
+        {
+            "plan_tier": request.target_plan_tier,
+            "base_repo_limit": target_plan.base_repo_limit,
+        },
+    )
+
+    # Log billing event
+    await subscription_ops.log_event(
+        db,
+        organization_id=subscription.organization_id,
+        event_type=BillingEventType.PLAN_CHANGED,
+        previous_value={"plan_tier": previous_tier, "repo_limit": current_plan.base_repo_limit},
+        new_value={
+            "plan_tier": request.target_plan_tier,
+            "repo_limit": target_plan.base_repo_limit,
+            "repos_deleted": deleted_count,
+        },
+        description=f"Downgraded from {current_plan.display_name} to {target_plan.display_name}",
+    )
+
+    await db.commit()
+
+    logger.info(
+        f"Downgraded org {subscription.organization_id} from {previous_tier} to "
+        f"{request.target_plan_tier}, deleted {deleted_count} repos"
+    )
+
+    return DowngradeResponse(
+        success=True,
+        message=f"Successfully downgraded to {target_plan.display_name}.",
+        deleted_repo_count=deleted_count,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -547,39 +850,43 @@ async def _handle_subscription_deleted(
     stripe_sub: dict[str, Any],
     event_id: str,
 ) -> None:
-    """Handle subscription cancellation — revert to lowest tier."""
+    """
+    Handle subscription deletion — delete the organization.
+
+    This webhook fires when the subscription actually ends (after the billing period),
+    not when the user clicks cancel. Since Trajan has no free tier, an ended subscription
+    means the organization should be deleted along with all its data.
+    """
     customer_id = stripe_sub.get("customer", "")
     subscription = await subscription_ops.get_by_stripe_customer(db, customer_id)
     if not subscription:
+        logger.warning(f"No subscription found for deleted Stripe customer {customer_id}")
         return
 
+    org_id = subscription.organization_id
     previous_tier = subscription.plan_tier
-    # Revert to indie (lowest paid tier) but mark as canceled
-    indie_plan = get_plan("indie")
 
-    await subscription_ops.update(
-        db,
-        subscription,
-        {
-            "plan_tier": PlanTier.INDIE.value,
-            "status": SubscriptionStatus.CANCELED.value,
-            "base_repo_limit": indie_plan.base_repo_limit,
-            "canceled_at": datetime.now(UTC),
-            "stripe_subscription_id": None,
-        },
-    )
-
+    # Log the event before deletion (for audit trail)
     await subscription_ops.log_event(
         db,
-        organization_id=subscription.organization_id,
+        organization_id=org_id,
         event_type=BillingEventType.SUBSCRIPTION_CANCELED,
         previous_value={"plan_tier": previous_tier},
-        new_value={"plan_tier": "indie", "status": "canceled"},
+        new_value={"status": "deleted", "action": "organization_deleted"},
         stripe_event_id=event_id,
-        description="Subscription canceled",
+        description="Subscription ended — organization deleted",
     )
 
-    logger.info(f"Canceled subscription for org {subscription.organization_id}")
+    # Delete the organization (cascades to products, repos, docs, etc.)
+    deleted = await organization_ops.delete(db, org_id)
+
+    if deleted:
+        logger.info(
+            f"Deleted organization {org_id} after subscription ended "
+            f"(previous tier: {previous_tier})"
+        )
+    else:
+        logger.error(f"Failed to delete organization {org_id} after subscription ended")
 
 
 async def _handle_payment_failed(
