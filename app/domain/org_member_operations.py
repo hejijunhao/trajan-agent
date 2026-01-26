@@ -90,6 +90,41 @@ class OrgMemberOperations:
         result = await db.execute(statement)
         return list(result.scalars().all())
 
+    async def get_by_user_with_details(
+        self,
+        db: AsyncSession,
+        user_id: uuid_pkg.UUID,
+    ) -> list[tuple[OrganizationMember, User | None]]:
+        """
+        Get all memberships for a user with organization, subscription, and inviter info.
+
+        Returns tuples of (membership, inviter_user) where inviter_user is the User
+        who invited this member (or None if no inviter).
+        """
+        from sqlalchemy.orm import aliased
+
+        from app.models.organization import Organization
+        from app.models.subscription import Subscription
+
+        # Create an alias for the inviter user to avoid ambiguity
+        InviterUser = aliased(User)
+
+        statement = (
+            select(OrganizationMember, InviterUser)
+            .where(OrganizationMember.user_id == user_id)
+            .join(Organization, OrganizationMember.organization_id == Organization.id)
+            .outerjoin(Subscription, Subscription.organization_id == Organization.id)
+            .outerjoin(InviterUser, OrganizationMember.invited_by == InviterUser.id)
+            .options(
+                selectinload(OrganizationMember.organization).selectinload(
+                    Organization.subscription
+                )
+            )
+            .order_by(OrganizationMember.joined_at.desc())
+        )
+        result = await db.execute(statement)
+        return list(result.all())
+
     async def count_by_org(
         self,
         db: AsyncSession,
@@ -273,13 +308,13 @@ class OrgMemberOperations:
             redirect_url = f"{settings.frontend_url}/auth/callback"
             invite_options = {"redirect_to": redirect_url}
 
-            await asyncio.to_thread(
-                supabase.auth.admin.invite_user_by_email, email, invite_options
-            )
+            await asyncio.to_thread(supabase.auth.admin.invite_user_by_email, email, invite_options)
             logger.info(f"Resent invite email to {email}")
         except Exception as e:
             logger.error(f"Failed to resend invite to {email}: {e}")
-            raise SupabaseInviteError("Failed to resend invite email. Please try again later.") from e
+            raise SupabaseInviteError(
+                "Failed to resend invite email. Please try again later."
+            ) from e
 
     async def get_owners(
         self,
