@@ -1,3 +1,9 @@
+from app.models.announcement import (
+    Announcement,
+    AnnouncementRead,
+    AnnouncementTargetAudience,
+    AnnouncementVariant,
+)
 from app.models.app_info import AppInfo, AppInfoCreate, AppInfoUpdate
 from app.models.billing import (
     BillingEvent,
@@ -56,6 +62,10 @@ from app.models.user_preferences import UserPreferences
 from app.models.work_item import WorkItem, WorkItemCreate, WorkItemUpdate
 
 __all__ = [
+    "Announcement",
+    "AnnouncementRead",
+    "AnnouncementVariant",
+    "AnnouncementTargetAudience",
     "CommitStatsCache",
     "ProgressSummary",
     "User",

@@ -5,10 +5,6 @@ grouped by product for easy display in the repo selection modal.
 """
 
 import uuid as uuid_pkg
-from typing import Annotated
-
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, DbSession
 from app.api.v1.organizations.helpers import require_org_access
@@ -18,8 +14,8 @@ from app.domain import repository_ops
 
 async def list_org_repositories(
     org_id: uuid_pkg.UUID,
-    db: Annotated[AsyncSession, Depends(DbSession)],
-    user: Annotated[CurrentUser, Depends()],
+    db: DbSession,
+    user: CurrentUser,
 ) -> OrgRepositoriesListResponse:
     """
     List all repositories across all products in an organization.
