@@ -12,6 +12,7 @@ from app.models.billing import (
 )
 from app.models.commit_stats_cache import CommitStatsCache
 from app.models.custom_doc_job import CustomDocJob, JobStatus
+from app.models.dashboard_shipped_summary import DashboardShippedSummary
 from app.models.document import Document, DocumentCreate, DocumentUpdate
 from app.models.document_section import (
     DocumentSection,
@@ -67,6 +68,7 @@ __all__ = [
     "AnnouncementVariant",
     "AnnouncementTargetAudience",
     "CommitStatsCache",
+    "DashboardShippedSummary",
     "ProgressSummary",
     "User",
     "UserPreferences",
