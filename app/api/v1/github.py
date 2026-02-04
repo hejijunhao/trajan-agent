@@ -5,11 +5,12 @@ GitHub integration endpoints for listing and importing repositories.
 import uuid as uuid_pkg
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_subscription_context_for_product
+from app.api.v1.products.docs_generation import maybe_auto_trigger_docs
 from app.core.database import get_db
 from app.domain import product_ops, repository_ops
 from app.domain.preferences_operations import preferences_ops
@@ -79,6 +80,7 @@ class ImportResponse(BaseModel):
 
     imported: list[ImportedRepo]
     skipped: list[SkippedRepo]
+    docs_generation_triggered: bool = False
 
 
 class BulkRefreshRequest(BaseModel):
@@ -203,6 +205,7 @@ async def list_github_repos(
 @router.post("/import", response_model=ImportResponse)
 async def import_github_repos(
     data: ImportRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ImportResponse:
@@ -324,7 +327,21 @@ async def import_github_repos(
             skipped.append(SkippedRepo(github_id=github_id, reason=e.message))
             continue
 
-    return ImportResponse(imported=imported, skipped=skipped)
+    # Auto-trigger docs generation if repos were actually imported
+    docs_triggered = False
+    if imported:
+        docs_triggered = await maybe_auto_trigger_docs(
+            product_id=data.product_id,
+            user_id=current_user.id,
+            db=db,
+            background_tasks=background_tasks,
+        )
+
+    return ImportResponse(
+        imported=imported,
+        skipped=skipped,
+        docs_generation_triggered=docs_triggered,
+    )
 
 
 @router.post("/refresh/{repository_id}")

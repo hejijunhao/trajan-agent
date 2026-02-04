@@ -7,7 +7,7 @@ Repositories are visible to all users with Product access.
 
 import uuid as uuid_pkg
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -18,6 +18,7 @@ from app.api.deps import (
     get_product_access,
     get_subscription_context_for_product,
 )
+from app.api.v1.products.docs_generation import maybe_auto_trigger_docs
 from app.config.plans import get_plan
 from app.domain import repository_ops
 from app.domain.subscription_operations import subscription_ops
@@ -97,6 +98,7 @@ async def get_repository(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_repository(
     data: RepositoryCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
@@ -165,7 +167,20 @@ async def create_repository(
         obj_in=obj_data,
         imported_by_user_id=current_user.id,
     )
-    return _serialize_repository(repo)
+
+    # Auto-trigger docs generation if user preference is enabled
+    docs_triggered = False
+    if data.product_id:
+        docs_triggered = await maybe_auto_trigger_docs(
+            product_id=data.product_id,
+            user_id=current_user.id,
+            db=db,
+            background_tasks=background_tasks,
+        )
+
+    result = _serialize_repository(repo)
+    result["docs_generation_triggered"] = docs_triggered
+    return result
 
 
 @router.patch("/{repository_id}")

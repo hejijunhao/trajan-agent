@@ -211,6 +211,57 @@ async def _mark_generation_failed(
         )
 
 
+async def maybe_auto_trigger_docs(
+    product_id: uuid_pkg.UUID,
+    user_id: uuid_pkg.UUID,
+    db: AsyncSession,
+    background_tasks: BackgroundTasks,
+) -> bool:
+    """Check user preference and preconditions, then trigger docs generation if appropriate.
+
+    Returns True if generation was triggered, False otherwise.
+    """
+    # 1. Check user's auto_generate_docs preference
+    prefs = await preferences_ops.get_or_create(db, user_id)
+    if not prefs.auto_generate_docs:
+        return False
+
+    # 2. Check GitHub token exists (required by the orchestrator)
+    if not preferences_ops.get_decrypted_token(prefs):
+        logger.debug(
+            f"Skipping auto-trigger for product {product_id}: no GitHub token configured"
+        )
+        return False
+
+    # 3. Check product is not already generating
+    product = await product_ops.get(db, product_id)
+    if not product:
+        return False
+
+    if product.docs_generation_status == "generating":
+        logger.debug(
+            f"Skipping auto-trigger for product {product_id}: generation already in progress"
+        )
+        return False
+
+    # 4. Trigger generation (additive mode — preserve existing docs when adding repos)
+    product.docs_generation_status = "generating"
+    product.docs_generation_error = None
+    product.docs_generation_progress = None
+    db.add(product)
+    await db.flush()
+
+    background_tasks.add_task(
+        run_document_orchestrator,
+        product_id=str(product_id),
+        user_id=str(user_id),
+        mode="additive",
+    )
+
+    logger.info(f"Auto-triggered docs generation for product {product_id}")
+    return True
+
+
 async def run_document_orchestrator(
     product_id: str,
     user_id: str,

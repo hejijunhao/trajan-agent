@@ -774,6 +774,7 @@ class AISummaryResponse:
     total_additions: int
     total_deletions: int
     generated_at: str | None
+    last_activity_at: str | None
 
 
 @router.get("/products/{product_id}/ai-summary")
@@ -805,6 +806,11 @@ async def get_ai_summary(
                 "total_additions": summary.total_additions,
                 "total_deletions": summary.total_deletions,
                 "generated_at": summary.generated_at.isoformat(),
+                "last_activity_at": (
+                    summary.last_activity_at.isoformat()
+                    if summary.last_activity_at
+                    else None
+                ),
             }
         }
 
@@ -969,7 +975,8 @@ async def generate_ai_summary(
             detail=f"Failed to generate summary: {str(e)}",
         ) from e
 
-    # Store the summary
+    # Store the summary (set last_activity_at to now to reset staleness clock)
+    now = datetime.now(UTC)
     stored_summary = await progress_summary_ops.upsert(
         db=db,
         product_id=product_id,
@@ -979,6 +986,7 @@ async def generate_ai_summary(
         total_contributors=summary_data["total_contributors"],
         total_additions=summary_data["total_additions"],
         total_deletions=summary_data["total_deletions"],
+        last_activity_at=now,
     )
 
     await db.commit()
@@ -993,6 +1001,11 @@ async def generate_ai_summary(
             "total_additions": stored_summary.total_additions,
             "total_deletions": stored_summary.total_deletions,
             "generated_at": stored_summary.generated_at.isoformat(),
+            "last_activity_at": (
+                stored_summary.last_activity_at.isoformat()
+                if stored_summary.last_activity_at
+                else None
+            ),
         }
     }
 
@@ -1749,6 +1762,7 @@ class ProductShippedSummary:
     total_additions: int
     total_deletions: int
     generated_at: str | None
+    last_activity_at: str | None
 
 
 @router.get("/dashboard")
@@ -1874,6 +1888,11 @@ async def get_dashboard_progress(
                         total_additions=cached.total_additions,
                         total_deletions=cached.total_deletions,
                         generated_at=cached.generated_at.isoformat(),
+                        last_activity_at=(
+                            cached.last_activity_at.isoformat()
+                            if cached.last_activity_at
+                            else None
+                        ),
                     )
                 )
             )
@@ -2056,6 +2075,11 @@ async def generate_dashboard_progress(
                         total_additions=product_stats["additions"],
                         total_deletions=product_stats["deletions"],
                         generated_at=cached_summary.generated_at.isoformat(),
+                        last_activity_at=(
+                            cached_summary.last_activity_at.isoformat()
+                            if cached_summary.last_activity_at
+                            else None
+                        ),
                     )
                 )
             )

@@ -40,6 +40,9 @@ class UserPreferences(SQLModel, table=True):
     default_view: str = Field(default="grid", max_length=20)  # 'grid', 'list'
     sidebar_default: str = Field(default="expanded", max_length=20)  # 'expanded', 'collapsed'
 
+    # Automation
+    auto_generate_docs: bool = Field(default=True)
+
     # Dismissals
     github_setup_dismissed: bool = Field(default=False)
 

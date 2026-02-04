@@ -3,6 +3,7 @@
 import re
 import secrets
 import uuid as uuid_pkg
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -264,6 +265,74 @@ class OrganizationOperations:
         )
         result = await db.execute(statement)
         return result.scalar_one_or_none()
+
+    # --- Settings helpers (atomic JSONB operations) ---
+
+    async def get_setting(
+        self,
+        db: AsyncSession,
+        org_id: uuid_pkg.UUID,
+        key: str,
+        default: Any = None,
+    ) -> Any:
+        """Read a typed setting from the Organization.settings JSONB column."""
+        org = await self.get(db, org_id)
+        if not org or not org.settings:
+            return default
+        return org.settings.get(key, default)
+
+    async def set_setting(
+        self,
+        db: AsyncSession,
+        org_id: uuid_pkg.UUID,
+        key: str,
+        value: Any,
+    ) -> None:
+        """
+        Atomically update a single key in Organization.settings JSONB.
+
+        Uses PostgreSQL jsonb_set() to avoid read-modify-write races.
+        If settings is NULL, initialises it first.
+        """
+        stmt = select(Organization).where(Organization.id == org_id).with_for_update()
+        result = await db.execute(stmt)
+        org = result.scalar_one_or_none()
+        if not org:
+            return
+
+        if org.settings is None:
+            org.settings = {}
+        org.settings[key] = value
+        db.add(org)
+        await db.flush()
+
+    async def get_auto_progress_enabled(
+        self,
+        db: AsyncSession,
+        org_id: uuid_pkg.UUID,
+    ) -> bool:
+        """Check whether auto-progress is enabled for an organization."""
+        return await self.get_setting(db, org_id, "auto_progress_enabled", False)
+
+    async def set_auto_progress_enabled(
+        self,
+        db: AsyncSession,
+        org_id: uuid_pkg.UUID,
+        enabled: bool,
+    ) -> None:
+        """Enable or disable auto-progress for an organization."""
+        await self.set_setting(db, org_id, "auto_progress_enabled", enabled)
+
+    async def get_orgs_with_auto_progress(
+        self,
+        db: AsyncSession,
+    ) -> list[Organization]:
+        """Get all organizations that have auto-progress enabled."""
+        statement = select(Organization).where(
+            Organization.settings["auto_progress_enabled"].as_boolean().is_(True)
+        )
+        result = await db.execute(statement)
+        return list(result.scalars().all())
 
     async def transfer_ownership(
         self,

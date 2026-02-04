@@ -2,12 +2,14 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin,
+    agent,
     announcements,
     app_info,
     billing,
     documents,
     feedback,
     github,
+    internal,
     organizations,
     preferences,
     products,
@@ -39,3 +41,5 @@ api_router.include_router(quick_access.router)
 api_router.include_router(billing.router)
 api_router.include_router(referrals.router)
 api_router.include_router(announcements.router)
+api_router.include_router(agent.router)
+api_router.include_router(internal.router)

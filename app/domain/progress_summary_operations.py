@@ -57,6 +57,7 @@ class ProgressSummaryOperations:
         total_contributors: int = 0,
         total_additions: int = 0,
         total_deletions: int = 0,
+        last_activity_at: datetime | None = None,
     ) -> ProgressSummary:
         """
         Create or update a progress summary.
@@ -72,6 +73,7 @@ class ProgressSummaryOperations:
             total_contributors: Stats snapshot
             total_additions: Stats snapshot
             total_deletions: Stats snapshot
+            last_activity_at: Timestamp of the newest commit seen
 
         Returns:
             The created or updated ProgressSummary
@@ -88,6 +90,7 @@ class ProgressSummaryOperations:
                 total_contributors=total_contributors,
                 total_additions=total_additions,
                 total_deletions=total_deletions,
+                last_activity_at=last_activity_at,
                 generated_at=now,
                 created_at=now,
                 updated_at=now,
@@ -100,6 +103,7 @@ class ProgressSummaryOperations:
                     "total_contributors": total_contributors,
                     "total_additions": total_additions,
                     "total_deletions": total_deletions,
+                    "last_activity_at": last_activity_at,
                     "generated_at": now,
                     "updated_at": now,
                 },
@@ -111,6 +115,33 @@ class ProgressSummaryOperations:
         await db.flush()
 
         return result.scalar_one()
+
+    async def update_last_activity(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        period: str,
+        last_activity_at: datetime,
+    ) -> None:
+        """
+        Update only the last_activity_at timestamp (skip-only update).
+
+        Used when auto-progress checks for new commits but finds none —
+        we record that we checked without regenerating the summary.
+        """
+        stmt = select(self.model).where(
+            and_(
+                ProgressSummary.product_id == product_id,  # type: ignore[arg-type]
+                ProgressSummary.period == period,  # type: ignore[arg-type]
+            )
+        )
+        result = await db.execute(stmt)
+        summary = result.scalar_one_or_none()
+        if summary:
+            summary.last_activity_at = last_activity_at
+            summary.updated_at = datetime.now(UTC)
+            db.add(summary)
+            await db.flush()
 
 
 progress_summary_ops = ProgressSummaryOperations()

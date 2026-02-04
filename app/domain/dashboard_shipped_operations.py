@@ -87,6 +87,7 @@ class DashboardShippedOperations:
         total_commits: int = 0,
         total_additions: int = 0,
         total_deletions: int = 0,
+        last_activity_at: datetime | None = None,
     ) -> DashboardShippedSummary:
         """
         Create or update a shipped summary.
@@ -102,6 +103,7 @@ class DashboardShippedOperations:
             total_commits: Stats snapshot
             total_additions: Stats snapshot
             total_deletions: Stats snapshot
+            last_activity_at: Timestamp of the newest commit seen
 
         Returns:
             The created or updated DashboardShippedSummary
@@ -118,6 +120,7 @@ class DashboardShippedOperations:
                 total_commits=total_commits,
                 total_additions=total_additions,
                 total_deletions=total_deletions,
+                last_activity_at=last_activity_at,
                 generated_at=now,
                 created_at=now,
                 updated_at=now,
@@ -130,6 +133,7 @@ class DashboardShippedOperations:
                     "total_commits": total_commits,
                     "total_additions": total_additions,
                     "total_deletions": total_deletions,
+                    "last_activity_at": last_activity_at,
                     "generated_at": now,
                     "updated_at": now,
                 },
@@ -141,6 +145,32 @@ class DashboardShippedOperations:
         await db.flush()
 
         return result.scalar_one()
+
+    async def update_last_activity(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        period: str,
+        last_activity_at: datetime,
+    ) -> None:
+        """
+        Update only the last_activity_at timestamp (skip-only update).
+
+        Used when auto-progress checks for new commits but finds none.
+        """
+        stmt = select(self.model).where(
+            and_(
+                DashboardShippedSummary.product_id == product_id,  # type: ignore[arg-type]
+                DashboardShippedSummary.period == period,  # type: ignore[arg-type]
+            )
+        )
+        result = await db.execute(stmt)
+        summary = result.scalar_one_or_none()
+        if summary:
+            summary.last_activity_at = last_activity_at
+            summary.updated_at = datetime.now(UTC)
+            db.add(summary)
+            await db.flush()
 
     async def delete_by_product(
         self,

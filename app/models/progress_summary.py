@@ -60,6 +60,14 @@ class ProgressSummary(SQLModel, table=True):
     total_additions: int = Field(default=0, nullable=False)
     total_deletions: int = Field(default=0, nullable=False)
 
+    # Activity tracking for auto-progress smart-skip logic
+    last_activity_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None,
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+        description="Timestamp of the newest commit seen during last generation/check",
+    )
+
     generated_at: datetime = Field(  # type: ignore[call-overload]
         default_factory=lambda: datetime.now(UTC),
         nullable=False,

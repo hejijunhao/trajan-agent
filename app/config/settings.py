@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # If empty, will be created automatically on first use
     stripe_referral_coupon_id: str = ""
 
+    # Internal API security — shared secret for cron-triggered endpoints
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    cron_secret: str = ""
+
     @property
     def stripe_enabled(self) -> bool:
         """Check if Stripe is configured (has secret key)."""
