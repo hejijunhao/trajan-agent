@@ -161,6 +161,40 @@ def get_period_start(period: str) -> datetime:
     return now - delta
 
 
+async def _resolve_github_token(
+    db: AsyncSession,
+    current_user: User,
+    product_id: uuid_pkg.UUID,
+) -> str | None:
+    """Resolve a GitHub token for API access.
+
+    Priority:
+    1. Current user's own token (preferred — respects their repo access scope)
+    2. Org owner/admin token (fallback for collaborative read access)
+    """
+    from app.domain import org_member_ops, product_ops
+
+    # 1. Try current user's token first
+    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
+    token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    if token:
+        return token
+
+    # 2. Fallback: find a token from an org admin/owner
+    product = await product_ops.get(db, product_id)
+    if not product or not product.organization_id:
+        return None
+
+    members = await org_member_ops.get_members_with_tokens(db, product.organization_id)
+    for member in members:
+        member_prefs = await preferences_ops.get_by_user_id(db, member.user_id)
+        fallback = preferences_ops.get_decrypted_token(member_prefs) if member_prefs else None
+        if fallback:
+            return fallback
+
+    return None
+
+
 @router.get("/products/{product_id}/summary")
 async def get_progress_summary(
     product_id: uuid_pkg.UUID,
@@ -193,11 +227,9 @@ async def get_progress_summary(
         if not repos:
             return _empty_summary_response()
 
-    # 3. Get GitHub token (optional - return empty data if not configured)
-    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    # 3. Resolve GitHub token (current user → org admin/owner fallback)
+    github_token = await _resolve_github_token(db, current_user, product_id)
     if not github_token:
-        # No token = return empty data gracefully (user can still view the tab)
         return _empty_summary_response()
 
     # 4. Calculate period bounds
@@ -546,11 +578,9 @@ async def get_progress_contributors(
         if not repos:
             return {"contributors": []}
 
-    # 3. Get GitHub token (optional - return empty data if not configured)
-    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    # 3. Resolve GitHub token (current user → org admin/owner fallback)
+    github_token = await _resolve_github_token(db, current_user, product_id)
     if not github_token:
-        # No token = return empty data gracefully (user can still view the tab)
         return {"contributors": []}
 
     # 4. Calculate period bounds
@@ -820,9 +850,8 @@ async def generate_ai_summary(
                 detail="No matching repositories found",
             )
 
-    # Get GitHub token
-    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    # Resolve GitHub token (current user → org admin/owner fallback)
+    github_token = await _resolve_github_token(db, current_user, product_id)
     if not github_token:
         raise HTTPException(status_code=400, detail="GitHub token required")
 
@@ -1035,11 +1064,9 @@ async def get_active_code(
         if not repos:
             return _empty_active_code_response()
 
-    # 3. Get GitHub token (optional - return empty data if not configured)
-    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    # 3. Resolve GitHub token (current user → org admin/owner fallback)
+    github_token = await _resolve_github_token(db, current_user, product_id)
     if not github_token:
-        # No token = return empty data gracefully (user can still view the tab)
         return _empty_active_code_response()
 
     # 4. Calculate period bounds
@@ -1320,11 +1347,9 @@ async def get_velocity(
         if not repos:
             return _empty_velocity_response()
 
-    # 3. Get GitHub token (optional - return empty data if not configured)
-    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    # 3. Resolve GitHub token (current user → org admin/owner fallback)
+    github_token = await _resolve_github_token(db, current_user, product_id)
     if not github_token:
-        # No token = return empty data gracefully (user can still view the tab)
         return _empty_velocity_response()
 
     # 4. Calculate period bounds (fetch extra for comparison)
@@ -1774,9 +1799,10 @@ async def get_dashboard_progress(
     # Get product IDs for cache lookup
     product_ids = [p.id for p, _ in all_products]
 
-    # Get GitHub token
+    # Resolve GitHub token (current user first for fast path)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    user_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    user_github = GitHubReadOperations(user_token) if user_token else None
 
     # Aggregate stats across all products
     aggregate_stats = {
@@ -1787,42 +1813,45 @@ async def get_dashboard_progress(
         "daily_activity": defaultdict(int),
     }
 
-    if github_token:
-        github = GitHubReadOperations(github_token)
-        period_start = get_period_start(period)
-        since_str = period_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+    period_start = get_period_start(period)
+    since_str = period_start.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Fetch commits for all products in parallel
-        for product, _ in all_products:
-            repos = await repository_ops.get_github_repos_by_product(db, product.id)
-            if not repos:
+    for product, _ in all_products:
+        repos = await repository_ops.get_github_repos_by_product(db, product.id)
+        if not repos:
+            continue
+
+        # Per-product token fallback when current user has no token
+        product_github = user_github
+        if not product_github:
+            fallback_token = await _resolve_github_token(db, current_user, product.id)
+            if not fallback_token:
                 continue
+            product_github = GitHubReadOperations(fallback_token)
 
-            for repo in repos:
-                if not repo.full_name:
-                    continue
-                try:
-                    owner, name = repo.full_name.split("/")
-                    commits, _ = await github.get_commits_for_timeline(
-                        owner, name, repo.default_branch, per_page=100
-                    )
+        for repo in repos:
+            if not repo.full_name:
+                continue
+            try:
+                owner, name = repo.full_name.split("/")
+                commits, _ = await product_github.get_commits_for_timeline(
+                    owner, name, repo.default_branch, per_page=100
+                )
 
-                    for commit in commits:
-                        timestamp = commit["commit"]["committer"]["date"]
-                        if timestamp < since_str:
-                            continue
+                for commit in commits:
+                    timestamp = commit["commit"]["committer"]["date"]
+                    if timestamp < since_str:
+                        continue
 
-                        aggregate_stats["total_commits"] += 1
-                        aggregate_stats["unique_contributors"].add(
-                            commit["commit"]["author"]["name"]
-                        )
+                    aggregate_stats["total_commits"] += 1
+                    aggregate_stats["unique_contributors"].add(commit["commit"]["author"]["name"])
 
-                        # Daily activity
-                        date = timestamp.split("T")[0]
-                        aggregate_stats["daily_activity"][date] += 1
+                    # Daily activity
+                    date = timestamp.split("T")[0]
+                    aggregate_stats["daily_activity"][date] += 1
 
-                except Exception as e:
-                    logger.warning(f"Failed to fetch commits for {repo.full_name}: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch commits for {repo.full_name}: {e}")
 
     # Get cached shipped summaries
     summaries = await dashboard_shipped_ops.get_by_products_period(db, product_ids, period)
@@ -1916,13 +1945,11 @@ async def generate_dashboard_progress(
     if not all_products:
         raise HTTPException(status_code=400, detail="No products found")
 
-    # Get GitHub token
+    # Resolve GitHub token (current user first for fast path)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
-    if not github_token:
-        raise HTTPException(status_code=400, detail="GitHub token required")
+    user_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    github = GitHubReadOperations(user_token) if user_token else None
 
-    github = GitHubReadOperations(github_token)
     period_start = get_period_start(period)
     since_str = period_start.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -1942,6 +1969,14 @@ async def generate_dashboard_progress(
             # No repos = no shipped summary
             continue
 
+        # Per-product token fallback when current user has no token
+        product_github = github
+        if not product_github:
+            fallback_token = await _resolve_github_token(db, current_user, product.id)
+            if not fallback_token:
+                continue
+            product_github = GitHubReadOperations(fallback_token)
+
         # Fetch commits for this product
         product_commits: list[CommitInfo] = []
         product_stats = {"commits": 0, "additions": 0, "deletions": 0}
@@ -1951,7 +1986,7 @@ async def generate_dashboard_progress(
                 continue
             try:
                 owner, name = repo.full_name.split("/")
-                commits, _ = await github.get_commits_for_timeline(
+                commits, _ = await product_github.get_commits_for_timeline(
                     owner, name, repo.default_branch, per_page=100
                 )
 

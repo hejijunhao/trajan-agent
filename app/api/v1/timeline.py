@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ProductAccessContext, get_current_user, get_db_with_rls, get_product_access
+from app.api.v1.progress import _resolve_github_token
 from app.domain import commit_stats_cache_ops, repository_ops
 from app.domain.preferences_operations import preferences_ops
 from app.models import User
@@ -95,11 +96,9 @@ async def get_product_timeline(
         if not repos:
             return {"events": [], "has_more": False, "next_cursor": None}
 
-    # 3. Get GitHub token (optional - return empty data if not configured)
-    preferences = await preferences_ops.get_by_user_id(db, current_user.id)
-    github_token = preferences_ops.get_decrypted_token(preferences) if preferences else None
+    # 3. Resolve GitHub token (current user → org admin/owner fallback)
+    github_token = await _resolve_github_token(db, current_user, product_id)
     if not github_token:
-        # No token = return empty data gracefully (user can still view the tab)
         return {"events": [], "has_more": False, "next_cursor": None}
 
     # 4. Fetch commits from all repos in parallel

@@ -316,6 +316,40 @@ class OrgMemberOperations:
                 "Failed to resend invite email. Please try again later."
             ) from e
 
+    async def get_members_with_tokens(
+        self,
+        db: AsyncSession,
+        organization_id: uuid_pkg.UUID,
+    ) -> list[OrganizationMember]:
+        """Get org owners/admins who have a GitHub token configured.
+
+        Returns members ordered by role priority (owners first, then admins)
+        so callers can prefer the highest-privilege token.
+        """
+        from sqlalchemy import case
+
+        from app.models.user_preferences import UserPreferences
+
+        role_priority = case(
+            (OrganizationMember.role == MemberRole.OWNER.value, 0),
+            else_=1,
+        )
+        statement = (
+            select(OrganizationMember)
+            .join(
+                UserPreferences,
+                UserPreferences.user_id == OrganizationMember.user_id,
+            )
+            .where(
+                OrganizationMember.organization_id == organization_id,
+                OrganizationMember.role.in_([MemberRole.OWNER.value, MemberRole.ADMIN.value]),
+                UserPreferences.github_token.is_not(None),
+            )
+            .order_by(role_priority)
+        )
+        result = await db.execute(statement)
+        return list(result.scalars().all())
+
     async def get_owners(
         self,
         db: AsyncSession,
