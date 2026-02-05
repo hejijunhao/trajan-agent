@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     cron_secret: str = ""
 
+    # Scheduler settings
+    # Enable/disable the internal APScheduler (set False for local dev to avoid noise)
+    scheduler_enabled: bool = True
+    # Hour (UTC) to run auto-progress job (default: 6 AM UTC)
+    auto_progress_hour: int = 6
+
     @property
     def stripe_enabled(self) -> bool:
         """Check if Stripe is configured (has secret key)."""

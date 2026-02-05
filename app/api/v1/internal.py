@@ -1,8 +1,8 @@
 """Internal API endpoints — protected by shared secret, not user auth.
 
-These endpoints are called by cron jobs / external schedulers, not by
-human users. They bypass Supabase JWT auth and instead validate a
-shared secret via the X-Cron-Secret header.
+These endpoints are primarily for manual triggering and debugging.
+The auto-progress job runs automatically via APScheduler (see services/scheduler.py).
+Endpoints bypass Supabase JWT auth and instead validate a shared secret via X-Cron-Secret.
 """
 
 import logging
@@ -40,11 +40,10 @@ async def trigger_auto_progress(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """
-    Trigger auto-progress generation for all eligible organizations.
+    Manually trigger auto-progress generation for all eligible organizations.
 
-    Protected by X-Cron-Secret header. Called by external cron (e.g. GitHub Actions).
-    Processes all orgs with auto_progress_enabled=true, checks for new commits,
-    and regenerates AI summaries where needed.
+    Protected by X-Cron-Secret header. Useful for testing or forcing a refresh.
+    Note: This job runs automatically via APScheduler — see services/scheduler.py.
     """
     _verify_cron_secret(x_cron_secret)
 

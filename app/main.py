@@ -41,13 +41,17 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Application lifespan: startup and shutdown events."""
+    from app.services.scheduler import scheduler
+
     # Startup
     setup_logging()
     logger.info("Trajan API starting up")
     if settings.debug:
         await init_db()
+    scheduler.start()
     yield
     # Shutdown
+    scheduler.stop()
     logger.info("Trajan API shutting down")
 
 
