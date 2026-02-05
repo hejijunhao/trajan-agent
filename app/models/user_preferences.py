@@ -45,6 +45,7 @@ class UserPreferences(SQLModel, table=True):
 
     # Dismissals
     github_setup_dismissed: bool = Field(default=False)
+    invite_box_dismissed: bool = Field(default=False)
 
     # Timestamps
     created_at: datetime = Field(  # type: ignore[call-overload]

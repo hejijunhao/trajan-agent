@@ -291,6 +291,7 @@ async def complete_onboarding(
 async def get_onboarding_context(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    has_referral: bool = False,
 ):
     """
     Get context to determine which onboarding flow to show.
@@ -298,6 +299,11 @@ async def get_onboarding_context(
     Returns information about invited organizations and personal org status
     to help the frontend decide between full onboarding, invited user flow,
     or redirect for returning users.
+
+    Args:
+        has_referral: If True, indicates the user arrived via a referral link.
+                     Referral users are always routed to "full" onboarding to
+                     ensure they select a plan and properly redeem their reward.
     """
     # Get all memberships with org, subscription, and inviter info
     memberships_with_inviters = await org_member_ops.get_by_user_with_details(db, current_user.id)
@@ -341,6 +347,10 @@ async def get_onboarding_context(
 
     if onboarding_completed:
         recommended_flow: Literal["full", "invited", "returning"] = "returning"
+    elif has_referral and personal_org_incomplete:
+        # Referral users MUST go through full onboarding to select a plan
+        # and properly redeem their referral reward (free month)
+        recommended_flow = "full"
     elif invited_orgs and personal_org_incomplete:
         # Has invites AND personal org not set up = invited user flow
         recommended_flow = "invited"
