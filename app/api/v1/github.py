@@ -2,6 +2,7 @@
 GitHub integration endpoints for listing and importing repositories.
 """
 
+import logging
 import uuid as uuid_pkg
 from dataclasses import asdict
 
@@ -20,6 +21,7 @@ from app.services.github import GitHubAPIError, GitHubService
 from app.services.github.exceptions import GitHubRepoRenamed
 
 router = APIRouter(prefix="/github", tags=["github"])
+logger = logging.getLogger(__name__)
 
 
 # --- Response Models ---
@@ -327,15 +329,28 @@ async def import_github_repos(
             skipped.append(SkippedRepo(github_id=github_id, reason=e.message))
             continue
 
+    # Commit the repo imports before attempting docs auto-trigger.
+    # This ensures repos are saved even if the docs trigger fails (e.g., statement timeout
+    # after long GitHub API calls holding the transaction open).
+    if imported:
+        await db.commit()
+
     # Auto-trigger docs generation if repos were actually imported
     docs_triggered = False
     if imported:
-        docs_triggered = await maybe_auto_trigger_docs(
-            product_id=data.product_id,
-            user_id=current_user.id,
-            db=db,
-            background_tasks=background_tasks,
-        )
+        try:
+            docs_triggered = await maybe_auto_trigger_docs(
+                product_id=data.product_id,
+                user_id=current_user.id,
+                db=db,
+                background_tasks=background_tasks,
+            )
+        except Exception as e:
+            # Log but don't fail the import - user can manually trigger docs
+            logger.warning(
+                f"Auto-trigger docs failed for product {data.product_id} after import: {e}. "
+                "User can manually trigger docs generation."
+            )
 
     return ImportResponse(
         imported=imported,
