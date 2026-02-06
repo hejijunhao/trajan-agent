@@ -415,11 +415,29 @@ class AnalysisOrchestrator:
         )
 
     async def _update_progress(self, progress: AnalysisProgress) -> None:
-        """Persist progress to database for frontend polling."""
-        self.product.analysis_progress = progress.model_dump()
-        self.session.add(self.product)
-        await self.session.commit()
-        await self.session.refresh(self.product)
+        """Persist progress to database for frontend polling.
+
+        Uses a fresh session to avoid Supabase statement timeout issues.
+        The transaction pooler (port 6543) has a statement timeout that cancels
+        queries if the transaction has been open too long. Since AI operations
+        can take minutes, we use a fresh session for each progress update.
+        """
+        from app.core.database import async_session_maker
+
+        progress_data = progress.model_dump()
+
+        try:
+            async with async_session_maker() as session:
+                # Fetch fresh product instance in new transaction
+                product = await session.get(Product, self.product.id)
+                if product:
+                    product.analysis_progress = progress_data
+                    await session.commit()
+                    # Update local product's progress for consistency
+                    self.product.analysis_progress = progress_data
+        except Exception as e:
+            # Log but don't fail the whole operation - progress updates are non-critical
+            logger.warning(f"Failed to update progress for product {self.product.id}: {e}")
 
     def _create_empty_overview(self, product: Product) -> ProductOverview:
         """Create an empty overview when no repositories are available."""

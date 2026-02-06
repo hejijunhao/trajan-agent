@@ -186,6 +186,7 @@ async def _mark_generation_failed(
     Helper to mark documentation generation as failed using a fresh DB session.
 
     This is used for error recovery when the main session may be in a bad state.
+    Uses a fresh session to avoid Supabase statement timeout issues.
     """
     from app.core.database import async_session_maker
 
@@ -208,6 +209,33 @@ async def _mark_generation_failed(
             f"CRITICAL: Failed to mark docs generation as failed. "
             f"Product {product_id} may be stuck in 'generating' state. "
             f"DB error: {db_error}. Original error: {error_message}"
+        )
+
+
+async def _mark_generation_completed(product_id: str) -> None:
+    """
+    Helper to mark documentation generation as completed using a fresh DB session.
+
+    Uses a fresh session to avoid Supabase statement timeout issues. The transaction
+    pooler (port 6543) has a statement timeout that cancels queries if the transaction
+    has been open too long. Since AI operations can take minutes, we use a fresh session.
+    """
+    from app.core.database import async_session_maker
+
+    try:
+        async with async_session_maker() as db:
+            product_uuid = uuid_pkg.UUID(product_id)
+            product = await product_ops.get(db, product_uuid)
+            if product:
+                product.docs_generation_status = "completed"
+                product.last_docs_generated_at = datetime.now(UTC)
+                product.docs_generation_error = None
+                product.docs_generation_progress = None
+                await db.commit()
+                logger.info(f"Documentation generation completed for product {product_id}")
+    except Exception as db_error:
+        logger.error(
+            f"Failed to mark docs generation as completed for product {product_id}: {db_error}"
         )
 
 
@@ -304,15 +332,10 @@ async def run_document_orchestrator(
             orchestrator = DocumentOrchestrator(db, product, github_service)
             await orchestrator.run(mode=mode)
 
-            # Update status on success
-            product.docs_generation_status = "completed"
-            product.last_docs_generated_at = datetime.now(UTC)
-            product.docs_generation_error = None
-            product.docs_generation_progress = None
-            await db.commit()
-            logger.info(
-                f"Documentation generation completed for product {product_id} (mode: {mode})"
-            )
+            # Update status on success using fresh session to avoid statement timeout
+            # The orchestrator session has been open for the entire AI generation process
+            await _mark_generation_completed(product_id)
+            logger.info(f"Documentation generation completed for product {product_id} (mode: {mode})")
 
         except Exception as e:
             logger.error(f"Documentation generation failed for product {product_id}: {e}")

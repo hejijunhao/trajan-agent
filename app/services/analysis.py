@@ -13,6 +13,7 @@ import uuid as uuid_pkg
 from app.core.database import async_session_maker
 from app.domain.preferences_operations import preferences_ops
 from app.models.product import Product
+from app.schemas.product_overview import ProductOverview
 from app.services.analysis_orchestrator import AnalysisOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -69,32 +70,41 @@ async def run_analysis_task(
             orchestrator = AnalysisOrchestrator(session, github_token, product)
             overview = await orchestrator.analyze_product()
 
-            # Update product with results and clear progress
-            product.product_overview = overview.model_dump(mode="json")
-            product.analysis_status = "completed"
-            product.analysis_error = None
-            product.analysis_progress = None  # Clear ephemeral progress data
-            session.add(product)
-            await session.commit()
-
+            # Update product with results using fresh session to avoid statement timeout.
+            # The session has been open for the entire AI analysis process.
+            await _mark_analysis_completed(product_id, overview)
             logger.info(f"Analysis completed successfully for product {product_id}")
 
         except Exception as e:
             logger.exception(f"Analysis failed for product {product_id}: {e}")
-
-            # Mark as failed with error message and clear progress
-            try:
-                if product is None:
-                    product = await session.get(Product, uuid_pkg.UUID(product_id))
-                if product:
-                    product.analysis_status = "failed"
-                    # Store truncated error message (max 500 chars)
-                    error_msg = str(e)
-                    product.analysis_error = error_msg[:500] if len(error_msg) > 500 else error_msg
-                    product.analysis_progress = None  # Clear ephemeral progress data
-                    session.add(product)
-                    await session.commit()
-            except Exception as rollback_error:
-                logger.error(f"Failed to mark product as failed: {rollback_error}")
-
+            await _mark_analysis_failed(product_id, str(e))
             raise
+
+
+async def _mark_analysis_completed(product_id: str, overview: ProductOverview) -> None:
+    """Mark analysis as completed using a fresh session to avoid statement timeout."""
+    try:
+        async with async_session_maker() as session:
+            product = await session.get(Product, uuid_pkg.UUID(product_id))
+            if product:
+                product.product_overview = overview.model_dump(mode="json")
+                product.analysis_status = "completed"
+                product.analysis_error = None
+                product.analysis_progress = None
+                await session.commit()
+    except Exception as e:
+        logger.error(f"Failed to mark analysis as completed for product {product_id}: {e}")
+
+
+async def _mark_analysis_failed(product_id: str, error_message: str) -> None:
+    """Mark analysis as failed using a fresh session to avoid statement timeout."""
+    try:
+        async with async_session_maker() as session:
+            product = await session.get(Product, uuid_pkg.UUID(product_id))
+            if product:
+                product.analysis_status = "failed"
+                product.analysis_error = error_message[:500]
+                product.analysis_progress = None
+                await session.commit()
+    except Exception as e:
+        logger.error(f"Failed to mark analysis as failed for product {product_id}: {e}")

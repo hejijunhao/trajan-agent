@@ -507,15 +507,34 @@ class DocumentOrchestrator:
         return imported
 
     async def _update_progress(self, stage: str, message: str) -> None:
-        """Update product's docs_generation_progress for frontend polling."""
-        self.product.docs_generation_progress = {
+        """Update product's docs_generation_progress for frontend polling.
+
+        Uses a fresh session to avoid Supabase statement timeout issues.
+        The transaction pooler (port 6543) has a statement timeout that cancels
+        queries if the transaction has been open too long. Since AI operations
+        can take minutes, we use a fresh session for each progress update.
+        """
+        from app.core.database import async_session_maker
+        from app.models.product import Product
+
+        progress_data = {
             "stage": stage,
             "message": message,
             "updated_at": datetime.now(UTC).isoformat(),
         }
-        self.db.add(self.product)
-        await self.db.commit()
-        await self.db.refresh(self.product)
+
+        try:
+            async with async_session_maker() as session:
+                # Fetch fresh product instance in new transaction
+                product = await session.get(Product, self.product.id)
+                if product:
+                    product.docs_generation_progress = progress_data
+                    await session.commit()
+                    # Update local product's progress for consistency
+                    self.product.docs_generation_progress = progress_data
+        except Exception as e:
+            # Log but don't fail the whole operation - progress updates are non-critical
+            logger.warning(f"Failed to update progress for product {self.product.id}: {e}")
 
     async def _handle_repo_rename(
         self,
