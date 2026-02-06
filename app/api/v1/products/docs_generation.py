@@ -248,7 +248,16 @@ async def maybe_auto_trigger_docs(
     """Check user preference and preconditions, then trigger docs generation if appropriate.
 
     Returns True if generation was triggered, False otherwise.
+
+    Uses a fresh database session for the status UPDATE to ensure the commit happens.
+    This is necessary because the calling code (github.py import endpoint) commits
+    the repo imports before calling this function, leaving no subsequent commit
+    for the status change. See: docs-auto-trigger-commit-fix (0.9.9).
     """
+    from app.core.database import async_session_maker
+    from app.core.rls import set_rls_user_context
+    from app.models.product import Product
+
     # 1. Check user's auto_generate_docs preference
     prefs = await preferences_ops.get_or_create(db, user_id)
     if not prefs.auto_generate_docs:
@@ -256,9 +265,7 @@ async def maybe_auto_trigger_docs(
 
     # 2. Check GitHub token exists (required by the orchestrator)
     if not preferences_ops.get_decrypted_token(prefs):
-        logger.debug(
-            f"Skipping auto-trigger for product {product_id}: no GitHub token configured"
-        )
+        logger.debug(f"Skipping auto-trigger for product {product_id}: no GitHub token configured")
         return False
 
     # 3. Check product is not already generating
@@ -272,13 +279,23 @@ async def maybe_auto_trigger_docs(
         )
         return False
 
-    # 4. Trigger generation (additive mode — preserve existing docs when adding repos)
-    product.docs_generation_status = "generating"
-    product.docs_generation_error = None
-    product.docs_generation_progress = None
-    db.add(product)
-    await db.flush()
+    # 4. Update status using fresh session (ensures commit + avoids statement timeout)
+    # Same pattern as analysis.py - the main session has already committed repo imports,
+    # so we need a new transaction to persist the docs generation status.
+    async with async_session_maker() as update_session:
+        await set_rls_user_context(update_session, user_id)
+        update_product = await update_session.get(Product, product_id)
+        if update_product:
+            update_product.docs_generation_status = "generating"
+            update_product.docs_generation_error = None
+            update_product.docs_generation_progress = None
+            await update_session.commit()
+            logger.info(f"Auto-triggered docs generation for product {product_id}")
+        else:
+            logger.warning(f"Product {product_id} not found during docs auto-trigger")
+            return False
 
+    # 5. Start background task (additive mode — preserve existing docs when adding repos)
     background_tasks.add_task(
         run_document_orchestrator,
         product_id=str(product_id),
@@ -286,7 +303,6 @@ async def maybe_auto_trigger_docs(
         mode="additive",
     )
 
-    logger.info(f"Auto-triggered docs generation for product {product_id}")
     return True
 
 
@@ -335,7 +351,9 @@ async def run_document_orchestrator(
             # Update status on success using fresh session to avoid statement timeout
             # The orchestrator session has been open for the entire AI generation process
             await _mark_generation_completed(product_id)
-            logger.info(f"Documentation generation completed for product {product_id} (mode: {mode})")
+            logger.info(
+                f"Documentation generation completed for product {product_id} (mode: {mode})"
+            )
 
         except Exception as e:
             logger.error(f"Documentation generation failed for product {product_id}: {e}")
