@@ -1,5 +1,6 @@
 """Product analysis: AI-powered repository analysis."""
 
+import logging
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
@@ -12,13 +13,18 @@ from app.api.deps import (
     get_db_with_rls,
     get_subscription_context_for_product,
 )
+from app.core.database import async_session_maker
+from app.core.rls import set_rls_user_context
 from app.domain import product_ops
 from app.domain.preferences_operations import preferences_ops
 from app.domain.repository_operations import repository_ops
 from app.domain.subscription_operations import subscription_ops
+from app.models.product import Product
 from app.models.user import User
 from app.schemas.product_overview import AnalyzeProductResponse
 from app.services.analysis import run_analysis_task
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -115,10 +121,19 @@ async def analyze_product(
             detail="GitHub token required for analysis. Configure it in Settings → General.",
         )
 
-    # Update status to analyzing
-    product.analysis_status = "analyzing"
-    db.add(product)
-    await db.commit()
+    # Update status to analyzing using fresh session.
+    # The main session has been open during validation queries above; Supabase's statement
+    # timeout may cancel the UPDATE if the transaction has been open too long.
+    # Using a fresh session resets the transaction timer. (See: github-import-statement-timeout-fix)
+    async with async_session_maker() as update_session:
+        await set_rls_user_context(update_session, current_user.id)
+        update_product = await update_session.get(Product, product_id)
+        if update_product:
+            update_product.analysis_status = "analyzing"
+            await update_session.commit()
+            logger.info(f"Analysis triggered for product {product_id}")
+        else:
+            logger.warning(f"Product {product_id} not found during status update")
 
     # Dispatch background task
     # Note: run_analysis_task creates its own database session since
