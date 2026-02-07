@@ -1,5 +1,6 @@
 """Product documentation generation: AI-powered docs creation."""
 
+import asyncio
 import logging
 import uuid as uuid_pkg
 from datetime import UTC, datetime, timedelta
@@ -169,6 +170,32 @@ async def get_docs_generation_status(
             except (ValueError, TypeError) as e:
                 # Couldn't parse timestamp - log but don't fail the request
                 logger.warning(f"Failed to parse docs progress timestamp: {e}")
+        else:
+            # Fallback: no updated_at in progress, use product.updated_at as proxy
+            # This catches cases where progress was never written (background task crash)
+            if product.updated_at:
+                # Ensure timezone-aware comparison
+                product_updated = (
+                    product.updated_at.replace(tzinfo=UTC)
+                    if product.updated_at.tzinfo is None
+                    else product.updated_at
+                )
+                elapsed = datetime.now(UTC) - product_updated
+                timeout_delta = timedelta(minutes=DOCS_GENERATION_TIMEOUT_MINUTES)
+
+                if elapsed > timeout_delta:
+                    elapsed_minutes = int(elapsed.total_seconds() / 60)
+                    product.docs_generation_status = "failed"
+                    product.docs_generation_error = (
+                        f"Generation timed out after {elapsed_minutes} minutes "
+                        "(no progress recorded). Please try again."
+                    )
+                    product.docs_generation_progress = None
+                    await db.commit()
+                    logger.warning(
+                        f"Auto-marked stale docs generation as failed for product {product_id}. "
+                        f"No progress was recorded for {elapsed_minutes} minutes."
+                    )
 
     return DocsStatusResponse(
         status=product.docs_generation_status or "idle",
@@ -178,38 +205,97 @@ async def get_docs_generation_status(
     )
 
 
+@router.post("/{product_id}/reset-docs-generation", response_model=GenerateDocsResponse)
+async def reset_docs_generation(
+    product_id: uuid_pkg.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+) -> GenerateDocsResponse:
+    """
+    Force-reset a stuck documentation generation job.
+
+    This endpoint allows users to manually cancel a stuck generation job.
+    The job will be marked as cancelled, allowing a new generation to be started.
+
+    Requires Editor or Admin access to the product.
+    """
+    # Check product access (editor or admin required)
+    await check_product_editor_access(db, product_id, current_user.id)
+
+    product = await product_ops.get(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Only reset if currently in generating state
+    if product.docs_generation_status != "generating":
+        return GenerateDocsResponse(
+            status="not_generating",
+            message="No generation in progress to reset.",
+        )
+
+    # Reset the stuck job
+    product.docs_generation_status = "failed"
+    product.docs_generation_error = "Generation was manually cancelled."
+    product.docs_generation_progress = None
+    await db.commit()
+
+    logger.info(
+        f"User {current_user.id} manually reset stuck docs generation for product {product_id}"
+    )
+
+    return GenerateDocsResponse(
+        status="reset",
+        message="Generation cancelled. You can now start a new generation.",
+    )
+
+
 async def _mark_generation_failed(
     product_id: str,
     error_message: str,
+    max_retries: int = 3,
 ) -> None:
     """
     Helper to mark documentation generation as failed using a fresh DB session.
 
     This is used for error recovery when the main session may be in a bad state.
     Uses a fresh session to avoid Supabase statement timeout issues.
+    Includes retry logic to handle transient connection failures.
     """
     from app.core.database import async_session_maker
 
-    try:
-        async with async_session_maker() as db:
-            product_uuid = uuid_pkg.UUID(product_id)
-            # Access was already verified when the task was started
-            product = await product_ops.get(db, product_uuid)
-            if product:
-                product.docs_generation_status = "failed"
-                product.docs_generation_error = error_message[:500]
-                product.docs_generation_progress = None
-                await db.commit()
-                logger.info(
-                    f"Marked product {product_id} docs generation as failed: {error_message}"
+    for attempt in range(max_retries):
+        try:
+            async with async_session_maker() as db:
+                product_uuid = uuid_pkg.UUID(product_id)
+                # Access was already verified when the task was started
+                product = await product_ops.get(db, product_uuid)
+                if product:
+                    product.docs_generation_status = "failed"
+                    product.docs_generation_error = error_message[:500]
+                    product.docs_generation_progress = None
+                    await db.commit()
+                    logger.info(
+                        f"Marked product {product_id} docs generation as failed: {error_message}"
+                    )
+                return  # Success - exit retry loop
+        except Exception as db_error:
+            if attempt < max_retries - 1:
+                # Retry after brief pause
+                logger.warning(
+                    f"Retry {attempt + 1}/{max_retries} marking docs generation failed "
+                    f"for product {product_id}: {db_error}"
                 )
-    except Exception as db_error:
-        # Critical: even error handling failed - log for manual intervention
-        logger.critical(
-            f"CRITICAL: Failed to mark docs generation as failed. "
-            f"Product {product_id} may be stuck in 'generating' state. "
-            f"DB error: {db_error}. Original error: {error_message}"
-        )
+                await asyncio.sleep(1)
+            else:
+                # All retries exhausted - log critical error
+                logger.critical(
+                    f"CRITICAL: Failed to mark docs generation as failed after {max_retries} attempts. "
+                    f"Product {product_id} may be stuck in 'generating' state. "
+                    f"DB error: {db_error}. Original error: {error_message}"
+                )
 
 
 async def _mark_generation_completed(product_id: str) -> None:

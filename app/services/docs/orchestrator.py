@@ -135,6 +135,10 @@ class DocumentOrchestrator:
         """
         results = OrchestratorResult()
 
+        # CRITICAL: Immediately update progress to establish updated_at timestamp.
+        # This ensures stale job detection works even if subsequent operations fail.
+        await self._update_progress("starting", "Starting documentation generation...")
+
         # Map API mode to planner mode (always additive for generated docs)
         planner_mode = "expand" if mode == "additive" else "full"
 
@@ -304,6 +308,10 @@ class DocumentOrchestrator:
         and as a fallback if v2 analysis/planning fails.
         """
         results = OrchestratorResult()
+
+        # CRITICAL: Immediately update progress to establish updated_at timestamp.
+        # This ensures stale job detection works even if subsequent operations fail.
+        await self._update_progress("starting", "Starting documentation generation...")
 
         logger.info(f"Starting v1 documentation orchestration for product {self.product.id}")
 
