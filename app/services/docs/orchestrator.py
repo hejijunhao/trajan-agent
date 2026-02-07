@@ -34,6 +34,7 @@ from app.services.docs.changelog_agent import ChangelogAgent
 from app.services.docs.codebase_analyzer import CodebaseAnalyzer
 from app.services.docs.document_generator import DocumentGenerator
 from app.services.docs.documentation_planner import DocumentationPlanner
+from app.services.docs.fingerprint import compute_codebase_fingerprint, should_skip_generation
 from app.services.docs.plans_agent import PlansAgent
 from app.services.docs.types import DocsInfo, OrchestratorResult
 from app.services.docs.utils import extract_title, infer_doc_type, map_path_to_folder
@@ -134,6 +135,7 @@ class DocumentOrchestrator:
             mode: "full" to regenerate all docs, "additive" to only add new docs
         """
         results = OrchestratorResult()
+        current_fingerprint: str | None = None  # Track codebase fingerprint for skip-if-unchanged
 
         # CRITICAL: Immediately update progress to establish updated_at timestamp.
         # This ensures stale job detection works even if subsequent operations fail.
@@ -163,6 +165,19 @@ class DocumentOrchestrator:
                 f"Codebase analysis complete: {codebase_context.total_files} files, "
                 f"{codebase_context.total_tokens} tokens analyzed"
             )
+
+            # Check fingerprint for skip-if-unchanged optimization
+            current_fingerprint = compute_codebase_fingerprint(codebase_context)
+            if should_skip_generation(current_fingerprint, self.product.docs_codebase_fingerprint):
+                await self._update_progress(
+                    "complete", "Documentation up-to-date (codebase unchanged)"
+                )
+                logger.info(
+                    f"Skipping doc generation for product {self.product.id}: "
+                    f"codebase unchanged (fingerprint: {current_fingerprint})"
+                )
+                return results  # Return empty results - docs are already current
+
         except GitHubRepoRenamed as e:
             # Repository was renamed - find and update the affected repo, then retry once
             for repo in repos:
@@ -290,7 +305,10 @@ class DocumentOrchestrator:
         except Exception as e:
             logger.error(f"Plans agent failed: {e}")
 
-        # Complete
+        # Complete - save fingerprint for skip-if-unchanged optimization
+        if current_fingerprint:
+            await self._save_fingerprint(current_fingerprint)
+
         await self._update_progress("complete", "Documentation generation complete")
 
         logger.info(
@@ -299,6 +317,26 @@ class DocumentOrchestrator:
         )
 
         return results
+
+    async def _save_fingerprint(self, fingerprint: str) -> None:
+        """
+        Save codebase fingerprint to product for skip-if-unchanged optimization.
+
+        Uses a fresh session to avoid transaction timeout issues.
+        """
+        from app.core.database import async_session_maker
+
+        try:
+            async with async_session_maker() as session:
+                product = await session.get(Product, self.product.id)
+                if product:
+                    product.docs_codebase_fingerprint = fingerprint
+                    await session.commit()
+                    self.product.docs_codebase_fingerprint = fingerprint
+                    logger.debug(f"Saved codebase fingerprint: {fingerprint}")
+        except Exception as e:
+            # Log but don't fail - fingerprint is an optimization, not critical
+            logger.warning(f"Failed to save fingerprint for product {self.product.id}: {e}")
 
     async def _run_v1(self) -> OrchestratorResult:
         """

@@ -11,17 +11,26 @@ Provides all read-only operations for fetching repository data:
 
 import asyncio
 import base64
+import logging
 import re
 from typing import Any
 
 import httpx
 
+from app.services.github.cache import (
+    cached_github_call,
+    contributors_cache,
+    languages_cache,
+    repo_details_cache,
+    tree_cache,
+)
 from app.services.github.constants import (
     GITHUB_LANGUAGE_COLORS,
     KEY_FILES,
 )
 from app.services.github.exceptions import GitHubAPIError
 from app.services.github.helpers import RateLimitInfo, handle_error_response
+from app.services.github.http_client import get_github_client
 from app.services.github.types import (
     CommitStats,
     ContributorInfo,
@@ -34,6 +43,8 @@ from app.services.github.types import (
     RepoTreeItem,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class GitHubReadOperations:
     """
@@ -41,6 +52,9 @@ class GitHubReadOperations:
 
     This class provides all methods for fetching data from GitHub repositories
     without modifying them.
+
+    Uses a shared HTTP client singleton for connection pooling. This eliminates
+    ~50-100ms SSL handshake overhead per request by reusing connections.
     """
 
     BASE_URL = "https://api.github.com"
@@ -109,47 +123,50 @@ class GitHubReadOperations:
             "direction": direction,
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/user/repos",
-                headers=self._headers,
-                params=params,
-                timeout=30.0,
-            )
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/user/repos",
+            headers=self._headers,
+            params=params,
+        )
 
-            rate_info = RateLimitInfo(response)
+        rate_info = RateLimitInfo(response)
 
-            if response.status_code == 401:
-                raise GitHubAPIError("Invalid or expired GitHub token", 401)
-            elif response.status_code == 403:
-                if rate_info.is_exhausted:
-                    raise GitHubAPIError(
-                        "GitHub API rate limit exceeded",
-                        403,
-                        rate_limit_reset=rate_info.reset_timestamp,
-                    )
-                raise GitHubAPIError("GitHub API forbidden", 403)
-            elif response.status_code != 200:
+        if response.status_code == 401:
+            raise GitHubAPIError("Invalid or expired GitHub token", 401)
+        elif response.status_code == 403:
+            if rate_info.is_exhausted:
                 raise GitHubAPIError(
-                    f"GitHub API error: {response.status_code}", response.status_code
+                    "GitHub API rate limit exceeded",
+                    403,
+                    rate_limit_reset=rate_info.reset_timestamp,
                 )
-
-            data = response.json()
-            repos = [self._normalize_repo(r) for r in data]
-
-            link_header = response.headers.get("Link", "")
-            has_more = 'rel="next"' in link_header
-
-            return GitHubReposResponse(
-                repos=repos,
-                total_count=len(repos),
-                has_more=has_more,
-                rate_limit_remaining=int(rate_info.remaining) if rate_info.remaining else None,
+            raise GitHubAPIError("GitHub API forbidden", 403)
+        elif response.status_code != 200:
+            raise GitHubAPIError(
+                f"GitHub API error: {response.status_code}", response.status_code
             )
 
+        data = response.json()
+        repos = [self._normalize_repo(r) for r in data]
+
+        link_header = response.headers.get("Link", "")
+        has_more = 'rel="next"' in link_header
+
+        return GitHubReposResponse(
+            repos=repos,
+            total_count=len(repos),
+            has_more=has_more,
+            rate_limit_remaining=int(rate_info.remaining) if rate_info.remaining else None,
+        )
+
+    @cached_github_call(repo_details_cache)
     async def get_repo_details(self, owner: str, repo: str) -> GitHubRepo:
         """
         Fetch detailed information for a specific repository.
+
+        Results are cached for 10 minutes to reduce API calls for metadata
+        that changes infrequently (stars, forks, description).
 
         Args:
             owner: Repository owner (username or org)
@@ -158,33 +175,32 @@ class GitHubReadOperations:
         Returns:
             GitHubRepo with full repository details
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/repos/{owner}/{repo}",
-                headers=self._headers,
-                timeout=30.0,
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}",
+            headers=self._headers,
+        )
+
+        rate_info = RateLimitInfo(response)
+
+        if response.status_code == 401:
+            raise GitHubAPIError("Invalid or expired GitHub token", 401)
+        elif response.status_code == 404:
+            raise GitHubAPIError(f"Repository {owner}/{repo} not found", 404)
+        elif response.status_code == 403:
+            if rate_info.is_exhausted:
+                raise GitHubAPIError(
+                    "GitHub API rate limit exceeded",
+                    403,
+                    rate_limit_reset=rate_info.reset_timestamp,
+                )
+            raise GitHubAPIError("GitHub API forbidden", 403)
+        elif response.status_code != 200:
+            raise GitHubAPIError(
+                f"GitHub API error: {response.status_code}", response.status_code
             )
 
-            rate_info = RateLimitInfo(response)
-
-            if response.status_code == 401:
-                raise GitHubAPIError("Invalid or expired GitHub token", 401)
-            elif response.status_code == 404:
-                raise GitHubAPIError(f"Repository {owner}/{repo} not found", 404)
-            elif response.status_code == 403:
-                if rate_info.is_exhausted:
-                    raise GitHubAPIError(
-                        "GitHub API rate limit exceeded",
-                        403,
-                        rate_limit_reset=rate_info.reset_timestamp,
-                    )
-                raise GitHubAPIError("GitHub API forbidden", 403)
-            elif response.status_code != 200:
-                raise GitHubAPIError(
-                    f"GitHub API error: {response.status_code}", response.status_code
-                )
-
-            return self._normalize_repo(response.json())
+        return self._normalize_repo(response.json())
 
     async def get_repo_by_id(self, repo_id: int) -> GitHubRepo:
         """
@@ -199,33 +215,32 @@ class GitHubReadOperations:
         Returns:
             GitHubRepo with full repository details including current owner/name
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/repositories/{repo_id}",
-                headers=self._headers,
-                timeout=30.0,
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repositories/{repo_id}",
+            headers=self._headers,
+        )
+
+        rate_info = RateLimitInfo(response)
+
+        if response.status_code == 401:
+            raise GitHubAPIError("Invalid or expired GitHub token", 401)
+        elif response.status_code == 404:
+            raise GitHubAPIError(f"Repository with ID {repo_id} not found", 404)
+        elif response.status_code == 403:
+            if rate_info.is_exhausted:
+                raise GitHubAPIError(
+                    "GitHub API rate limit exceeded",
+                    403,
+                    rate_limit_reset=rate_info.reset_timestamp,
+                )
+            raise GitHubAPIError("GitHub API forbidden", 403)
+        elif response.status_code != 200:
+            raise GitHubAPIError(
+                f"GitHub API error: {response.status_code}", response.status_code
             )
 
-            rate_info = RateLimitInfo(response)
-
-            if response.status_code == 401:
-                raise GitHubAPIError("Invalid or expired GitHub token", 401)
-            elif response.status_code == 404:
-                raise GitHubAPIError(f"Repository with ID {repo_id} not found", 404)
-            elif response.status_code == 403:
-                if rate_info.is_exhausted:
-                    raise GitHubAPIError(
-                        "GitHub API rate limit exceeded",
-                        403,
-                        rate_limit_reset=rate_info.reset_timestamp,
-                    )
-                raise GitHubAPIError("GitHub API forbidden", 403)
-            elif response.status_code != 200:
-                raise GitHubAPIError(
-                    f"GitHub API error: {response.status_code}", response.status_code
-                )
-
-            return self._normalize_repo(response.json())
+        return self._normalize_repo(response.json())
 
     async def get_authenticated_user(self) -> dict[str, Any]:
         """
@@ -234,23 +249,24 @@ class GitHubReadOperations:
         Returns:
             Dict with user info (login, name, avatar_url, etc.)
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/user",
-                headers=self._headers,
-                timeout=10.0,
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/user",
+            headers=self._headers,
+            timeout=10.0,
+        )
+
+        if response.status_code == 401:
+            raise GitHubAPIError("Invalid or expired GitHub token", 401)
+        elif response.status_code != 200:
+            raise GitHubAPIError(
+                f"GitHub API error: {response.status_code}", response.status_code
             )
 
-            if response.status_code == 401:
-                raise GitHubAPIError("Invalid or expired GitHub token", 401)
-            elif response.status_code != 200:
-                raise GitHubAPIError(
-                    f"GitHub API error: {response.status_code}", response.status_code
-                )
+        result: dict[str, Any] = response.json()
+        return result
 
-            result: dict[str, Any] = response.json()
-            return result
-
+    @cached_github_call(tree_cache)
     async def get_repo_tree(
         self,
         owner: str,
@@ -261,6 +277,8 @@ class GitHubReadOperations:
         Fetch the complete file tree for a repository.
 
         Uses the Git Trees API with recursive=1 to get all files in a single call.
+        Results are cached for 5 minutes - tree changes with commits but within
+        a session we typically see the same data.
 
         Args:
             owner: Repository owner (username or org)
@@ -270,43 +288,42 @@ class GitHubReadOperations:
         Returns:
             RepoTree with file paths, directory paths, and truncation status
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/repos/{owner}/{repo}/git/trees/{branch}",
-                headers=self._headers,
-                params={"recursive": "1"},
-                timeout=30.0,
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/git/trees/{branch}",
+            headers=self._headers,
+            params={"recursive": "1"},
+        )
+
+        handle_error_response(response, f"{owner}/{repo}")
+
+        data = response.json()
+
+        files: list[str] = []
+        directories: list[str] = []
+        all_items: list[RepoTreeItem] = []
+
+        for item in data.get("tree", []):
+            tree_item = RepoTreeItem(
+                path=item["path"],
+                type=item["type"],
+                size=item.get("size"),
+                sha=item["sha"],
             )
+            all_items.append(tree_item)
 
-            handle_error_response(response, f"{owner}/{repo}")
+            if item["type"] == "blob":
+                files.append(item["path"])
+            elif item["type"] == "tree":
+                directories.append(item["path"])
 
-            data = response.json()
-
-            files: list[str] = []
-            directories: list[str] = []
-            all_items: list[RepoTreeItem] = []
-
-            for item in data.get("tree", []):
-                tree_item = RepoTreeItem(
-                    path=item["path"],
-                    type=item["type"],
-                    size=item.get("size"),
-                    sha=item["sha"],
-                )
-                all_items.append(tree_item)
-
-                if item["type"] == "blob":
-                    files.append(item["path"])
-                elif item["type"] == "tree":
-                    directories.append(item["path"])
-
-            return RepoTree(
-                sha=data["sha"],
-                files=files,
-                directories=directories,
-                all_items=all_items,
-                truncated=data.get("truncated", False),
-            )
+        return RepoTree(
+            sha=data["sha"],
+            files=files,
+            directories=directories,
+            all_items=all_items,
+            truncated=data.get("truncated", False),
+        )
 
     async def get_file_content(
         self,
@@ -329,46 +346,46 @@ class GitHubReadOperations:
         Returns:
             RepoFile with decoded content, or None if file is too large/binary
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/repos/{owner}/{repo}/contents/{path}",
-                headers=self._headers,
-                params={"ref": branch},
-                timeout=30.0,
-            )
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/contents/{path}",
+            headers=self._headers,
+            params={"ref": branch},
+        )
 
-            if response.status_code == 404:
-                return None
+        if response.status_code == 404:
+            return None
 
-            handle_error_response(response, f"{owner}/{repo}")
+        handle_error_response(response, f"{owner}/{repo}")
 
-            data = response.json()
+        data = response.json()
 
-            if data.get("type") != "file":
-                return None
+        if data.get("type") != "file":
+            return None
 
-            size = data.get("size", 0)
-            if size > max_size:
-                return None
+        size = data.get("size", 0)
+        if size > max_size:
+            return None
 
-            content_b64 = data.get("content")
-            if not content_b64:
-                return None
+        content_b64 = data.get("content")
+        if not content_b64:
+            return None
 
-            try:
-                content_bytes = base64.b64decode(content_b64)
-                content = content_bytes.decode("utf-8")
-            except (ValueError, UnicodeDecodeError):
-                return None
+        try:
+            content_bytes = base64.b64decode(content_b64)
+            content = content_bytes.decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None
 
-            return RepoFile(
-                path=path,
-                content=content,
-                size=size,
-                sha=data["sha"],
-                encoding=data.get("encoding", "base64"),
-            )
+        return RepoFile(
+            path=path,
+            content=content,
+            size=size,
+            sha=data["sha"],
+            encoding=data.get("encoding", "base64"),
+        )
 
+    @cached_github_call(languages_cache)
     async def get_repo_languages(
         self,
         owner: str,
@@ -377,6 +394,9 @@ class GitHubReadOperations:
         """
         Fetch language breakdown for a repository.
 
+        Results are cached for 1 hour - language breakdown rarely changes
+        and is expensive to compute on GitHub's side.
+
         Args:
             owner: Repository owner
             repo: Repository name
@@ -384,37 +404,38 @@ class GitHubReadOperations:
         Returns:
             List of LanguageStat sorted by percentage (descending)
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/repos/{owner}/{repo}/languages",
-                headers=self._headers,
-                timeout=15.0,
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/languages",
+            headers=self._headers,
+            timeout=15.0,
+        )
+
+        handle_error_response(response, f"{owner}/{repo}")
+
+        data: dict[str, int] = response.json()
+
+        if not data:
+            return []
+
+        total_bytes = sum(data.values())
+        if total_bytes == 0:
+            return []
+
+        languages = [
+            LanguageStat(
+                name=name,
+                bytes=byte_count,
+                percentage=round((byte_count / total_bytes) * 100, 1),
+                color=GITHUB_LANGUAGE_COLORS.get(name, "#8b8b8b"),
             )
+            for name, byte_count in data.items()
+        ]
 
-            handle_error_response(response, f"{owner}/{repo}")
+        languages.sort(key=lambda x: x.percentage, reverse=True)
+        return languages
 
-            data: dict[str, int] = response.json()
-
-            if not data:
-                return []
-
-            total_bytes = sum(data.values())
-            if total_bytes == 0:
-                return []
-
-            languages = [
-                LanguageStat(
-                    name=name,
-                    bytes=byte_count,
-                    percentage=round((byte_count / total_bytes) * 100, 1),
-                    color=GITHUB_LANGUAGE_COLORS.get(name, "#8b8b8b"),
-                )
-                for name, byte_count in data.items()
-            ]
-
-            languages.sort(key=lambda x: x.percentage, reverse=True)
-            return languages
-
+    @cached_github_call(contributors_cache)
     async def get_repo_contributors(
         self,
         owner: str,
@@ -424,6 +445,9 @@ class GitHubReadOperations:
         """
         Fetch top contributors for a repository.
 
+        Results are cached for 1 hour - contributor list rarely changes
+        and is frequently accessed for product cards.
+
         Args:
             owner: Repository owner
             repo: Repository name
@@ -432,29 +456,29 @@ class GitHubReadOperations:
         Returns:
             List of ContributorInfo sorted by contributions (descending)
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/repos/{owner}/{repo}/contributors",
-                headers=self._headers,
-                params={"per_page": limit, "anon": "false"},
-                timeout=15.0,
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/contributors",
+            headers=self._headers,
+            params={"per_page": limit, "anon": "false"},
+            timeout=15.0,
+        )
+
+        if response.status_code == 204:
+            return []
+
+        handle_error_response(response, f"{owner}/{repo}")
+
+        data: list[dict[str, Any]] = response.json()
+
+        return [
+            ContributorInfo(
+                login=contrib["login"],
+                avatar_url=contrib.get("avatar_url"),
+                contributions=contrib.get("contributions", 0),
             )
-
-            if response.status_code == 204:
-                return []
-
-            handle_error_response(response, f"{owner}/{repo}")
-
-            data: list[dict[str, Any]] = response.json()
-
-            return [
-                ContributorInfo(
-                    login=contrib["login"],
-                    avatar_url=contrib.get("avatar_url"),
-                    contributions=contrib.get("contributions", 0),
-                )
-                for contrib in data[:limit]
-            ]
+            for contrib in data[:limit]
+        ]
 
     async def get_commit_stats(
         self,
@@ -473,54 +497,54 @@ class GitHubReadOperations:
         Returns:
             CommitStats with total commits and date range
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/commits",
+            headers=self._headers,
+            params={"sha": branch, "per_page": 1},
+            timeout=15.0,
+        )
+
+        if response.status_code != 200:
+            return CommitStats(total_commits=0, first_commit_date=None, last_commit_date=None)
+
+        commits = response.json()
+        if not commits:
+            return CommitStats(total_commits=0, first_commit_date=None, last_commit_date=None)
+
+        last_commit_date = commits[0].get("commit", {}).get("committer", {}).get("date")
+
+        link_header = response.headers.get("Link", "")
+        total_commits = 1
+
+        if 'rel="last"' in link_header:
+            match = re.search(r'page=(\d+)>; rel="last"', link_header)
+            if match:
+                total_commits = int(match.group(1))
+
+        first_commit_date = None
+        if total_commits > 1:
+            last_page_response = await client.get(
                 f"{self.BASE_URL}/repos/{owner}/{repo}/commits",
                 headers=self._headers,
-                params={"sha": branch, "per_page": 1},
+                params={"sha": branch, "per_page": 1, "page": total_commits},
                 timeout=15.0,
             )
 
-            if response.status_code != 200:
-                return CommitStats(total_commits=0, first_commit_date=None, last_commit_date=None)
+            if last_page_response.status_code == 200:
+                last_page_commits = last_page_response.json()
+                if last_page_commits:
+                    first_commit_date = (
+                        last_page_commits[0].get("commit", {}).get("committer", {}).get("date")
+                    )
+        else:
+            first_commit_date = last_commit_date
 
-            commits = response.json()
-            if not commits:
-                return CommitStats(total_commits=0, first_commit_date=None, last_commit_date=None)
-
-            last_commit_date = commits[0].get("commit", {}).get("committer", {}).get("date")
-
-            link_header = response.headers.get("Link", "")
-            total_commits = 1
-
-            if 'rel="last"' in link_header:
-                match = re.search(r'page=(\d+)>; rel="last"', link_header)
-                if match:
-                    total_commits = int(match.group(1))
-
-            first_commit_date = None
-            if total_commits > 1:
-                last_page_response = await client.get(
-                    f"{self.BASE_URL}/repos/{owner}/{repo}/commits",
-                    headers=self._headers,
-                    params={"sha": branch, "per_page": 1, "page": total_commits},
-                    timeout=15.0,
-                )
-
-                if last_page_response.status_code == 200:
-                    last_page_commits = last_page_response.json()
-                    if last_page_commits:
-                        first_commit_date = (
-                            last_page_commits[0].get("commit", {}).get("committer", {}).get("date")
-                        )
-            else:
-                first_commit_date = last_commit_date
-
-            return CommitStats(
-                total_commits=total_commits,
-                first_commit_date=first_commit_date,
-                last_commit_date=last_commit_date,
-            )
+        return CommitStats(
+            total_commits=total_commits,
+            first_commit_date=first_commit_date,
+            last_commit_date=last_commit_date,
+        )
 
     async def get_commit_detail(
         self,
@@ -542,25 +566,25 @@ class GitHubReadOperations:
             Dict with additions, deletions, files_changed or None if fetch fails
         """
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.BASE_URL}/repos/{owner}/{repo}/commits/{sha}",
-                    headers=self._headers,
-                    timeout=timeout,
-                )
+            client = get_github_client()
+            response = await client.get(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/commits/{sha}",
+                headers=self._headers,
+                timeout=timeout,
+            )
 
-                if response.status_code != 200:
-                    return None
+            if response.status_code != 200:
+                return None
 
-                data = response.json()
-                stats = data.get("stats", {})
-                files = data.get("files", [])
+            data = response.json()
+            stats = data.get("stats", {})
+            files = data.get("files", [])
 
-                return {
-                    "additions": stats.get("additions", 0),
-                    "deletions": stats.get("deletions", 0),
-                    "files_changed": len(files),
-                }
+            return {
+                "additions": stats.get("additions", 0),
+                "deletions": stats.get("deletions", 0),
+                "files_changed": len(files),
+            }
         except (httpx.TimeoutException, httpx.RequestError):
             return None
 
@@ -595,19 +619,18 @@ class GitHubReadOperations:
         if path:
             params["path"] = path
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.BASE_URL}/repos/{owner}/{repo}/commits",
-                headers=self._headers,
-                params=params,
-                timeout=30.0,
-            )
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/commits",
+            headers=self._headers,
+            params=params,
+        )
 
-            handle_error_response(response, f"{owner}/{repo}")
+        handle_error_response(response, f"{owner}/{repo}")
 
-            commits: list[dict[str, Any]] = response.json()
-            has_more = len(commits) > per_page
-            return commits[:per_page], has_more
+        commits: list[dict[str, Any]] = response.json()
+        has_more = len(commits) > per_page
+        return commits[:per_page], has_more
 
     async def get_commit_files(
         self,
@@ -630,28 +653,28 @@ class GitHubReadOperations:
             or None if fetch fails
         """
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.BASE_URL}/repos/{owner}/{repo}/commits/{sha}",
-                    headers=self._headers,
-                    timeout=timeout,
-                )
+            client = get_github_client()
+            response = await client.get(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/commits/{sha}",
+                headers=self._headers,
+                timeout=timeout,
+            )
 
-                if response.status_code != 200:
-                    return None
+            if response.status_code != 200:
+                return None
 
-                data = response.json()
-                files = data.get("files", [])
+            data = response.json()
+            files = data.get("files", [])
 
-                return [
-                    {
-                        "filename": f.get("filename", ""),
-                        "status": f.get("status", "modified"),
-                        "additions": f.get("additions", 0),
-                        "deletions": f.get("deletions", 0),
-                    }
-                    for f in files
-                ]
+            return [
+                {
+                    "filename": f.get("filename", ""),
+                    "status": f.get("status", "modified"),
+                    "additions": f.get("additions", 0),
+                    "deletions": f.get("deletions", 0),
+                }
+                for f in files
+            ]
         except (httpx.TimeoutException, httpx.RequestError):
             return None
 

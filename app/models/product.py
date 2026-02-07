@@ -125,6 +125,13 @@ class Product(ProductBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
             comment="Timestamp of last successful doc generation",
         ),
     )
+    docs_codebase_fingerprint: str | None = Field(
+        default=None,
+        max_length=32,
+        sa_column_kwargs={
+            "comment": "Hash of codebase state at last doc generation (for skip-if-unchanged)"
+        },
+    )
 
     # Quick Access fields - allows password-protected shareable link to App Info
     quick_access_enabled: bool = Field(

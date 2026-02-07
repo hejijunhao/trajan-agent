@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Application lifespan: startup and shutdown events."""
+    from app.services.github import close_github_client
     from app.services.scheduler import scheduler
 
     # Startup
@@ -52,6 +53,7 @@ async def lifespan(_app: FastAPI):
     yield
     # Shutdown
     scheduler.stop()
+    await close_github_client()  # Clean up HTTP connection pool
     logger.info("Trajan API shutting down")
 
 
@@ -74,6 +76,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_cache_middleware(request: Request, call_next):
+    """Clear request-scoped cache at the start of each request."""
+    from app.core.request_cache import clear_request_cache
+
+    clear_request_cache()
+    return await call_next(request)
 
 
 @app.middleware("http")

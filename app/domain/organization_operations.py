@@ -9,6 +9,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.request_cache import (
+    get_request_cache_value,
+    request_cache_key,
+    set_request_cache_value,
+)
 from app.models.organization import MemberRole, Organization, OrganizationMember
 from app.models.subscription import PlanTier, Subscription, SubscriptionStatus
 
@@ -244,13 +249,28 @@ class OrganizationOperations:
         organization_id: uuid_pkg.UUID,
         user_id: uuid_pkg.UUID,
     ) -> MemberRole | None:
-        """Get a user's role in an organization."""
+        """
+        Get a user's role in an organization.
+
+        Results are cached per-request to avoid duplicate DB queries when
+        role is checked multiple times (e.g., auth middleware, endpoint handler).
+        """
+        # Check request cache first
+        cache_key = request_cache_key("member_role", organization_id, user_id)
+        cached = get_request_cache_value(cache_key)
+        if cached is not None:
+            return cached  # type: ignore[return-value]
+
         statement = select(OrganizationMember.role).where(
             OrganizationMember.organization_id == organization_id,
             OrganizationMember.user_id == user_id,
         )
         result = await db.execute(statement)
-        return result.scalar_one_or_none()
+        role = result.scalar_one_or_none()
+
+        # Cache the result (even None to avoid repeated lookups)
+        set_request_cache_value(cache_key, role)
+        return role
 
     async def get_member(
         self,

@@ -6,6 +6,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.request_cache import (
+    get_request_cache_value,
+    request_cache_key,
+    set_request_cache_value,
+)
 from app.models.organization import MemberRole
 from app.models.product_access import ProductAccess, ProductAccessLevel
 
@@ -46,6 +51,10 @@ class ProductAccessOperations:
         """
         Get user's effective access level, considering org role defaults.
 
+        Results are cached per-request to avoid duplicate DB queries when
+        the same access check is performed multiple times (e.g., middleware,
+        endpoint handler, nested permission checks).
+
         Args:
             db: Database session
             product_id: The product to check access for
@@ -55,17 +64,88 @@ class ProductAccessOperations:
         Returns:
             Effective access level: 'admin', 'editor', 'viewer', or 'none'
         """
+        # Check request cache first
+        cache_key = request_cache_key("access", product_id, user_id)
+        cached = get_request_cache_value(cache_key)
+        if cached is not None:
+            return cached  # type: ignore[return-value]
+
         # Owners and admins always have admin access to all products
         if org_role in (MemberRole.OWNER.value, MemberRole.ADMIN.value):
-            return ProductAccessLevel.ADMIN.value
+            result = ProductAccessLevel.ADMIN.value
+            set_request_cache_value(cache_key, result)
+            return result
 
         # Check for explicit product access
         explicit_access = await self.get_user_access_level(db, product_id, user_id)
+        if explicit_access:
+            set_request_cache_value(cache_key, explicit_access)
+            return explicit_access
+
+        # No explicit access for members/viewers = no access
+        result = ProductAccessLevel.NONE.value
+        set_request_cache_value(cache_key, result)
+        return result
+
+    def _compute_effective_access(self, org_role: str, explicit_access: str | None) -> str:
+        """
+        Compute effective access from org role and explicit product access.
+
+        Internal helper used by both single and bulk access methods.
+        """
+        # Owners and admins always have admin access
+        if org_role in (MemberRole.OWNER.value, MemberRole.ADMIN.value):
+            return ProductAccessLevel.ADMIN.value
+
+        # Use explicit access if set
         if explicit_access:
             return explicit_access
 
         # No explicit access for members/viewers = no access
         return ProductAccessLevel.NONE.value
+
+    async def get_effective_access_bulk(
+        self,
+        db: AsyncSession,
+        product_ids: list[uuid_pkg.UUID],
+        user_id: uuid_pkg.UUID,
+        org_role: str,
+    ) -> dict[uuid_pkg.UUID, str]:
+        """
+        Get effective access for multiple products in a single query.
+
+        This eliminates N+1 queries when listing products by fetching all
+        access records at once instead of one query per product.
+
+        Args:
+            db: Database session
+            product_ids: List of product IDs to check
+            user_id: The user to check access for
+            org_role: The user's role in the organization
+
+        Returns:
+            Dict mapping product_id -> access_level ('admin', 'editor', 'viewer', 'none')
+        """
+        if not product_ids:
+            return {}
+
+        # Owners/admins have admin access to all products - fast path
+        if org_role in (MemberRole.OWNER.value, MemberRole.ADMIN.value):
+            return dict.fromkeys(product_ids, ProductAccessLevel.ADMIN.value)
+
+        # Single query to get all product access records for this user
+        statement = select(ProductAccess).where(
+            ProductAccess.product_id.in_(product_ids),  # type: ignore[attr-defined]
+            ProductAccess.user_id == user_id,  # type: ignore[arg-type]
+        )
+        result = await db.execute(statement)
+        access_records = {pa.product_id: pa.access_level for pa in result.scalars().all()}
+
+        # Compute effective access for each product
+        return {
+            pid: self._compute_effective_access(org_role, access_records.get(pid))
+            for pid in product_ids
+        }
 
     async def get_product_collaborators(
         self,
@@ -158,6 +238,67 @@ class ProductAccessOperations:
         count_stmt = select(func.count()).select_from(combined)
         result = await db.execute(count_stmt)
         return result.scalar() or 0
+
+    async def get_product_collaborators_count_bulk(
+        self,
+        db: AsyncSession,
+        product_ids: list[uuid_pkg.UUID],
+        organization_id: uuid_pkg.UUID,
+    ) -> dict[uuid_pkg.UUID, int]:
+        """
+        Count collaborators for multiple products in bulk.
+
+        Optimized for list views where all products are from the same organization.
+        Uses 2 queries instead of N queries:
+        1. One query for org admin/owner count (shared across all products)
+        2. One query for per-product explicit collaborator counts
+
+        Args:
+            db: Database session
+            product_ids: List of product IDs to count for
+            organization_id: The organization ID (all products must be from this org)
+
+        Returns:
+            Dict mapping product_id -> collaborator count
+        """
+        from app.models.organization import OrganizationMember
+
+        if not product_ids:
+            return {}
+
+        # Query 1: Count org owners/admins (same for all products in org)
+        org_admin_stmt = select(func.count(OrganizationMember.id)).where(  # type: ignore[arg-type]
+            OrganizationMember.organization_id == organization_id,  # type: ignore[arg-type]
+            OrganizationMember.role.in_(  # type: ignore[attr-defined]
+                [MemberRole.OWNER.value, MemberRole.ADMIN.value]
+            ),
+        )
+        org_admin_result = await db.execute(org_admin_stmt)
+        org_admin_count = org_admin_result.scalar() or 0
+
+        # Query 2: Count explicit collaborators per product (excluding org admins)
+        # Group by product_id to get counts in one query
+        collab_stmt = (
+            select(  # type: ignore[call-overload]
+                ProductAccess.product_id,
+                func.count(ProductAccess.id),  # type: ignore[arg-type]
+            )
+            .where(
+                ProductAccess.product_id.in_(product_ids),  # type: ignore[attr-defined]
+                ProductAccess.access_level != ProductAccessLevel.NONE.value,
+            )
+            .group_by(ProductAccess.product_id)
+        )
+        collab_result = await db.execute(collab_stmt)
+        collab_counts = {row[0]: row[1] for row in collab_result.all()}
+
+        # Combine counts for each product
+        # Note: This may slightly overcount if an org admin also has explicit access,
+        # but for list views this approximation is acceptable and much faster
+        return {
+            pid: org_admin_count + collab_counts.get(pid, 0)
+            for pid in product_ids
+        }
 
     async def set_access(
         self,

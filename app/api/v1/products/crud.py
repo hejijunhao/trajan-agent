@@ -57,6 +57,8 @@ async def list_products(
         user_orgs = await organization_ops.get_for_user(db, current_user.id)
 
     accessible_products = []
+    products_by_org: dict[uuid_pkg.UUID, list] = {}
+
     for org in user_orgs:
         # Get user's role in this org
         org_role = await organization_ops.get_member_role(db, org.id, current_user.id)
@@ -65,22 +67,37 @@ async def list_products(
 
         # Get all products in this org
         org_products = await product_ops.get_by_organization(db, org.id)
+        if not org_products:
+            continue
 
-        for product in org_products:
-            # Check if user can access this product
-            access = await product_access_ops.get_effective_access(
-                db, product.id, current_user.id, org_role
-            )
-            if access != "none":
-                accessible_products.append(product)
+        # Bulk check access for all products in this org (eliminates N+1)
+        product_ids = [p.id for p in org_products]
+        access_map = await product_access_ops.get_effective_access_bulk(
+            db, product_ids, current_user.id, org_role
+        )
+
+        # Filter to accessible products
+        org_accessible = [p for p in org_products if access_map.get(p.id, "none") != "none"]
+        accessible_products.extend(org_accessible)
+        products_by_org[org.id] = org_accessible
 
     # Apply pagination
     paginated = accessible_products[skip : skip + limit]
 
+    # Bulk fetch collaborator counts per org (eliminates N+1)
+    collab_counts: dict[uuid_pkg.UUID, int] = {}
+    for org_id in products_by_org:
+        paginated_ids = [p.id for p in paginated if p.organization_id == org_id]
+        if paginated_ids:
+            org_counts = await product_access_ops.get_product_collaborators_count_bulk(
+                db, paginated_ids, org_id
+            )
+            collab_counts.update(org_counts)
+
     # Build response with collaborator counts and top contributors
     result = []
     for p in paginated:
-        collab_count = await product_access_ops.get_product_collaborators_count(db, p.id)
+        collab_count = collab_counts.get(p.id, 0)
 
         # Extract top contributor from product_overview if available
         top_contributor = None

@@ -14,9 +14,12 @@ Module structure:
 - constants.py: API constants and configuration
 """
 
+from app.services.github.cache import clear_all_caches as clear_github_caches
+from app.services.github.cache import get_cache_stats as get_github_cache_stats
 from app.services.github.constants import GITHUB_LANGUAGE_COLORS, KEY_FILES
 from app.services.github.exceptions import GitHubAPIError
 from app.services.github.helpers import RateLimitInfo, handle_error_response
+from app.services.github.http_client import close_github_client
 from app.services.github.read_operations import GitHubReadOperations
 from app.services.github.service import GitHubService, calculate_lines_of_code
 from app.services.github.types import (
@@ -38,6 +41,11 @@ __all__ = [
     # Operation classes (for direct use if needed)
     "GitHubReadOperations",
     "GitHubWriteOperations",
+    # HTTP client lifecycle
+    "close_github_client",
+    # Cache management
+    "clear_github_caches",
+    "get_github_cache_stats",
     # Utilities
     "calculate_lines_of_code",
     "handle_error_response",
