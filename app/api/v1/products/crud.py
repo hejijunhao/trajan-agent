@@ -261,7 +261,9 @@ async def update_product(
     # Check product access first
     await check_product_editor_access(db, product_id, current_user.id)
 
-    product = await product_ops.get_by_user(db, user_id=current_user.id, id=product_id)
+    # Access already validated above - use get() instead of get_by_user()
+    # to allow org admins/editors to update products they didn't create
+    product = await product_ops.get(db, product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -292,9 +294,13 @@ async def delete_product(
     # Check admin access first
     await check_product_admin_access(db, product_id, current_user.id)
 
-    deleted = await product_ops.delete(db, id=product_id, user_id=current_user.id)
-    if not deleted:
+    # Access already validated above - use get() instead of delete() with user_id
+    # to allow org admins to delete products they didn't create
+    product = await product_ops.get(db, product_id)
+    if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
         )
+    await db.delete(product)
+    await db.flush()
