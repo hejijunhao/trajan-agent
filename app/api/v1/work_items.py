@@ -4,10 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
     get_product_access,
+    require_active_subscription,
 )
 from app.domain import work_item_ops
 from app.models.user import User
@@ -84,6 +86,7 @@ async def create_work_item(
     data: WorkItemCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Create a new work item. Requires Editor or Admin access to the product."""
     # Check product access (editor level required for creation)
@@ -104,6 +107,7 @@ async def update_work_item(
     data: WorkItemUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update a work item. Requires Editor or Admin access to the product."""
     item = await work_item_ops.get(db, work_item_id=work_item_id)
@@ -128,6 +132,7 @@ async def delete_work_item(
     work_item_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete a work item. Requires Editor or Admin access to the product."""
     # Get work item first to check product access

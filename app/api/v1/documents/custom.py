@@ -22,6 +22,7 @@ from app.api.deps import (
     get_current_user,
     get_db_with_rls,
     get_subscription_context,
+    require_active_subscription,
 )
 from app.domain import preferences_ops, product_ops, repository_ops
 from app.models.custom_doc_job import CustomDocJob
@@ -115,6 +116,7 @@ async def generate_custom_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
     _rate_limit: None = Depends(rate_limiter),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> CustomDocResponseSchema:
     """
     Generate a custom document based on user request.
@@ -327,6 +329,7 @@ async def cancel_custom_doc_job(
     job_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> dict[str, bool]:
     """
     Cancel a running custom document generation job.
@@ -367,6 +370,7 @@ async def generate_assessment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
     _rate_limit: None = Depends(rate_limiter),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> dict[str, Any]:
     """
     Generate a critical assessment of the codebase.

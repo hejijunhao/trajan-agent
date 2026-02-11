@@ -7,8 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db_with_rls
+from app.api.deps import (
+    SubscriptionContext,
+    get_current_user,
+    get_db_with_rls,
+    require_active_subscription,
+)
 from app.domain import product_ops
+from app.models.user import User
 from app.services.agent import CLIAgentService
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -42,7 +48,9 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 async def agent_chat(
     data: ChatRequest,
+    _current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> ChatResponse:
     """Chat with the CLI agent about a project.
 

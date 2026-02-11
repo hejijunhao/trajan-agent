@@ -9,9 +9,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
+    require_active_subscription,
 )
 from app.domain import product_ops
 from app.domain.organization_operations import organization_ops
@@ -34,6 +36,7 @@ async def generate_documentation(
     request: GenerateDocsRequest | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> GenerateDocsResponse:
     """
     Trigger DocumentOrchestrator to analyze and generate documentation.
@@ -210,6 +213,7 @@ async def reset_docs_generation(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> GenerateDocsResponse:
     """
     Force-reset a stuck documentation generation job.

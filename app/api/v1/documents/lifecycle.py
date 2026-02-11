@@ -5,7 +5,13 @@ import uuid as uuid_pkg
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import check_product_editor_access, get_current_user, get_db_with_rls
+from app.api.deps import (
+    SubscriptionContext,
+    check_product_editor_access,
+    get_current_user,
+    get_db_with_rls,
+    require_active_subscription,
+)
 from app.api.v1.documents.crud import serialize_document
 from app.domain import document_ops
 from app.models.user import User
@@ -15,6 +21,7 @@ async def move_to_executing(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Move a plan to executing/ folder. Requires Editor access."""
     doc = await document_ops.get(db, id=document_id)
@@ -42,6 +49,7 @@ async def move_to_completed(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Move a plan to completions/ folder with date prefix. Requires Editor access."""
     doc = await document_ops.get(db, id=document_id)
@@ -69,6 +77,7 @@ async def archive_document(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Move a document to archive/ folder. Requires Editor access."""
     doc = await document_ops.get(db, id=document_id)

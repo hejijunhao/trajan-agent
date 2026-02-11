@@ -9,10 +9,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
     get_subscription_context_for_product,
+    require_active_subscription,
 )
 from app.core.database import async_session_maker
 from app.core.rls import set_rls_user_context
@@ -43,6 +45,7 @@ async def analyze_product(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> AnalyzeProductResponse:
     """
     Trigger AI analysis of the product's repositories.

@@ -12,6 +12,7 @@ from app.api.deps import (
     get_current_user,
     get_db_with_rls,
     get_subscription_context,
+    require_active_subscription,
 )
 from app.domain import product_ops
 from app.domain.organization_operations import organization_ops
@@ -220,6 +221,7 @@ async def create_product(
     current_user: User = Depends(get_current_user),
     sub_ctx: SubscriptionContext = Depends(get_subscription_context),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Create a new product."""
     # Check for duplicate name
@@ -256,6 +258,7 @@ async def update_product(
     data: ProductUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update a product. Requires Editor or Admin access."""
     # Check product access first
@@ -289,6 +292,7 @@ async def delete_product(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete a product and all related entities. Requires Admin access."""
     # Check admin access first

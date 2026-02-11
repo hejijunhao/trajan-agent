@@ -6,10 +6,12 @@ from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
     get_product_access,
+    require_active_subscription,
 )
 from app.domain import document_ops, product_ops
 from app.models.document import DocumentCreate, DocumentUpdate
@@ -109,6 +111,7 @@ async def create_document(
     data: DocumentCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Create a new document. Requires Editor or Admin access to the product.
 
@@ -136,6 +139,7 @@ async def update_document(
     data: DocumentUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update a document. Requires Editor or Admin access to the product."""
     doc = await document_ops.get(db, id=document_id)
@@ -157,6 +161,7 @@ async def delete_document(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete a document. Requires Editor or Admin access to the product."""
     # Get document first to check product access
@@ -231,6 +236,7 @@ async def add_changelog_entry(
     data: AddChangelogEntryRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Add an entry to the changelog. Requires Editor or Admin access to the product."""
     # Check product access first
@@ -255,6 +261,7 @@ async def delete_all_generated_documents(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> dict:
     """Delete all AI-generated documents for a product.
 

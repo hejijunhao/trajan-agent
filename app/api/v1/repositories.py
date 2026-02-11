@@ -12,12 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    SubscriptionContext,
     check_product_editor_access,
     get_current_organization,
     get_current_user,
     get_db_with_rls,
     get_product_access,
     get_subscription_context_for_product,
+    require_active_subscription,
 )
 from app.api.v1.products.analysis import maybe_auto_trigger_analysis
 from app.api.v1.products.docs_generation import maybe_auto_trigger_docs
@@ -106,6 +108,7 @@ async def create_repository(
     data: RepositoryCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """
     Create a new repository.
@@ -215,6 +218,7 @@ async def update_repository(
     data: RepositoryUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update a repository. Requires Editor or Admin access to the product."""
     repo = await repository_ops.get(db, id=repository_id)
@@ -239,6 +243,7 @@ async def delete_repository(
     repository_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
+    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete a repository. Requires Editor or Admin access to the product."""
     # Get repo first to check product access
