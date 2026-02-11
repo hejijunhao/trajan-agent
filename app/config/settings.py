@@ -59,16 +59,34 @@ class Settings(BaseSettings):
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     cron_secret: str = ""
 
+    # Postmark - Transactional email delivery
+    # Empty string = Postmark disabled (no transactional emails sent)
+    postmark_api_key: str = ""
+    postmark_from_email: str = "hello@trajancloud.com"
+
     # Scheduler settings
     # Enable/disable the internal APScheduler (set False for local dev to avoid noise)
     scheduler_enabled: bool = True
     # Hour (UTC) to run auto-progress job (default: 6 AM UTC)
     auto_progress_hour: int = 6
+    # Plan prompt email: how often to nudge orgs without a plan (days)
+    plan_prompt_frequency_days: int = 3
+    # Plan prompt email: hour (UTC) to check and send (default: 9 AM UTC)
+    plan_prompt_email_hour: int = 9
+    # Weekly digest: hour (UTC) to send (default: 17 = 5 PM UTC)
+    weekly_digest_hour: int = 17
+    # Weekly digest: day of week (default: fri)
+    weekly_digest_day: str = "fri"
 
     @property
     def stripe_enabled(self) -> bool:
         """Check if Stripe is configured (has secret key)."""
         return bool(self.stripe_secret_key)
+
+    @property
+    def postmark_enabled(self) -> bool:
+        """Check if Postmark is configured (has API key)."""
+        return bool(self.postmark_api_key)
 
 
 settings = Settings()

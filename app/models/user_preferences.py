@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Column, DateTime, ForeignKey, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -30,6 +31,14 @@ class UserPreferences(SQLModel, table=True):
 
     # Notifications
     email_digest: str = Field(default="none", max_length=20)  # 'none', 'daily', 'weekly'
+    digest_product_ids: list[str] | None = Field(
+        default=None,
+        sa_column=Column(
+            JSONB,
+            nullable=True,
+            comment="Product UUIDs for per-project digest. NULL = all projects.",
+        ),
+    )
     notify_work_items: bool = Field(default=True)
     notify_documents: bool = Field(default=True)
 

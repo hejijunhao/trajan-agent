@@ -15,6 +15,7 @@ class PreferencesRead(BaseModel):
     """User preferences response."""
 
     email_digest: str
+    digest_product_ids: list[str] | None = None
     notify_work_items: bool
     notify_documents: bool
     github_token_set: bool  # Don't expose actual token
@@ -32,6 +33,7 @@ class PreferencesUpdate(BaseModel):
     """User preferences update request."""
 
     email_digest: str | None = None
+    digest_product_ids: list[str] | None = None
     notify_work_items: bool | None = None
     notify_documents: bool | None = None
     github_token: str | None = None
@@ -64,6 +66,7 @@ def prefs_to_response(prefs: UserPreferences) -> dict:
     """Convert UserPreferences model to response dict."""
     return {
         "email_digest": prefs.email_digest,
+        "digest_product_ids": prefs.digest_product_ids,
         "notify_work_items": prefs.notify_work_items,
         "notify_documents": prefs.notify_documents,
         "github_token_set": prefs.github_token is not None and len(prefs.github_token) > 0,

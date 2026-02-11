@@ -1,7 +1,7 @@
 """Internal API endpoints — protected by shared secret, not user auth.
 
 These endpoints are primarily for manual triggering and debugging.
-The auto-progress job runs automatically via APScheduler (see services/scheduler.py).
+Scheduled jobs run automatically via APScheduler (see services/scheduler.py).
 Endpoints bypass Supabase JWT auth and instead validate a shared secret via X-Cron-Secret.
 """
 
@@ -50,6 +50,48 @@ async def trigger_auto_progress(
     from app.services.progress.auto_generator import auto_progress_generator
 
     report = await auto_progress_generator.run_for_all_orgs(db)
+    await db.commit()
+
+    return asdict(report)
+
+
+@router.post("/send-plan-prompt-emails")
+async def trigger_plan_prompt_emails(
+    x_cron_secret: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Manually trigger plan-selection prompt emails for orgs without a plan.
+
+    Protected by X-Cron-Secret header. Useful for testing or forcing a send.
+    Note: This job runs automatically via APScheduler — see services/scheduler.py.
+    """
+    _verify_cron_secret(x_cron_secret)
+
+    from app.services.email.plan_prompt import send_plan_selection_prompts
+
+    report = await send_plan_selection_prompts(db)
+    await db.commit()
+
+    return asdict(report)
+
+
+@router.post("/send-weekly-digest")
+async def trigger_weekly_digest(
+    x_cron_secret: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Manually trigger the weekly digest email for all opted-in users.
+
+    Protected by X-Cron-Secret header. Useful for testing or forcing a send.
+    Note: This job runs automatically via APScheduler — see services/scheduler.py.
+    """
+    _verify_cron_secret(x_cron_secret)
+
+    from app.services.email.weekly_digest import send_weekly_digests
+
+    report = await send_weekly_digests(db)
     await db.commit()
 
     return asdict(report)

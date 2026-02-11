@@ -19,8 +19,10 @@ from app.core.database import async_session_maker
 
 logger = logging.getLogger(__name__)
 
-# Advisory lock ID for auto-progress job (arbitrary unique integer)
+# Advisory lock IDs (arbitrary unique integers — one per job)
 AUTO_PROGRESS_LOCK_ID = 891247
+PLAN_PROMPT_LOCK_ID = 891248
+WEEKLY_DIGEST_LOCK_ID = 891249
 
 
 @asynccontextmanager
@@ -89,6 +91,77 @@ async def run_auto_progress() -> dict[str, Any] | None:
             return None
 
 
+async def run_plan_prompt_emails() -> dict[str, Any] | None:
+    """
+    Execute the plan-prompt email job with advisory lock protection.
+
+    Returns the report dict if executed, None if skipped (lock held by another instance).
+    """
+    async with advisory_lock(PLAN_PROMPT_LOCK_ID) as acquired:
+        if not acquired:
+            logger.info("[scheduler] Plan-prompt: skipped (another instance is running)")
+            return None
+
+        logger.info("[scheduler] Plan-prompt: starting")
+
+        try:
+            from dataclasses import asdict
+
+            from app.core.database import async_session_maker
+            from app.services.email.plan_prompt import send_plan_selection_prompts
+
+            async with async_session_maker() as db:
+                report = await send_plan_selection_prompts(db)
+                await db.commit()
+
+            logger.info(
+                f"[scheduler] Plan-prompt: completed "
+                f"({report.orgs_emailed} orgs emailed, "
+                f"{report.emails_sent} emails sent)"
+            )
+            return asdict(report)
+
+        except Exception as e:
+            logger.exception(f"[scheduler] Plan-prompt: failed with error: {e}")
+            return None
+
+
+async def run_weekly_digest() -> dict[str, Any] | None:
+    """
+    Execute the weekly digest email job with advisory lock protection.
+
+    Returns the report dict if executed, None if skipped (lock held by another instance).
+    """
+    async with advisory_lock(WEEKLY_DIGEST_LOCK_ID) as acquired:
+        if not acquired:
+            logger.info("[scheduler] Weekly-digest: skipped (another instance is running)")
+            return None
+
+        logger.info("[scheduler] Weekly-digest: starting")
+
+        try:
+            from dataclasses import asdict
+
+            from app.core.database import async_session_maker
+            from app.services.email.weekly_digest import send_weekly_digests
+
+            async with async_session_maker() as db:
+                report = await send_weekly_digests(db)
+                await db.commit()
+
+            logger.info(
+                f"[scheduler] Weekly-digest: completed "
+                f"({report.users_emailed} emailed, "
+                f"{report.emails_sent} emails sent, "
+                f"{report.duration_seconds}s)"
+            )
+            return asdict(report)
+
+        except Exception as e:
+            logger.exception(f"[scheduler] Weekly-digest: failed with error: {e}")
+            return None
+
+
 class Scheduler:
     """Manages the APScheduler instance and job registration."""
 
@@ -112,10 +185,35 @@ class Scheduler:
             replace_existing=True,
         )
 
+        # Plan-prompt emails: daily at configured hour, offset by 30 min
+        self._scheduler.add_job(
+            run_plan_prompt_emails,
+            trigger=CronTrigger(hour=settings.plan_prompt_email_hour, minute=30),
+            id="plan_prompt_emails",
+            name="Plan Selection Prompt Emails",
+            replace_existing=True,
+        )
+
+        # Weekly digest: configured day and hour (default: Friday 5 PM UTC)
+        self._scheduler.add_job(
+            run_weekly_digest,
+            trigger=CronTrigger(
+                day_of_week=settings.weekly_digest_day,
+                hour=settings.weekly_digest_hour,
+                minute=0,
+            ),
+            id="weekly_digest",
+            name="Weekly Digest Emails",
+            replace_existing=True,
+        )
+
         self._scheduler.start()
         logger.info(
-            f"[scheduler] Started with auto-progress scheduled at "
-            f"{settings.auto_progress_hour:02d}:00 UTC"
+            f"[scheduler] Started with auto-progress at "
+            f"{settings.auto_progress_hour:02d}:00 UTC, "
+            f"plan-prompt at {settings.plan_prompt_email_hour:02d}:30 UTC, "
+            f"weekly-digest on {settings.weekly_digest_day} at "
+            f"{settings.weekly_digest_hour:02d}:00 UTC"
         )
 
     def stop(self) -> None:
@@ -132,6 +230,10 @@ class Scheduler:
         """
         if job_id == "auto_progress":
             return await run_auto_progress()
+        if job_id == "plan_prompt_emails":
+            return await run_plan_prompt_emails()
+        if job_id == "weekly_digest":
+            return await run_weekly_digest()
         return None
 
 
