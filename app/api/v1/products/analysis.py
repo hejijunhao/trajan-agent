@@ -1,5 +1,6 @@
 """Product analysis: AI-powered repository analysis."""
 
+import asyncio
 import logging
 import uuid as uuid_pkg
 from datetime import UTC, datetime
@@ -149,3 +150,61 @@ async def analyze_product(
         status="analyzing",
         message="Analysis started. Poll GET /products/{id} for status updates.",
     )
+
+
+async def maybe_auto_trigger_analysis(
+    product_id: uuid_pkg.UUID,
+    user_id: uuid_pkg.UUID,
+    db: AsyncSession,
+) -> bool:
+    """Check user preference and preconditions, then trigger analysis if appropriate.
+
+    Returns True if analysis was triggered, False otherwise.
+
+    Uses a fresh database session for the status UPDATE to ensure the commit happens.
+    Mirrors the maybe_auto_trigger_docs() pattern in docs_generation.py.
+    Skips access checks and frequency limits (user just created the project).
+    """
+    # 1. Check user's auto_generate_docs preference (reused — no separate setting)
+    prefs = await preferences_ops.get_or_create(db, user_id)
+    if not prefs.auto_generate_docs:
+        return False
+
+    # 2. Check GitHub token exists (required by analysis)
+    if not preferences_ops.get_decrypted_token(prefs):
+        logger.debug(f"Skipping auto-analysis for product {product_id}: no GitHub token configured")
+        return False
+
+    # 3. Check product exists and is not already analyzing
+    product = await product_ops.get(db, product_id)
+    if not product:
+        return False
+
+    if product.analysis_status == "analyzing":
+        logger.debug(
+            f"Skipping auto-analysis for product {product_id}: analysis already in progress"
+        )
+        return False
+
+    # 4. Update status using fresh session (ensures commit + avoids statement timeout)
+    async with async_session_maker() as update_session:
+        await set_rls_user_context(update_session, user_id)
+        update_product = await update_session.get(Product, product_id)
+        if update_product:
+            update_product.analysis_status = "analyzing"
+            await update_session.commit()
+            logger.info(f"Auto-triggered analysis for product {product_id}")
+        else:
+            logger.warning(f"Product {product_id} not found during analysis auto-trigger")
+            return False
+
+    # 5. Start as independent async task (runs concurrently with docs generation)
+    asyncio.create_task(
+        run_analysis_task(
+            product_id=str(product_id),
+            user_id=str(user_id),
+        ),
+        name=f"analysis-{product_id}",
+    )
+
+    return True

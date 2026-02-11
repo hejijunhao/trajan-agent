@@ -329,7 +329,6 @@ async def maybe_auto_trigger_docs(
     product_id: uuid_pkg.UUID,
     user_id: uuid_pkg.UUID,
     db: AsyncSession,
-    background_tasks: BackgroundTasks,
 ) -> bool:
     """Check user preference and preconditions, then trigger docs generation if appropriate.
 
@@ -381,12 +380,14 @@ async def maybe_auto_trigger_docs(
             logger.warning(f"Product {product_id} not found during docs auto-trigger")
             return False
 
-    # 5. Start background task (additive mode — preserve existing docs when adding repos)
-    background_tasks.add_task(
-        run_document_orchestrator,
-        product_id=str(product_id),
-        user_id=str(user_id),
-        mode="additive",
+    # 5. Start as independent async task (runs concurrently with analysis)
+    asyncio.create_task(
+        run_document_orchestrator(
+            product_id=str(product_id),
+            user_id=str(user_id),
+            mode="additive",
+        ),
+        name=f"docs-gen-{product_id}",
     )
 
     return True

@@ -6,11 +6,12 @@ import logging
 import uuid as uuid_pkg
 from dataclasses import asdict
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_subscription_context_for_product
+from app.api.v1.products.analysis import maybe_auto_trigger_analysis
 from app.api.v1.products.docs_generation import maybe_auto_trigger_docs
 from app.core.database import get_db
 from app.domain import product_ops, repository_ops
@@ -83,6 +84,7 @@ class ImportResponse(BaseModel):
     imported: list[ImportedRepo]
     skipped: list[SkippedRepo]
     docs_generation_triggered: bool = False
+    analysis_triggered: bool = False
 
 
 class BulkRefreshRequest(BaseModel):
@@ -207,7 +209,6 @@ async def list_github_repos(
 @router.post("/import", response_model=ImportResponse)
 async def import_github_repos(
     data: ImportRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ImportResponse:
@@ -343,7 +344,6 @@ async def import_github_repos(
                 product_id=data.product_id,
                 user_id=current_user.id,
                 db=db,
-                background_tasks=background_tasks,
             )
         except Exception as e:
             # Log but don't fail the import - user can manually trigger docs
@@ -352,10 +352,26 @@ async def import_github_repos(
                 "User can manually trigger docs generation."
             )
 
+    # Auto-trigger project analysis if repos were actually imported
+    analysis_triggered = False
+    if imported:
+        try:
+            analysis_triggered = await maybe_auto_trigger_analysis(
+                product_id=data.product_id,
+                user_id=current_user.id,
+                db=db,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Auto-trigger analysis failed for product {data.product_id} after import: {e}. "
+                "User can manually trigger analysis."
+            )
+
     return ImportResponse(
         imported=imported,
         skipped=skipped,
         docs_generation_triggered=docs_triggered,
+        analysis_triggered=analysis_triggered,
     )
 
 

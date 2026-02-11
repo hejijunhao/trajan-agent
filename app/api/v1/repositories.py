@@ -5,9 +5,10 @@ Repositories are visible to all users with Product access.
 - Editors can create, update, and delete repositories
 """
 
+import logging
 import uuid as uuid_pkg
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -18,12 +19,15 @@ from app.api.deps import (
     get_product_access,
     get_subscription_context_for_product,
 )
+from app.api.v1.products.analysis import maybe_auto_trigger_analysis
 from app.api.v1.products.docs_generation import maybe_auto_trigger_docs
 from app.config.plans import get_plan
 from app.domain import repository_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.repository import RepositoryCreate, RepositoryUpdate
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
 
@@ -65,7 +69,9 @@ async def list_repositories(
     if product_id:
         # Verify product access (will raise 403 if no access)
         await get_product_access(product_id, db, current_user)
-        repos = await repository_ops.get_by_product(db, product_id=product_id, skip=skip, limit=limit)
+        repos = await repository_ops.get_by_product(
+            db, product_id=product_id, skip=skip, limit=limit
+        )
     else:
         # Without product_id filter, RLS will only return repos from accessible products
         # For now, require product_id to avoid returning repos from all products
@@ -98,7 +104,6 @@ async def get_repository(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_repository(
     data: RepositoryCreate,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
 ):
@@ -171,15 +176,36 @@ async def create_repository(
     # Auto-trigger docs generation if user preference is enabled
     docs_triggered = False
     if data.product_id:
-        docs_triggered = await maybe_auto_trigger_docs(
-            product_id=data.product_id,
-            user_id=current_user.id,
-            db=db,
-            background_tasks=background_tasks,
-        )
+        try:
+            docs_triggered = await maybe_auto_trigger_docs(
+                product_id=data.product_id,
+                user_id=current_user.id,
+                db=db,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Auto-trigger docs failed for product {data.product_id}: {e}. "
+                "User can manually trigger docs generation."
+            )
+
+    # Auto-trigger project analysis if user preference is enabled
+    analysis_triggered = False
+    if data.product_id:
+        try:
+            analysis_triggered = await maybe_auto_trigger_analysis(
+                product_id=data.product_id,
+                user_id=current_user.id,
+                db=db,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Auto-trigger analysis failed for product {data.product_id}: {e}. "
+                "User can manually trigger analysis."
+            )
 
     result = _serialize_repository(repo)
     result["docs_generation_triggered"] = docs_triggered
+    result["analysis_triggered"] = analysis_triggered
     return result
 
 
