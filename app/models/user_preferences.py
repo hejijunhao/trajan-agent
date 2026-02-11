@@ -39,6 +39,8 @@ class UserPreferences(SQLModel, table=True):
             comment="Product UUIDs for per-project digest. NULL = all projects.",
         ),
     )
+    digest_timezone: str = Field(default="UTC", max_length=50)  # IANA timezone
+    digest_hour: int = Field(default=17)  # 0-23, user's preferred local hour
     notify_work_items: bool = Field(default=True)
     notify_documents: bool = Field(default=True)
 

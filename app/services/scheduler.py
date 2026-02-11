@@ -194,14 +194,10 @@ class Scheduler:
             replace_existing=True,
         )
 
-        # Weekly digest: configured day and hour (default: Friday 5 PM UTC)
+        # Weekly digest: hourly check (per-user timezone filtering happens in the service)
         self._scheduler.add_job(
             run_weekly_digest,
-            trigger=CronTrigger(
-                day_of_week=settings.weekly_digest_day,
-                hour=settings.weekly_digest_hour,
-                minute=0,
-            ),
+            trigger=CronTrigger(minute=0),
             id="weekly_digest",
             name="Weekly Digest Emails",
             replace_existing=True,
@@ -212,8 +208,7 @@ class Scheduler:
             f"[scheduler] Started with auto-progress at "
             f"{settings.auto_progress_hour:02d}:00 UTC, "
             f"plan-prompt at {settings.plan_prompt_email_hour:02d}:30 UTC, "
-            f"weekly-digest on {settings.weekly_digest_day} at "
-            f"{settings.weekly_digest_hour:02d}:00 UTC"
+            f"weekly-digest hourly (per-user timezone)"
         )
 
     def stop(self) -> None:

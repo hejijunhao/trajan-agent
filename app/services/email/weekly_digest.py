@@ -1,6 +1,8 @@
 """Weekly digest email job.
 
-Sends a Friday summary of project progress to users who opted in.
+Sends a weekly summary of project progress to users who opted in.
+Fires every hour; filters to users whose local time matches their
+configured digest_hour on the configured digest day.
 Reads pre-cached ProgressSummary and DashboardShippedSummary data —
 zero AI cost at send time.
 """
@@ -9,7 +11,9 @@ import logging
 import time
 import uuid as uuid_pkg
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from html import escape as html_escape
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,19 +72,17 @@ def _build_product_html(product_name: str, narrative: str, items: list[dict]) ->
             if label
             else ""
         )
-        items_html += f"<li style=\"margin:4px 0;font-size:14px;color:#334155;\">{badge}{html_escape(item.get('description', ''))}</li>\n"
+        items_html += f'<li style="margin:4px 0;font-size:14px;color:#334155;">{badge}{html_escape(item.get("description", ""))}</li>\n'
 
     overflow = ""
     if len(items) > 8:
-        overflow = (
-            f'<p style="font-size:12px;color:#94a3b8;margin:4px 0 0;">… and {len(items) - 8} more</p>'
-        )
+        overflow = f'<p style="font-size:12px;color:#94a3b8;margin:4px 0 0;">… and {len(items) - 8} more</p>'
 
     return f"""
     <div style="margin-bottom:24px;">
       <h2 style="font-size:16px;font-weight:600;color:#0f172a;margin:0 0 6px;">{html_escape(product_name)}</h2>
       <p style="font-size:14px;color:#475569;margin:0 0 10px;line-height:1.5;">{html_escape(narrative)}</p>
-      {f'<ul style="list-style:none;padding:0;margin:0 0 4px;">{items_html}</ul>{overflow}' if items_html else ''}
+      {f'<ul style="list-style:none;padding:0;margin:0 0 4px;">{items_html}</ul>{overflow}' if items_html else ""}
     </div>"""
 
 
@@ -138,9 +140,7 @@ def _build_plain_text(product_data: list[tuple[str, str, list[dict]]]) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def _get_user_products(
-    db: AsyncSession, user_id: uuid_pkg.UUID
-) -> list[Product]:
+async def _get_user_products(db: AsyncSession, user_id: uuid_pkg.UUID) -> list[Product]:
     """Get all products across the user's organization memberships."""
     stmt = (
         select(OrganizationMember)
@@ -187,21 +187,15 @@ async def _send_digest_for_user(
         products = all_products
 
     if not products:
-        report.skipped_reasons["no_products"] = (
-            report.skipped_reasons.get("no_products", 0) + 1
-        )
+        report.skipped_reasons["no_products"] = report.skipped_reasons.get("no_products", 0) + 1
         return
 
     # Gather cached progress data per product
     product_data: list[tuple[str, str, list[dict]]] = []  # (name, narrative, items)
 
     for product in products:
-        summary = await progress_summary_ops.get_by_product_period(
-            db, product.id, PERIOD
-        )
-        shipped = await dashboard_shipped_ops.get_by_product_period(
-            db, product.id, PERIOD
-        )
+        summary = await progress_summary_ops.get_by_product_period(db, product.id, PERIOD)
+        shipped = await dashboard_shipped_ops.get_by_product_period(db, product.id, PERIOD)
 
         narrative = summary.summary_text if summary else ""
         items = shipped.items if shipped and shipped.has_significant_changes else []
@@ -213,9 +207,7 @@ async def _send_digest_for_user(
         product_data.append((product.name or "Untitled Project", narrative, items))
 
     if not product_data:
-        report.skipped_reasons["no_activity"] = (
-            report.skipped_reasons.get("no_activity", 0) + 1
-        )
+        report.skipped_reasons["no_activity"] = report.skipped_reasons.get("no_activity", 0) + 1
         return
 
     # Decide: consolidated email or per-project emails
@@ -241,8 +233,7 @@ async def _send_digest_for_user(
     else:
         # Consolidated mode: all projects in one email
         sections = [
-            _build_product_html(name, narrative, items)
-            for name, narrative, items in product_data
+            _build_product_html(name, narrative, items) for name, narrative, items in product_data
         ]
         html_body = _build_email_html(sections, settings.frontend_url)
         text_body = _build_plain_text(product_data)
@@ -265,9 +256,11 @@ async def _send_digest_for_user(
 
 
 async def send_weekly_digests(db: AsyncSession) -> WeeklyDigestReport:
-    """Main entry point: send weekly digest emails to all opted-in users.
+    """Main entry point: send weekly digest emails to eligible users.
 
-    Called by the scheduler (Friday 5 PM UTC) or the manual trigger endpoint.
+    Called hourly by the scheduler. Filters to users whose local time
+    matches their configured digest_hour on the configured digest day.
+    Also callable via the manual trigger endpoint.
     """
     report = WeeklyDigestReport()
     start = time.monotonic()
@@ -289,13 +282,34 @@ async def send_weekly_digests(db: AsyncSession) -> WeeklyDigestReport:
     report.users_checked = len(weekly_prefs)
     logger.info(f"[weekly-digest] Found {len(weekly_prefs)} users with weekly digest enabled")
 
+    # Filter to users whose local time matches right now
+    now_utc = datetime.now(UTC)
+    target_day = settings.weekly_digest_day  # e.g. "fri"
+
+    eligible: list[UserPreferences] = []
+    for prefs in weekly_prefs:
+        try:
+            tz = ZoneInfo(prefs.digest_timezone or "UTC")
+        except (KeyError, ValueError):
+            tz = ZoneInfo("UTC")
+        local_now = now_utc.astimezone(tz)
+        day_abbrev = local_now.strftime("%a").lower()  # "mon", "tue", …, "fri"
+        if day_abbrev == target_day and local_now.hour == (
+            prefs.digest_hour if prefs.digest_hour is not None else 17
+        ):
+            eligible.append(prefs)
+
+    logger.info(f"[weekly-digest] {len(eligible)} users eligible for current hour")
+
+    if not eligible:
+        report.duration_seconds = round(time.monotonic() - start, 2)
+        return report
+
     async with postmark_service.batch():
-        for prefs in weekly_prefs:
+        for prefs in eligible:
             user = prefs.user
             if not user or not user.email:
-                report.skipped_reasons["no_email"] = (
-                    report.skipped_reasons.get("no_email", 0) + 1
-                )
+                report.skipped_reasons["no_email"] = report.skipped_reasons.get("no_email", 0) + 1
                 continue
 
             try:
