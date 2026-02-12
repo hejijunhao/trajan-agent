@@ -11,28 +11,22 @@ Tests cover:
 - Two-pass refinement (Phase 4)
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 from app.services.file_selector import (
-    FALLBACK_PATTERNS,
-    FileSelector,
-    FileSelectorInput,
     MAX_FILES_TO_SELECT,
     MAX_TREE_FILES,
-    MIN_FILES_TO_SELECT,
+    FileSelector,
+    FileSelectorInput,
     extract_references,
     heuristic_fallback,
     parse_response,
     truncate_tree,
 )
-from app.services.file_selector.constants import SOURCE_EXTENSIONS, TEST_INDICATORS
 from app.services.file_selector.fallback import is_source_file, is_test_file
 from app.services.file_selector.parser import _resolve_import
 from app.services.file_selector.prompts import build_selection_prompt
 from app.services.framework_detector import DetectionResult, FrameworkInfo
-
 
 # Sample file trees for testing
 SMALL_REPO_FILES = [
@@ -112,7 +106,7 @@ These files are important."""
     def test_parse_limits_to_max_files(self) -> None:
         """Parsing should limit results to MAX_FILES_TO_SELECT."""
         # Create response with more files than limit
-        many_files = MEDIUM_REPO_FILES[:MAX_FILES_TO_SELECT + 5]
+        many_files = MEDIUM_REPO_FILES[: MAX_FILES_TO_SELECT + 5]
         quoted_files = [f'"{f}"' for f in many_files]
         response = "[" + ", ".join(quoted_files) + "]"
         valid_set = set(many_files)

@@ -1,0 +1,248 @@
+"""Unit tests for auth dependencies — JWT validation and user auto-creation."""
+
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi import HTTPException
+
+from app.api.deps.auth import (
+    get_current_user,
+    get_current_user_optional,
+    get_signing_key,
+)
+
+from tests.helpers.mock_factories import make_mock_user, mock_scalar_result
+
+
+# ---------------------------------------------------------------------------
+# get_signing_key
+# ---------------------------------------------------------------------------
+
+
+class TestGetSigningKey:
+    """Tests for JWKS key matching by kid."""
+
+    def test_returns_key_when_kid_matches(self):
+        jwks = {
+            "keys": [
+                {"kid": "key-1", "kty": "EC", "crv": "P-256", "x": "a", "y": "b"},
+                {"kid": "key-2", "kty": "EC", "crv": "P-256", "x": "c", "y": "d"},
+            ]
+        }
+        token = "dummy"
+
+        with patch("app.api.deps.auth.jwt") as mock_jwt:
+            mock_jwt.get_unverified_header.return_value = {"kid": "key-2"}
+
+            with patch("app.api.deps.auth.ECKey") as mock_eckey:
+                mock_eckey.return_value = MagicMock()
+                key = get_signing_key(jwks, token)
+                mock_eckey.assert_called_once_with(
+                    {"kid": "key-2", "kty": "EC", "crv": "P-256", "x": "c", "y": "d"},
+                    algorithm="ES256",
+                )
+
+    def test_raises_when_no_matching_kid(self):
+        jwks = {"keys": [{"kid": "key-1", "kty": "EC", "crv": "P-256"}]}
+
+        with patch("app.api.deps.auth.jwt") as mock_jwt:
+            mock_jwt.get_unverified_header.return_value = {"kid": "missing-kid"}
+
+            with pytest.raises(ValueError, match="Unable to find matching key"):
+                get_signing_key(jwks, "dummy")
+
+    def test_raises_when_no_keys_in_jwks(self):
+        with patch("app.api.deps.auth.jwt") as mock_jwt:
+            mock_jwt.get_unverified_header.return_value = {"kid": "any"}
+
+            with pytest.raises(ValueError, match="Unable to find matching key"):
+                get_signing_key({}, "dummy")
+
+
+# ---------------------------------------------------------------------------
+# get_current_user
+# ---------------------------------------------------------------------------
+
+
+class TestGetCurrentUser:
+    """Tests for JWT-based user authentication."""
+
+    def setup_method(self):
+        self.db = AsyncMock()
+        self.user_id = uuid.uuid4()
+        self.valid_payload = {
+            "sub": str(self.user_id),
+            "email": "test@example.com",
+            "app_metadata": {"provider": "email"},
+            "user_metadata": {"full_name": "Test User"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_raises_401_when_no_credentials(self):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(credentials=None, db=self.db)
+        assert exc_info.value.status_code == 401
+        assert "Not authenticated" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_raises_401_on_jwt_error(self):
+        from jose import JWTError
+
+        credentials = MagicMock()
+        credentials.credentials = "invalid.jwt.token"
+
+        with patch("app.api.deps.auth.get_jwks", new_callable=AsyncMock) as mock_jwks:
+            mock_jwks.return_value = {"keys": []}
+            with patch("app.api.deps.auth.get_signing_key") as mock_get_key:
+                mock_get_key.side_effect = ValueError("no key")
+
+                with pytest.raises(HTTPException) as exc_info:
+                    await get_current_user(credentials=credentials, db=self.db)
+                assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_raises_401_when_sub_missing(self):
+        credentials = MagicMock()
+        credentials.credentials = "valid.jwt.token"
+
+        with (
+            patch("app.api.deps.auth.get_jwks", new_callable=AsyncMock) as mock_jwks,
+            patch("app.api.deps.auth.get_signing_key") as mock_get_key,
+            patch("app.api.deps.auth.jwt") as mock_jwt,
+        ):
+            mock_jwks.return_value = {"keys": [{"kid": "k1"}]}
+            mock_get_key.return_value = MagicMock()
+            mock_jwt.decode.return_value = {"email": "test@example.com"}  # no 'sub'
+
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(credentials=credentials, db=self.db)
+            assert exc_info.value.status_code == 401
+            assert "Invalid authentication token" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_returns_existing_user(self):
+        existing_user = make_mock_user(id=self.user_id)
+        credentials = MagicMock()
+        credentials.credentials = "valid.jwt.token"
+
+        self.db.execute = AsyncMock(return_value=mock_scalar_result(existing_user))
+
+        with (
+            patch("app.api.deps.auth.get_jwks", new_callable=AsyncMock) as mock_jwks,
+            patch("app.api.deps.auth.get_signing_key") as mock_get_key,
+            patch("app.api.deps.auth.jwt") as mock_jwt,
+            patch(
+                "app.api.deps.auth.organization_ops"
+            ) as mock_org_ops,
+        ):
+            mock_jwks.return_value = {"keys": []}
+            mock_get_key.return_value = MagicMock()
+            mock_jwt.decode.return_value = self.valid_payload
+            mock_org_ops.get_for_user = AsyncMock(return_value=[MagicMock()])
+
+            result = await get_current_user(credentials=credentials, db=self.db)
+            assert result == existing_user
+
+    @pytest.mark.asyncio
+    async def test_creates_user_when_not_found(self):
+        credentials = MagicMock()
+        credentials.credentials = "valid.jwt.token"
+
+        self.db.execute = AsyncMock(return_value=mock_scalar_result(None))
+        self.db.add = MagicMock()
+        self.db.flush = AsyncMock()
+        self.db.refresh = AsyncMock()
+
+        with (
+            patch("app.api.deps.auth.get_jwks", new_callable=AsyncMock) as mock_jwks,
+            patch("app.api.deps.auth.get_signing_key") as mock_get_key,
+            patch("app.api.deps.auth.jwt") as mock_jwt,
+            patch(
+                "app.api.deps.auth.organization_ops"
+            ) as mock_org_ops,
+        ):
+            mock_jwks.return_value = {"keys": []}
+            mock_get_key.return_value = MagicMock()
+            mock_jwt.decode.return_value = self.valid_payload
+            mock_org_ops.get_for_user = AsyncMock(return_value=[MagicMock()])
+
+            result = await get_current_user(credentials=credentials, db=self.db)
+            self.db.add.assert_called_once()
+            added_user = self.db.add.call_args[0][0]
+            assert added_user.id == self.user_id
+            assert added_user.email == "test@example.com"
+
+    @pytest.mark.asyncio
+    async def test_creates_personal_org_when_none_exists(self):
+        existing_user = make_mock_user(id=self.user_id, email="test@example.com")
+        credentials = MagicMock()
+        credentials.credentials = "valid.jwt.token"
+
+        self.db.execute = AsyncMock(return_value=mock_scalar_result(existing_user))
+
+        with (
+            patch("app.api.deps.auth.get_jwks", new_callable=AsyncMock) as mock_jwks,
+            patch("app.api.deps.auth.get_signing_key") as mock_get_key,
+            patch("app.api.deps.auth.jwt") as mock_jwt,
+            patch(
+                "app.api.deps.auth.organization_ops"
+            ) as mock_org_ops,
+        ):
+            mock_jwks.return_value = {"keys": []}
+            mock_get_key.return_value = MagicMock()
+            mock_jwt.decode.return_value = self.valid_payload
+            mock_org_ops.get_for_user = AsyncMock(return_value=[])  # No orgs
+            mock_org_ops.create_personal_org = AsyncMock()
+
+            await get_current_user(credentials=credentials, db=self.db)
+            mock_org_ops.create_personal_org.assert_awaited_once_with(
+                self.db,
+                user_id=self.user_id,
+                user_name="Test User",
+                user_email="test@example.com",
+            )
+
+
+# ---------------------------------------------------------------------------
+# get_current_user_optional
+# ---------------------------------------------------------------------------
+
+
+class TestGetCurrentUserOptional:
+    """Tests for optional authentication."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_credentials(self):
+        db = AsyncMock()
+        result = await get_current_user_optional(credentials=None, db=db)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_auth_failure(self):
+        db = AsyncMock()
+        credentials = MagicMock()
+        credentials.credentials = "bad.jwt"
+
+        with patch(
+            "app.api.deps.auth.get_current_user",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=401, detail="fail"),
+        ):
+            result = await get_current_user_optional(credentials=credentials, db=db)
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_user_when_authenticated(self):
+        db = AsyncMock()
+        user = make_mock_user()
+        credentials = MagicMock()
+        credentials.credentials = "valid.jwt"
+
+        with patch(
+            "app.api.deps.auth.get_current_user",
+            new_callable=AsyncMock,
+            return_value=user,
+        ):
+            result = await get_current_user_optional(credentials=credentials, db=db)
+            assert result == user

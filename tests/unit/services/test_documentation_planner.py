@@ -324,7 +324,9 @@ class TestResponseParsing:
 
         assert isinstance(result, DocumentationPlan)
         assert result.summary == "This is a FastAPI + Next.js monorepo"
-        assert result.codebase_summary == "Full-stack web app with Python backend and React frontend"
+        assert (
+            result.codebase_summary == "Full-stack web app with Python backend and React frontend"
+        )
         assert len(result.planned_documents) == 1
         assert result.planned_documents[0].title == "Project Overview"
         assert result.planned_documents[0].priority == 1

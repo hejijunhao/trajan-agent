@@ -11,8 +11,6 @@ Tests cover:
 - Empty/invalid input handling
 """
 
-import pytest
-
 from app.services.framework_detector import (
     DetectionResult,
     FrameworkDetector,
@@ -180,7 +178,7 @@ require (
 
     def test_detect_echo(self) -> None:
         """Detect Echo from go.mod."""
-        go_mod = 'require github.com/labstack/echo/v4 v4.0.0'
+        go_mod = "require github.com/labstack/echo/v4 v4.0.0"
         files = {"go.mod": go_mod}
 
         result = self.detector.detect(files)

@@ -6,7 +6,7 @@ Tests cover:
 - Document folder movement operations
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -174,10 +174,8 @@ class TestDocumentOperationsMove:
             sync_status=None,
         )
 
-        with patch.object(self.ops, "get_by_user", return_value=mock_doc):
-            result = await self.ops.move_to_folder(
-                mock_db, mock_doc.id, "executing", mock_doc.user_id
-            )
+        with patch.object(self.ops, "get", return_value=mock_doc):
+            result = await self.ops.move_to_folder(mock_db, mock_doc.id, "executing")
 
         assert result.folder == {"path": "executing"}
         mock_db.commit.assert_called_once()
@@ -195,10 +193,8 @@ class TestDocumentOperationsMove:
             sync_status="synced",
         )
 
-        with patch.object(self.ops, "get_by_user", return_value=mock_doc):
-            result = await self.ops.move_to_folder(
-                mock_db, mock_doc.id, "executing", mock_doc.user_id
-            )
+        with patch.object(self.ops, "get", return_value=mock_doc):
+            result = await self.ops.move_to_folder(mock_db, mock_doc.id, "executing")
 
         assert result.sync_status == "local_changes"
 
@@ -207,10 +203,8 @@ class TestDocumentOperationsMove:
         """move_to_folder should return None if document not found."""
         mock_db = AsyncMock()
 
-        with patch.object(self.ops, "get_by_user", return_value=None):
-            result = await self.ops.move_to_folder(
-                mock_db, MagicMock(), "executing", MagicMock()
-            )
+        with patch.object(self.ops, "get", return_value=None):
+            result = await self.ops.move_to_folder(mock_db, MagicMock(), "executing")
 
         assert result is None
         mock_db.commit.assert_not_called()
@@ -227,12 +221,8 @@ class TestDocumentOperationsMove:
         )
 
         with patch.object(self.ops, "move_to_folder", return_value=mock_doc) as mock_move:
-            result = await self.ops.move_to_executing(
-                mock_db, mock_doc.id, mock_doc.user_id
-            )
-            mock_move.assert_called_once_with(
-                mock_db, mock_doc.id, "executing", mock_doc.user_id
-            )
+            await self.ops.move_to_executing(mock_db, mock_doc.id)
+            mock_move.assert_called_once_with(mock_db, mock_doc.id, "executing")
 
     @pytest.mark.asyncio
     async def test_move_to_completed_includes_date(self) -> None:
@@ -246,7 +236,7 @@ class TestDocumentOperationsMove:
         )
 
         with patch.object(self.ops, "move_to_folder", return_value=mock_doc) as mock_move:
-            await self.ops.move_to_completed(mock_db, mock_doc.id, mock_doc.user_id)
+            await self.ops.move_to_completed(mock_db, mock_doc.id)
 
             # Check that the folder path includes a date
             call_args = mock_move.call_args
@@ -268,7 +258,5 @@ class TestDocumentOperationsMove:
         )
 
         with patch.object(self.ops, "move_to_folder", return_value=mock_doc) as mock_move:
-            await self.ops.archive(mock_db, mock_doc.id, mock_doc.user_id)
-            mock_move.assert_called_once_with(
-                mock_db, mock_doc.id, "archive", mock_doc.user_id
-            )
+            await self.ops.archive(mock_db, mock_doc.id)
+            mock_move.assert_called_once_with(mock_db, mock_doc.id, "archive")

@@ -197,10 +197,7 @@ class TestFileExtraction:
     def test_respects_token_budget(self) -> None:
         """Should not exceed token budget."""
         # Create files that would exceed the 50k token budget
-        files = [
-            FileContent(f"file{i}.py", "x" * 10000, 10000, 1, 30000)
-            for i in range(5)
-        ]
+        files = [FileContent(f"file{i}.py", "x" * 10000, 10000, 1, 30000) for i in range(5)]
         context = make_codebase_context(key_files=files)
 
         result = self.generator._extract_relevant_files(

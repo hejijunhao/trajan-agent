@@ -42,7 +42,9 @@ class TestAppInfoBulkCreate:
     @pytest.mark.asyncio
     async def test_bulk_create_deduplicates_within_batch(self) -> None:
         """Duplicate keys in batch take last occurrence."""
-        db = AsyncMock()
+        db = MagicMock()
+        db.flush = AsyncMock()
+        db.refresh = AsyncMock()
 
         # Mock get_existing_keys to return empty set
         self.ops.get_existing_keys = AsyncMock(return_value=set())
@@ -72,7 +74,9 @@ class TestAppInfoBulkCreate:
     @pytest.mark.asyncio
     async def test_bulk_create_skips_existing_keys(self) -> None:
         """Entries with existing keys are skipped."""
-        db = AsyncMock()
+        db = MagicMock()
+        db.flush = AsyncMock()
+        db.refresh = AsyncMock()
 
         # Mock get_existing_keys to return one existing key
         self.ops.get_existing_keys = AsyncMock(return_value={"EXISTING_KEY"})

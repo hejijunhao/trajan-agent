@@ -8,8 +8,6 @@ Tests cover:
 - GitHub path generation
 """
 
-import pytest
-
 from app.services.docs.utils import (
     extract_title,
     generate_github_path,

@@ -14,6 +14,7 @@ Verifies:
 """
 
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -26,6 +27,14 @@ from app.services.email.weekly_digest import (
     send_weekly_digests,
 )
 
+# ---------------------------------------------------------------------------
+# Time-matching constants — computed once at import so prefs pass the
+# eligible-hour filter added in v0.9.23 (per-user local time delivery).
+# ---------------------------------------------------------------------------
+
+_NOW_UTC = datetime.now(UTC)
+_CURRENT_DAY = _NOW_UTC.strftime("%a").lower()  # e.g. "mon", "tue", …
+_CURRENT_HOUR = _NOW_UTC.hour
 
 # ---------------------------------------------------------------------------
 # Mock helpers
@@ -49,7 +58,17 @@ def _make_mock_prefs(
     prefs.user = user or _make_mock_user()
     prefs.email_digest = "weekly"
     prefs.digest_product_ids = digest_product_ids
+    # Time-matching fields (v0.9.23): ensure prefs pass the eligible-hour filter
+    prefs.digest_timezone = "UTC"
+    prefs.digest_hour = _CURRENT_HOUR
     return prefs
+
+
+def _configure_digest_settings(mock_settings: MagicMock) -> None:
+    """Set required settings fields so the digest job runs normally."""
+    mock_settings.postmark_enabled = True
+    mock_settings.weekly_digest_day = _CURRENT_DAY
+    mock_settings.frontend_url = "https://app.trajancloud.com"
 
 
 def _make_mock_product(name: str = "Test Product") -> MagicMock:
@@ -124,7 +143,7 @@ class TestSendWeeklyDigests:
         self, mock_settings: MagicMock, mock_postmark: MagicMock
     ) -> None:
         """When no users have weekly digest enabled, nothing is sent."""
-        mock_settings.postmark_enabled = True
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -144,7 +163,7 @@ class TestSendWeeklyDigests:
         self, mock_settings: MagicMock, mock_postmark: MagicMock
     ) -> None:
         """A user with no email address should be skipped."""
-        mock_settings.postmark_enabled = True
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -166,7 +185,7 @@ class TestSendWeeklyDigests:
         self, mock_settings: MagicMock, mock_postmark: MagicMock
     ) -> None:
         """A prefs record with user=None should be skipped."""
-        mock_settings.postmark_enabled = True
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -192,7 +211,7 @@ class TestSendWeeklyDigests:
         mock_postmark: MagicMock,
     ) -> None:
         """If processing one user throws, the job continues to the next."""
-        mock_settings.postmark_enabled = True
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -234,8 +253,7 @@ class TestSendDigestForUser:
         mock_postmark: MagicMock,
     ) -> None:
         """Consolidated mode (digest_product_ids=None): one email with all projects."""
-        mock_settings.postmark_enabled = True
-        mock_settings.frontend_url = "https://app.trajancloud.com"
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
@@ -283,8 +301,7 @@ class TestSendDigestForUser:
         mock_postmark: MagicMock,
     ) -> None:
         """Per-project mode: one email per selected product."""
-        mock_settings.postmark_enabled = True
-        mock_settings.frontend_url = "https://app.trajancloud.com"
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
@@ -300,9 +317,7 @@ class TestSendDigestForUser:
             side_effect=[_make_mock_shipped(), _make_mock_shipped()]
         )
 
-        prefs = _make_mock_prefs(
-            digest_product_ids=[str(product_a.id), str(product_b.id)]
-        )
+        prefs = _make_mock_prefs(digest_product_ids=[str(product_a.id), str(product_b.id)])
 
         db = AsyncMock()
         db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
@@ -333,8 +348,7 @@ class TestSendDigestForUser:
         mock_postmark: MagicMock,
     ) -> None:
         """User with no products should be skipped."""
-        mock_settings.postmark_enabled = True
-        mock_settings.frontend_url = "https://app.trajancloud.com"
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -366,8 +380,7 @@ class TestSendDigestForUser:
         mock_postmark: MagicMock,
     ) -> None:
         """User whose products all have no cached data should be skipped."""
-        mock_settings.postmark_enabled = True
-        mock_settings.frontend_url = "https://app.trajancloud.com"
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -404,8 +417,7 @@ class TestSendDigestForUser:
         mock_postmark: MagicMock,
     ) -> None:
         """Only selected products should be included when digest_product_ids is set."""
-        mock_settings.postmark_enabled = True
-        mock_settings.frontend_url = "https://app.trajancloud.com"
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
@@ -418,9 +430,7 @@ class TestSendDigestForUser:
         mock_progress_ops.get_by_product_period = AsyncMock(
             return_value=_make_mock_summary("Selected progress")
         )
-        mock_shipped_ops.get_by_product_period = AsyncMock(
-            return_value=_make_mock_shipped()
-        )
+        mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
 
         prefs = _make_mock_prefs(digest_product_ids=[str(product_a.id)])
 
@@ -448,8 +458,7 @@ class TestSendDigestForUser:
         mock_postmark: MagicMock,
     ) -> None:
         """If all sends fail for a user, users_emailed should NOT increment (Phase 1 fix)."""
-        mock_settings.postmark_enabled = True
-        mock_settings.frontend_url = "https://app.trajancloud.com"
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=False)  # all sends fail
@@ -460,9 +469,7 @@ class TestSendDigestForUser:
         mock_progress_ops.get_by_product_period = AsyncMock(
             return_value=_make_mock_summary("Some progress")
         )
-        mock_shipped_ops.get_by_product_period = AsyncMock(
-            return_value=_make_mock_shipped()
-        )
+        mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
 
         prefs = _make_mock_prefs(digest_product_ids=None)
 
@@ -490,8 +497,7 @@ class TestSendDigestForUser:
         mock_postmark: MagicMock,
     ) -> None:
         """Per-project mode: partial send failure still counts user as emailed."""
-        mock_settings.postmark_enabled = True
-        mock_settings.frontend_url = "https://app.trajancloud.com"
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         # First send succeeds, second fails
@@ -508,9 +514,7 @@ class TestSendDigestForUser:
             side_effect=[_make_mock_shipped(), _make_mock_shipped()]
         )
 
-        prefs = _make_mock_prefs(
-            digest_product_ids=[str(product_a.id), str(product_b.id)]
-        )
+        prefs = _make_mock_prefs(digest_product_ids=[str(product_a.id), str(product_b.id)])
 
         db = AsyncMock()
         db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
@@ -536,8 +540,7 @@ class TestSendDigestForUser:
         mock_postmark: MagicMock,
     ) -> None:
         """Products where shipped.has_significant_changes=False should exclude items."""
-        mock_settings.postmark_enabled = True
-        mock_settings.frontend_url = "https://app.trajancloud.com"
+        _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
@@ -612,9 +615,7 @@ class TestGetUserProducts:
         membership.organization = None
 
         db = AsyncMock()
-        db.execute = AsyncMock(
-            return_value=_mock_scalars_result([membership])
-        )
+        db.execute = AsyncMock(return_value=_mock_scalars_result([membership]))
 
         products = await _get_user_products(db, uuid.uuid4())
 

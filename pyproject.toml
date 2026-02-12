@@ -70,3 +70,7 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: DB integration tests (transaction rollback)",
+    "full_stack: Full-stack tests (real Supabase + Stripe sandbox)",
+]
