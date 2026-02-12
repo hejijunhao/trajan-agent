@@ -8,12 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     get_current_user,
     get_db_with_rls,
-    require_active_subscription,
+    require_product_subscription,
 )
-from app.domain import product_ops
 from app.models.user import User
 from app.services.agent import CLIAgentService
 
@@ -50,17 +48,13 @@ async def agent_chat(
     data: ChatRequest,
     _current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> ChatResponse:
     """Chat with the CLI agent about a project.
 
     RLS ensures the user can only access products they have permission for.
     Full message history is sent per request (stateless backend).
     """
-    # RLS will return None for inaccessible products
-    product = await product_ops.get(db, data.product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found or access denied")
+    await require_product_subscription(db, data.product_id)
 
     service = CLIAgentService()
     try:

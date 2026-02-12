@@ -4,12 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
     get_product_access,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.domain import work_item_ops
 from app.models.user import User
@@ -86,12 +85,12 @@ async def create_work_item(
     data: WorkItemCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Create a new work item. Requires Editor or Admin access to the product."""
     # Check product access (editor level required for creation)
     if data.product_id:
         await check_product_editor_access(db, data.product_id, current_user.id)
+        await require_product_subscription(db, data.product_id)
 
     item = await work_item_ops.create(
         db,
@@ -107,7 +106,6 @@ async def update_work_item(
     data: WorkItemUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update a work item. Requires Editor or Admin access to the product."""
     item = await work_item_ops.get(db, work_item_id=work_item_id)
@@ -120,6 +118,7 @@ async def update_work_item(
     # Check product access (editor level required for update)
     if item.product_id:
         await check_product_editor_access(db, item.product_id, current_user.id)
+        await require_product_subscription(db, item.product_id)
 
     updated = await work_item_ops.update(
         db, db_obj=item, obj_in=data.model_dump(exclude_unset=True)
@@ -132,7 +131,6 @@ async def delete_work_item(
     work_item_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete a work item. Requires Editor or Admin access to the product."""
     # Get work item first to check product access
@@ -146,5 +144,6 @@ async def delete_work_item(
     # Check product access (editor level required for deletion)
     if item.product_id:
         await check_product_editor_access(db, item.product_id, current_user.id)
+        await require_product_subscription(db, item.product_id)
 
     await work_item_ops.delete(db, work_item=item)

@@ -14,12 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     SubscriptionContext,
     check_product_editor_access,
+    check_subscription_active,
     get_current_organization,
     get_current_user,
     get_db_with_rls,
     get_product_access,
-    get_subscription_context_for_product,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.api.v1.products.analysis import maybe_auto_trigger_analysis
 from app.api.v1.products.docs_generation import maybe_auto_trigger_docs
@@ -108,7 +108,6 @@ async def create_repository(
     data: RepositoryCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """
     Create a new repository.
@@ -128,8 +127,8 @@ async def create_repository(
     if data.product_id:
         # Check product access first
         await check_product_editor_access(db, data.product_id, current_user.id)
-        # Get subscription context for the PRODUCT's organization
-        sub_ctx = await get_subscription_context_for_product(db, data.product_id)
+        # Get subscription context for the PRODUCT's organization + check active
+        sub_ctx = await require_product_subscription(db, data.product_id)
     else:
         # Fallback: repo without a product uses user's default organization
         default_org = await get_current_organization(org_id=None, current_user=current_user, db=db)
@@ -139,14 +138,12 @@ async def create_repository(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Organization subscription not found",
             )
-        # Create a minimal context for limit checking
-        from app.api.deps import SubscriptionContext
-
         sub_ctx = SubscriptionContext(
             organization=default_org,
             subscription=subscription,
             plan=get_plan(subscription.plan_tier),
         )
+        check_subscription_active(sub_ctx)
 
     # Check repo limit before creation
     current_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)
@@ -218,7 +215,6 @@ async def update_repository(
     data: RepositoryUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update a repository. Requires Editor or Admin access to the product."""
     repo = await repository_ops.get(db, id=repository_id)
@@ -231,6 +227,7 @@ async def update_repository(
     # Check product access (editor required for updates)
     if repo.product_id:
         await check_product_editor_access(db, repo.product_id, current_user.id)
+        await require_product_subscription(db, repo.product_id)
 
     updated = await repository_ops.update(
         db, db_obj=repo, obj_in=data.model_dump(exclude_unset=True)
@@ -243,7 +240,6 @@ async def delete_repository(
     repository_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete a repository. Requires Editor or Admin access to the product."""
     # Get repo first to check product access
@@ -257,5 +253,6 @@ async def delete_repository(
     # Check product access (editor required for deletion)
     if repo.product_id:
         await check_product_editor_access(db, repo.product_id, current_user.id)
+        await require_product_subscription(db, repo.product_id)
 
     await repository_ops.delete(db, id=repository_id)

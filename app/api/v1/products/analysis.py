@@ -9,12 +9,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
-    get_subscription_context_for_product,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.core.database import async_session_maker
 from app.core.rls import set_rls_user_context
@@ -45,7 +43,6 @@ async def analyze_product(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> AnalyzeProductResponse:
     """
     Trigger AI analysis of the product's repositories.
@@ -65,16 +62,11 @@ async def analyze_product(
     # Check product access first (verifies user has editor access via org membership)
     await check_product_editor_access(db, product_id, current_user.id)
 
-    # Get product (no user_id filter since access is checked above)
-    product = await product_ops.get(db, product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
-
     # Get subscription context for the product's organization (not user's default org)
-    sub_ctx = await get_subscription_context_for_product(db, product_id)
+    # Also checks subscription is active — raises 402 if pending/none
+    # product is included in sub_ctx (avoids redundant DB lookup)
+    sub_ctx = await require_product_subscription(db, product_id)
+    product = sub_ctx.product
 
     # Check if agent features are enabled for this organization
     repo_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)

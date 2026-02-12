@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Domain Entity Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
@@ -199,6 +198,96 @@ async def second_user_client(db_session: AsyncSession, second_user):
     from app.main import app
 
     app.dependency_overrides[get_current_user] = lambda: second_user
+
+    async def override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_db
+
+    async def override_db_rls():
+        yield db_session
+
+    app.dependency_overrides[get_db_with_rls] = override_db_rls
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", follow_redirects=True
+    ) as client:
+        yield client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def unauth_client(db_session: AsyncSession):
+    """HTTP client with NO auth override — for 401 tests.
+
+    Does NOT override get_current_user.  Without an Authorization header
+    the real HTTPBearer dependency returns None, causing get_current_user
+    to raise HTTPException(401).
+    """
+    from app.core.database import get_db
+    from app.main import app
+
+    async def override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", follow_redirects=True
+    ) as client:
+        yield client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def viewer_user(db_session: AsyncSession, test_org, test_product):
+    """A user with viewer role in test_org and viewer access to test_product."""
+    from app.domain.org_member_operations import org_member_ops
+    from app.models.product_access import ProductAccess
+
+    user = User(
+        id=uuid.uuid4(),
+        email=f"__test_viewer_{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Viewer User",
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(user)
+    await db_session.flush()
+    await db_session.refresh(user)
+
+    # Add as viewer member of test_org
+    await org_member_ops.add_member(
+        db_session,
+        organization_id=test_org.id,
+        user_id=user.id,
+        role="viewer",
+    )
+    await db_session.flush()
+
+    # Grant viewer-level product access
+    pa = ProductAccess(
+        product_id=test_product.id,
+        user_id=user.id,
+        access_level="viewer",
+    )
+    db_session.add(pa)
+    await db_session.flush()
+
+    return user
+
+
+@pytest.fixture
+async def viewer_client(db_session: AsyncSession, viewer_user):
+    """HTTP client authenticated as viewer_user (viewer role in test_org)."""
+    from app.api.deps.auth import get_current_user, get_db_with_rls
+    from app.core.database import get_db
+    from app.main import app
+
+    app.dependency_overrides[get_current_user] = lambda: viewer_user
 
     async def override_db():
         yield db_session

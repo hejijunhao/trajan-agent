@@ -4,10 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     get_current_user,
     get_db_with_rls,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.core.rate_limit import EXPORT_LIMIT, REVEAL_LIMIT, rate_limiter
 from app.domain import app_info_ops
@@ -239,11 +238,10 @@ async def create_app_info(
     data: AppInfoCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Create a new app info entry."""
-    # Check variables access
     await _check_variables_access(db, data.product_id, current_user.id)
+    await require_product_subscription(db, data.product_id)
 
     # Validate tags
     tag_errors = validate_tags(data.tags)
@@ -289,7 +287,6 @@ async def update_app_info(
     data: AppInfoUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update an app info entry."""
     entry = await app_info_ops.get_by_user(db, user_id=current_user.id, id=app_info_id)
@@ -302,6 +299,7 @@ async def update_app_info(
     # Check variables access
     if entry.product_id:
         await _check_variables_access(db, entry.product_id, current_user.id)
+        await require_product_subscription(db, entry.product_id)
 
     # Validate tags if provided
     if data.tags is not None:
@@ -335,7 +333,6 @@ async def delete_app_info(
     app_info_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete an app info entry."""
     # First get the entry to check access
@@ -349,6 +346,7 @@ async def delete_app_info(
     # Check variables access
     if entry.product_id:
         await _check_variables_access(db, entry.product_id, current_user.id)
+        await require_product_subscription(db, entry.product_id)
 
     await app_info_ops.delete(db, id=app_info_id, user_id=current_user.id)
 
@@ -387,7 +385,6 @@ async def bulk_create_app_info(
     data: AppInfoBulkCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """
     Bulk create app info entries from parsed .env content.
@@ -401,8 +398,8 @@ async def bulk_create_app_info(
     - Value length: max 10,000 characters (10KB)
     - Maximum 10 tags per entry
     """
-    # Check variables access
     await _check_variables_access(db, data.product_id, current_user.id)
+    await require_product_subscription(db, data.product_id)
 
     # Validate bulk import limits
     if len(data.entries) > MAX_BULK_ENTRIES:

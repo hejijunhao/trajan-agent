@@ -6,12 +6,11 @@ from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
     get_product_access,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.domain import document_ops, product_ops
 from app.models.document import DocumentCreate, DocumentUpdate
@@ -111,7 +110,6 @@ async def create_document(
     data: DocumentCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Create a new document. Requires Editor or Admin access to the product.
 
@@ -121,6 +119,7 @@ async def create_document(
     # Check product access
     if data.product_id:
         await check_product_editor_access(db, data.product_id, current_user.id)
+        await require_product_subscription(db, data.product_id)
 
     # Documents created in Trajan are marked as generated
     doc_data = data.model_dump()
@@ -139,7 +138,6 @@ async def update_document(
     data: DocumentUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update a document. Requires Editor or Admin access to the product."""
     doc = await document_ops.get(db, id=document_id)
@@ -152,6 +150,7 @@ async def update_document(
     # Check product access
     if doc.product_id:
         await check_product_editor_access(db, doc.product_id, current_user.id)
+        await require_product_subscription(db, doc.product_id)
 
     updated = await document_ops.update(db, db_obj=doc, obj_in=data.model_dump(exclude_unset=True))
     return serialize_document(updated)
@@ -161,7 +160,6 @@ async def delete_document(
     document_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete a document. Requires Editor or Admin access to the product."""
     # Get document first to check product access
@@ -175,6 +173,7 @@ async def delete_document(
     # Check product access
     if doc.product_id:
         await check_product_editor_access(db, doc.product_id, current_user.id)
+        await require_product_subscription(db, doc.product_id)
 
     await document_ops.delete(db, id=document_id)
 
@@ -236,18 +235,11 @@ async def add_changelog_entry(
     data: AddChangelogEntryRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Add an entry to the changelog. Requires Editor or Admin access to the product."""
-    # Check product access first
     await check_product_editor_access(db, product_id, current_user.id)
-
-    product = await product_ops.get(db, id=product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
+    sub_ctx = await require_product_subscription(db, product_id)
+    product = sub_ctx.product
 
     # Convert request entries to ChangeEntry dataclasses
     changes = [ChangeEntry(category=c.category, description=c.description) for c in data.changes]
@@ -261,7 +253,6 @@ async def delete_all_generated_documents(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> dict:
     """Delete all AI-generated documents for a product.
 
@@ -269,16 +260,8 @@ async def delete_all_generated_documents(
     Repository-imported documents are preserved.
     Requires Editor or Admin access to the product.
     """
-    # Check product access first
     await check_product_editor_access(db, product_id, current_user.id)
-
-    # Verify product exists
-    product = await product_ops.get(db, id=product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
+    await require_product_subscription(db, product_id)
 
     deleted_count = await document_ops.delete_by_product_generated(db, product_id)
     return {"deleted_count": deleted_count}

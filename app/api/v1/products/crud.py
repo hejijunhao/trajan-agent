@@ -9,10 +9,11 @@ from app.api.deps import (
     SubscriptionContext,
     check_product_admin_access,
     check_product_editor_access,
+    check_subscription_active,
     get_current_user,
     get_db_with_rls,
     get_subscription_context,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.domain import product_ops
 from app.domain.organization_operations import organization_ops
@@ -221,9 +222,12 @@ async def create_product(
     current_user: User = Depends(get_current_user),
     sub_ctx: SubscriptionContext = Depends(get_subscription_context),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Create a new product."""
+    # Check subscription is active for user's current org
+    # (product doesn't exist yet, so we use the user's org context)
+    check_subscription_active(sub_ctx)
+
     # Check for duplicate name
     existing = await product_ops.get_by_name(db, user_id=current_user.id, name=data.name)
     if existing:
@@ -258,20 +262,11 @@ async def update_product(
     data: ProductUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Update a product. Requires Editor or Admin access."""
-    # Check product access first
     await check_product_editor_access(db, product_id, current_user.id)
-
-    # Access already validated above - use get() instead of get_by_user()
-    # to allow org admins/editors to update products they didn't create
-    product = await product_ops.get(db, product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
+    sub_ctx = await require_product_subscription(db, product_id)
+    product = sub_ctx.product
 
     updated = await product_ops.update(
         db, db_obj=product, obj_in=data.model_dump(exclude_unset=True)
@@ -292,19 +287,10 @@ async def delete_product(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """Delete a product and all related entities. Requires Admin access."""
-    # Check admin access first
     await check_product_admin_access(db, product_id, current_user.id)
-
-    # Access already validated above - use get() instead of delete() with user_id
-    # to allow org admins to delete products they didn't create
-    product = await product_ops.get(db, product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
+    sub_ctx = await require_product_subscription(db, product_id)
+    product = sub_ctx.product
     await db.delete(product)
     await db.flush()

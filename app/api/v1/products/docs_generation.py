@@ -9,11 +9,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     check_product_editor_access,
     get_current_user,
     get_db_with_rls,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.domain import product_ops
 from app.domain.organization_operations import organization_ops
@@ -36,7 +35,6 @@ async def generate_documentation(
     request: GenerateDocsRequest | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> GenerateDocsResponse:
     """
     Trigger DocumentOrchestrator to analyze and generate documentation.
@@ -51,16 +49,9 @@ async def generate_documentation(
     Runs as a background task with progress updates. Poll GET /products/{id}/docs-status
     for real-time progress.
     """
-    # Check product access first (verifies user has editor access via org membership)
     await check_product_editor_access(db, product_id, current_user.id)
-
-    # Get product (no user_id filter since access is checked above)
-    product = await product_ops.get(db, product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
+    sub_ctx = await require_product_subscription(db, product_id)
+    product = sub_ctx.product
 
     # Check if already running
     if product.docs_generation_status == "generating":
@@ -213,7 +204,6 @@ async def reset_docs_generation(
     product_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> GenerateDocsResponse:
     """
     Force-reset a stuck documentation generation job.
@@ -223,15 +213,9 @@ async def reset_docs_generation(
 
     Requires Editor or Admin access to the product.
     """
-    # Check product access (editor or admin required)
     await check_product_editor_access(db, product_id, current_user.id)
-
-    product = await product_ops.get(db, product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
+    sub_ctx = await require_product_subscription(db, product_id)
+    product = sub_ctx.product
 
     # Only reset if currently in generating state
     if product.docs_generation_status != "generating":

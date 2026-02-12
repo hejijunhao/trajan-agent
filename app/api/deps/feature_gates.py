@@ -1,7 +1,8 @@
 """Subscription-based feature gating dependencies."""
 
 import uuid as uuid_pkg
-from dataclasses import dataclass, fields as dataclass_fields
+from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +12,7 @@ from app.core.database import get_db
 from app.domain.organization_operations import organization_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.organization import Organization
-from app.models.subscription import Subscription
+from app.models.subscription import Subscription, SubscriptionStatus
 
 from .organization import get_current_organization
 
@@ -25,6 +26,7 @@ class SubscriptionContext:
     organization: Organization
     subscription: Subscription
     plan: PlanConfig
+    product: object | None = None  # Product when resolved via product-scoped context
 
 
 async def get_subscription_context(
@@ -113,12 +115,17 @@ async def get_subscription_context_for_product(
         organization=org,
         subscription=subscription,
         plan=plan,
+        product=product,
     )
 
 
 class FeatureGate:
     """
     Dependency class for feature gating based on subscription plan.
+
+    DEPRECATED: Uses get_subscription_context (user's default org), which is wrong
+    for product-scoped endpoints. Not currently used on any v1 endpoint.
+    If re-enabling, create a product-scoped variant that resolves from the product's org.
 
     Usage:
         @router.post("/some-feature")
@@ -155,26 +162,16 @@ class FeatureGate:
         return True
 
 
-async def require_active_subscription(
-    ctx: SubscriptionContext = Depends(get_subscription_context),
-) -> SubscriptionContext:
+def check_subscription_active(ctx: SubscriptionContext) -> None:
+    """Raise 402 if the subscription is pending or has no plan selected.
+
+    Use this to validate a pre-fetched SubscriptionContext (e.g., from
+    get_subscription_context or get_subscription_context_for_product).
     """
-    Require an active (non-pending) subscription to access the app.
-
-    New users have plan_tier="none" and status="pending" until they select
-    and pay for a plan. This dependency blocks access until they do.
-
-    Returns 402 Payment Required with SUBSCRIPTION_REQUIRED code if pending.
-
-    Exempt endpoints (billing, user profile) should NOT use this dependency.
-    """
-    from app.models.subscription import SubscriptionStatus
-
     is_pending = (
         ctx.subscription.plan_tier == "none"
         or ctx.subscription.status == SubscriptionStatus.PENDING.value
     )
-
     if is_pending:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -184,6 +181,42 @@ async def require_active_subscription(
             },
         )
 
+
+async def require_active_subscription(
+    ctx: SubscriptionContext = Depends(get_subscription_context),
+) -> SubscriptionContext:
+    """
+    Require an active (non-pending) subscription to access the app.
+
+    Uses the user's DEFAULT organization. For product-scoped endpoints,
+    use require_product_subscription() instead — it resolves the subscription
+    from the product's organization, not the user's default.
+
+    Returns 402 Payment Required with SUBSCRIPTION_REQUIRED code if pending.
+
+    Exempt endpoints (billing, user profile) should NOT use this dependency.
+    """
+    check_subscription_active(ctx)
+    return ctx
+
+
+async def require_product_subscription(
+    db: AsyncSession,
+    product_id: uuid_pkg.UUID,
+) -> SubscriptionContext:
+    """
+    Require the product's organization to have an active subscription.
+
+    Use this instead of require_active_subscription for product-scoped
+    endpoints. Resolves the subscription from the product's organization,
+    not the user's default organization — fixing incorrect 402s for
+    multi-org users.
+
+    Returns SubscriptionContext for further checks (repo limits, agent, etc.).
+    Raises 402 if subscription is pending or has no plan.
+    """
+    ctx = await get_subscription_context_for_product(db, product_id)
+    check_subscription_active(ctx)
     return ctx
 
 
@@ -193,6 +226,11 @@ async def require_agent_enabled(
 ) -> SubscriptionContext:
     """
     Require that agent features are enabled for the organization.
+
+    DEPRECATED: Uses get_subscription_context (user's default org), which is wrong
+    for product-scoped endpoints. Not currently used on any v1 endpoint.
+    Product-scoped agent checks are done inline (e.g., analysis.py uses
+    subscription_ops.is_agent_enabled with the product's org context).
 
     For free tier: Checks if org is within repo limit.
     For paid tiers: Always enabled.

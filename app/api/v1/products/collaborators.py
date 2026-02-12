@@ -6,13 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     check_product_admin_access,
     get_current_user,
     get_db_with_rls,
-    require_active_subscription,
+    require_product_subscription,
 )
-from app.core.database import get_db
 from app.domain import product_ops
 from app.domain.organization_operations import organization_ops
 from app.domain.product_access_operations import product_access_ops
@@ -108,7 +106,6 @@ async def add_or_update_collaborator(
     data: ProductAccessCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """
     Add a new collaborator or update existing access level.
@@ -116,8 +113,9 @@ async def add_or_update_collaborator(
     Requires admin access to the product.
     Cannot modify org owners/admins (they have automatic access).
     """
-    # Verify admin access
     await check_product_admin_access(db, product_id, current_user.id)
+    sub_ctx = await require_product_subscription(db, product_id)
+    product = sub_ctx.product
 
     # Validate access level
     valid_levels = {level.value for level in ProductAccessLevel}
@@ -125,14 +123,6 @@ async def add_or_update_collaborator(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid access level. Must be one of: {', '.join(valid_levels)}",
-        )
-
-    # Get product to check org
-    product = await product_ops.get(db, product_id)
-    if not product or not product.organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
         )
 
     # Check if target user is org owner/admin (cannot modify their access)
@@ -172,7 +162,6 @@ async def remove_collaborator(
     user_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ):
     """
     Remove a collaborator's explicit access to a product.
@@ -180,8 +169,8 @@ async def remove_collaborator(
     Requires admin access to the product.
     Cannot remove org owners/admins (they have automatic access).
     """
-    # Verify admin access
     await check_product_admin_access(db, product_id, current_user.id)
+    await require_product_subscription(db, product_id)
 
     # Prevent self-removal
     if user_id == current_user.id:

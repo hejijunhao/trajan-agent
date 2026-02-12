@@ -87,8 +87,8 @@ async def test_update_product_not_found(api_client: AsyncClient, test_subscripti
         f"/api/v1/products/{fake_id}",
         json={"name": "Ghost"},
     )
-    # Returns 403 (access check fails before 404) or 404
-    assert resp.status_code in (403, 404)
+    # Product not found → 404 (check_product_editor_access does product lookup first)
+    assert resp.status_code == 404
 
 
 @pytest.mark.anyio

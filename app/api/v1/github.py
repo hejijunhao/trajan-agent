@@ -11,10 +11,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
-    SubscriptionContext,
     get_current_user,
-    get_subscription_context_for_product,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.api.v1.products.analysis import maybe_auto_trigger_analysis
 from app.api.v1.products.docs_generation import maybe_auto_trigger_docs
@@ -246,7 +244,6 @@ async def import_github_repos(
     data: ImportRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> ImportResponse:
     """
     Import selected GitHub repositories into a product.
@@ -261,7 +258,7 @@ async def import_github_repos(
     This ensures collaborators on paid organizations can import repos using
     that org's subscription limits, not their personal org's limits.
     """
-    # Verify product exists and belongs to user
+    # Verify product exists and belongs to user (access check first)
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=data.product_id)
     if not product:
         raise HTTPException(
@@ -270,9 +267,8 @@ async def import_github_repos(
         )
 
     # Get subscription context for the PRODUCT's organization (not user's default)
-    # This fixes the cross-org subscription bug where free-tier collaborators
-    # couldn't import repos to paid organizations
-    sub_ctx = await get_subscription_context_for_product(db, data.product_id)
+    # Also checks subscription is active — raises 402 if pending/none
+    sub_ctx = await require_product_subscription(db, data.product_id)
 
     # Check repo limit before import
     current_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)
@@ -417,7 +413,6 @@ async def refresh_repository_metadata(
     repository_id: uuid_pkg.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> dict[str, str | int | bool | None]:
     """
     Refresh a repository's metadata from GitHub.
@@ -432,6 +427,9 @@ async def refresh_repository_metadata(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found",
         )
+
+    if repo.product_id:
+        await require_product_subscription(db, repo.product_id)
 
     if not repo.github_id:
         raise HTTPException(
@@ -516,7 +514,6 @@ async def bulk_refresh_github_repos(
     data: BulkRefreshRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> BulkRefreshResponse:
     """
     Refresh metadata for all GitHub-linked repositories in a product.
@@ -524,13 +521,15 @@ async def bulk_refresh_github_repos(
     Updates stars, forks, description, and default branch for each repo.
     Continues processing even if some repos fail.
     """
-    # Verify product exists and belongs to user
+    # Verify product exists and belongs to user (access check first)
     product = await product_ops.get_by_user(db, user_id=current_user.id, id=data.product_id)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
         )
+
+    await require_product_subscription(db, data.product_id)
 
     token = await get_github_token(db, current_user.id)
     github = GitHubService(token)

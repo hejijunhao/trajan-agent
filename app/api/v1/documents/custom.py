@@ -12,6 +12,7 @@ import logging
 import uuid as uuid_pkg
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,8 +21,7 @@ from app.api.deps import (
     SubscriptionContext,
     get_current_user,
     get_db_with_rls,
-    get_subscription_context,
-    require_active_subscription,
+    require_product_subscription,
 )
 from app.domain import preferences_ops, product_ops, repository_ops
 from app.models.custom_doc_job import CustomDocJob
@@ -47,65 +47,58 @@ RATE_LIMITS = {
 }
 
 
-class RateLimiter:
+async def check_custom_doc_rate_limit(
+    ctx: SubscriptionContext,
+    current_user: User,
+    db: AsyncSession,
+) -> None:
+    """Check custom doc generation rate limit using the product's org tier.
+
+    Uses the subscription context from the product's organization (not the user's
+    default org) to determine the correct rate limit tier.
     """
-    Rate limiter for custom doc generation.
+    tier = ctx.subscription.plan_tier
+    limits = RATE_LIMITS.get(tier, RATE_LIMITS["none"])
 
-    Limits are based on subscription tier.
-    """
+    window_start = datetime.now(UTC) - timedelta(hours=limits["window_hours"])
 
-    async def __call__(
-        self,
-        ctx: SubscriptionContext = Depends(get_subscription_context),
-        current_user: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db_with_rls),
-    ) -> None:
-        """Check if user is within rate limits."""
-        tier = ctx.subscription.plan_tier
-        limits = RATE_LIMITS.get(tier, RATE_LIMITS["none"])
+    # Count recent jobs for this user
+    result = await db.execute(
+        select(func.count())
+        .select_from(CustomDocJob)
+        .where(CustomDocJob.user_id == current_user.id)  # type: ignore[arg-type]
+        .where(CustomDocJob.created_at >= window_start)  # type: ignore[arg-type]
+    )
+    count = result.scalar() or 0
 
-        window_start = datetime.now(UTC) - timedelta(hours=limits["window_hours"])
-
-        # Count recent jobs for this user
-        result = await db.execute(
-            select(func.count())
-            .select_from(CustomDocJob)
+    if count >= limits["max_requests"]:
+        # Get oldest job in window to calculate reset time
+        oldest_result = await db.execute(
+            select(func.min(CustomDocJob.created_at))
             .where(CustomDocJob.user_id == current_user.id)  # type: ignore[arg-type]
             .where(CustomDocJob.created_at >= window_start)  # type: ignore[arg-type]
         )
-        count = result.scalar() or 0
+        oldest_job_time = oldest_result.scalar()
 
-        if count >= limits["max_requests"]:
-            # Get oldest job in window to calculate reset time
-            oldest_result = await db.execute(
-                select(func.min(CustomDocJob.created_at))
-                .where(CustomDocJob.user_id == current_user.id)  # type: ignore[arg-type]
-                .where(CustomDocJob.created_at >= window_start)  # type: ignore[arg-type]
-            )
-            oldest_job_time = oldest_result.scalar()
+        # Calculate approximate reset time (when oldest job falls out of window)
+        if oldest_job_time:
+            reset_at = oldest_job_time + timedelta(hours=limits["window_hours"])
+        else:
+            reset_at = datetime.now(UTC) + timedelta(hours=limits["window_hours"])
 
-            # Calculate approximate reset time (when oldest job falls out of window)
-            if oldest_job_time:
-                reset_at = oldest_job_time + timedelta(hours=limits["window_hours"])
-            else:
-                reset_at = datetime.now(UTC) + timedelta(hours=limits["window_hours"])
-
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "code": "RATE_LIMIT_EXCEEDED",
-                    "message": "Generation limit reached",
-                    "current_plan": tier,
-                    "plan_display_name": ctx.plan.display_name,
-                    "limit": limits["max_requests"],
-                    "used": count,
-                    "window_hours": limits["window_hours"],
-                    "reset_at": reset_at.isoformat(),
-                },
-            )
-
-
-rate_limiter = RateLimiter()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": "Generation limit reached",
+                "current_plan": tier,
+                "plan_display_name": ctx.plan.display_name,
+                "limit": limits["max_requests"],
+                "used": count,
+                "window_hours": limits["window_hours"],
+                "reset_at": reset_at.isoformat(),
+            },
+        )
 
 
 async def generate_custom_document(
@@ -114,8 +107,6 @@ async def generate_custom_document(
     background: bool = Query(False, description="Run generation in background with progress"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _rate_limit: None = Depends(rate_limiter),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> CustomDocResponseSchema:
     """
     Generate a custom document based on user request.
@@ -133,13 +124,11 @@ async def generate_custom_document(
     Returns:
         CustomDocResponseSchema with generated content or job_id
     """
-    # Get the product (RLS enforces access)
-    product = await product_ops.get(db, id=product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
+    sub_ctx = await require_product_subscription(db, product_id)
+    product = sub_ctx.product
+
+    # Check rate limit using the product's org tier (not user's default org)
+    await check_custom_doc_rate_limit(sub_ctx, current_user, db)
 
     # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
@@ -339,7 +328,6 @@ async def cancel_custom_doc_job(
     job_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> dict[str, bool]:
     """
     Cancel a running custom document generation job.
@@ -355,6 +343,8 @@ async def cancel_custom_doc_job(
     Returns:
         {"cancelled": True} if job was cancelled, {"cancelled": False} otherwise
     """
+    await require_product_subscription(db, product_id)
+
     job = await job_store.get_job(db, job_id)
 
     if not job:
@@ -379,8 +369,6 @@ async def generate_assessment(
     assessment_type: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_with_rls),
-    _rate_limit: None = Depends(rate_limiter),
-    _sub: SubscriptionContext = Depends(require_active_subscription),
 ) -> dict[str, Any]:
     """
     Generate a critical assessment of the codebase.
@@ -398,6 +386,11 @@ async def generate_assessment(
     Returns:
         The saved assessment document
     """
+    sub_ctx = await require_product_subscription(db, product_id)
+
+    # Check rate limit using the product's org tier (not user's default org)
+    await check_custom_doc_rate_limit(sub_ctx, current_user, db)
+
     # Validate assessment type
     valid_types = ["code-quality", "security", "performance"]
     if assessment_type not in valid_types:
@@ -406,13 +399,7 @@ async def generate_assessment(
             detail=f"Invalid assessment type. Must be one of: {', '.join(valid_types)}",
         )
 
-    # Get the product (RLS enforces access)
-    product = await product_ops.get(db, id=product_id)
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
-        )
+    product = sub_ctx.product
 
     # Get user's GitHub token (decrypted)
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)

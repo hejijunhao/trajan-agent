@@ -13,10 +13,12 @@ from .auth import (
 from .feature_gates import (
     FeatureGate,
     SubscriptionContext,
+    check_subscription_active,
     get_subscription_context,
     get_subscription_context_for_product,
     require_active_subscription,
     require_agent_enabled,
+    require_product_subscription,
 )
 from .organization import (
     get_current_organization,
@@ -51,11 +53,13 @@ __all__ = [
     "require_system_admin",
     # Feature gates
     "SubscriptionContext",
+    "check_subscription_active",
     "get_subscription_context",
     "get_subscription_context_for_product",
     "FeatureGate",
     "require_active_subscription",
     "require_agent_enabled",
+    "require_product_subscription",
     # Product access
     "ProductAccessContext",
     "get_product_access",
