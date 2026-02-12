@@ -19,6 +19,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.config.settings import settings
 
@@ -56,9 +57,7 @@ def pytest_configure(config: pytest.Config) -> None:
 TEST_ENGINE = create_async_engine(
     settings.database_url_direct,
     echo=False,
-    pool_pre_ping=True,
-    pool_size=3,
-    max_overflow=2,
+    poolclass=NullPool,
     connect_args={
         "command_timeout": 30,
     },
@@ -209,13 +208,15 @@ async def api_client(db_session: AsyncSession, test_user):
     # RLS context. For tests, we skip RLS and just yield the session.
     from app.api.deps.auth import get_db_with_rls
 
-    async def override_db_rls(**_kwargs):
+    async def override_db_rls():
         yield db_session
 
     app.dependency_overrides[get_db_with_rls] = override_db_rls
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", follow_redirects=True
+    ) as client:
         yield client
 
     app.dependency_overrides.clear()

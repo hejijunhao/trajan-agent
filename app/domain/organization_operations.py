@@ -103,7 +103,11 @@ class OrganizationOperations:
     ) -> list[Organization]:
         """Get all organizations (admin only)."""
         statement = (
-            select(Organization).offset(skip).limit(limit).order_by(Organization.created_at.desc())
+            select(Organization)
+            .options(selectinload(Organization.owner))  # type: ignore[arg-type]
+            .offset(skip)
+            .limit(limit)
+            .order_by(Organization.created_at.desc())
         )
         result = await db.execute(statement)
         return list(result.scalars().all())
