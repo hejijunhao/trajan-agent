@@ -490,31 +490,32 @@ async def downgrade_subscription(
     current_repo_count = await repository_ops.count_by_org(db, request.organization_id)
 
     # Validate repos_to_keep if reduction is needed
+    # Validate repos_to_keep if reduction is needed
+    needs_repo_deletion = current_repo_count > target_plan.base_repo_limit
     deleted_count = 0
-    if current_repo_count > target_plan.base_repo_limit:
-        # Must specify exactly target_plan.base_repo_limit repos to keep
-        if len(request.repos_to_keep) != target_plan.base_repo_limit:
-            raise HTTPException(
-                400,
-                f"Must specify exactly {target_plan.base_repo_limit} repositories to keep. "
-                f"Got {len(request.repos_to_keep)}.",
-            )
-
-        # Delete repos not in the keep list
-        deleted_count = await repository_ops.bulk_delete_except(
-            db, request.organization_id, request.repos_to_keep
+    if needs_repo_deletion and len(request.repos_to_keep) != target_plan.base_repo_limit:
+        raise HTTPException(
+            400,
+            f"Must specify exactly {target_plan.base_repo_limit} repositories to keep. "
+            f"Got {len(request.repos_to_keep)}.",
         )
 
-    # Change Stripe subscription plan (handles proration)
+    # Change Stripe subscription plan FIRST (external side effect before local mutations).
+    # If Stripe fails, no local data has been changed — nothing to roll back.
     try:
         stripe_service.change_subscription_plan(
             subscription.stripe_subscription_id, request.target_plan_tier
         )
     except Exception as e:
-        # If Stripe fails, we need to rollback the repo deletions
-        await db.rollback()
         logger.error(f"Stripe plan change failed: {e}")
         raise HTTPException(500, "Failed to update subscription in Stripe") from None
+
+    # Delete repos AFTER Stripe succeeds. If deletion fails, the user is on the
+    # correct plan and deletion can be retried.
+    if needs_repo_deletion:
+        deleted_count = await repository_ops.bulk_delete_except(
+            db, request.organization_id, request.repos_to_keep
+        )
 
     # Update local subscription record
     previous_tier = subscription.plan_tier

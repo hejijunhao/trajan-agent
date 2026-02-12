@@ -41,10 +41,10 @@ logger = logging.getLogger(__name__)
 
 # Rate limit configuration by plan tier
 RATE_LIMITS = {
-    "free": {"max_requests": 5, "window_hours": 24},
-    "starter": {"max_requests": 25, "window_hours": 24},
+    "none": {"max_requests": 5, "window_hours": 24},
+    "indie": {"max_requests": 25, "window_hours": 24},
     "pro": {"max_requests": 100, "window_hours": 24},
-    "enterprise": {"max_requests": 1000, "window_hours": 24},
+    "scale": {"max_requests": 1000, "window_hours": 24},
 }
 
 
@@ -63,7 +63,7 @@ class RateLimiter:
     ) -> None:
         """Check if user is within rate limits."""
         tier = ctx.subscription.plan_tier
-        limits = RATE_LIMITS.get(tier, RATE_LIMITS["free"])
+        limits = RATE_LIMITS.get(tier, RATE_LIMITS["none"])
 
         window_start = datetime.now(UTC) - timedelta(hours=limits["window_hours"])
 

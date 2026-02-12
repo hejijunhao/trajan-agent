@@ -7,9 +7,13 @@ Generate a new key:
     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 """
 
+import logging
+
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class TokenEncryption:
@@ -35,8 +39,12 @@ class TokenEncryption:
                 self._cipher = Fernet(key.encode())
                 self._key_configured = True
             except (ValueError, TypeError):
-                # Invalid key format - log warning in production
-                pass
+                logger.warning("token_encryption_key has invalid format — encryption disabled")
+        elif not settings.debug:
+            logger.warning(
+                "SECURITY: token_encryption_key is not configured. "
+                "Sensitive tokens (GitHub, etc.) will be stored in plaintext."
+            )
 
     @property
     def is_enabled(self) -> bool:

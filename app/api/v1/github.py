@@ -278,6 +278,10 @@ async def import_github_repos(
     imported: list[ImportedRepo] = []
     skipped: list[SkippedRepo] = []
 
+    # Fetch user repos once upfront to avoid N+1 API calls
+    user_repos = await github.get_user_repos(per_page=100, visibility="all")
+    repos_by_id = {r.github_id: r for r in user_repos.repos}
+
     for github_id in data.github_ids:
         # Check if already imported to this specific product
         existing = await repository_ops.get_by_github_id(db, data.product_id, github_id)
@@ -289,10 +293,7 @@ async def import_github_repos(
 
         # Fetch fresh repo details from GitHub
         try:
-            # We need owner/repo from the github_id, so we'll search in the user's repos
-            # For efficiency, we could cache the list, but for now re-fetch per repo
-            user_repos = await github.get_user_repos(per_page=100, visibility="all")
-            repo_data = next((r for r in user_repos.repos if r.github_id == github_id), None)
+            repo_data = repos_by_id.get(github_id)
 
             if not repo_data:
                 # Try fetching with more pages if not found

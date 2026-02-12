@@ -1,4 +1,9 @@
+import logging
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -87,6 +92,31 @@ class Settings(BaseSettings):
     def postmark_enabled(self) -> bool:
         """Check if Postmark is configured (has API key)."""
         return bool(self.postmark_api_key)
+
+    @model_validator(mode="after")
+    def validate_required_vars(self) -> "Settings":
+        """Validate critical environment variables are set in production."""
+        if self.debug:
+            return self
+
+        required = {
+            "supabase_url": self.supabase_url,
+            "supabase_jwks_url": self.supabase_jwks_url,
+            "supabase_service_role_key": self.supabase_service_role_key,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ValueError(
+                f"Missing required environment variables for production: {', '.join(missing)}. "
+                f"Set debug=True to bypass this check in development."
+            )
+
+        if not self.token_encryption_key:
+            logger.warning(
+                "token_encryption_key is not set — sensitive tokens will be stored in plaintext"
+            )
+
+        return self
 
 
 settings = Settings()

@@ -580,7 +580,7 @@ class CustomDocGenerator:
         """Save generated content as a Document entity."""
         doc = Document(
             product_id=product.id,
-            user_id=str(user_id),
+            created_by_user_id=str(user_id),
             title=title,
             content=content,
             type=doc_type,

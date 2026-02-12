@@ -6,6 +6,8 @@ This module provides:
 - RLS-aware database session dependency
 """
 
+import logging
+import time
 import uuid as uuid_pkg
 from collections.abc import AsyncGenerator
 from typing import Annotated, Any
@@ -24,23 +26,36 @@ from app.core.rls import set_rls_user_context
 from app.domain.organization_operations import organization_ops
 from app.models.user import User
 
+logger = logging.getLogger(__name__)
+
 security = HTTPBearer(auto_error=False)
 
-# Cache for JWKS to avoid fetching on every request
+# Cache for JWKS with TTL to handle key rotation
 _jwks_cache: dict[str, Any] = {}
+_jwks_cache_timestamp: float = 0.0
+_JWKS_CACHE_TTL_SECONDS: float = 3600.0  # 1 hour
 
 
-async def get_jwks() -> dict[str, Any]:
-    """Fetch and cache JWKS from Supabase."""
-    if _jwks_cache:
-        return _jwks_cache
-
+async def _fetch_jwks() -> dict[str, Any]:
+    """Fetch JWKS from Supabase and update the cache."""
+    global _jwks_cache_timestamp
     async with httpx.AsyncClient() as client:
         response = await client.get(settings.supabase_jwks_url)
         response.raise_for_status()
         jwks = response.json()
+        _jwks_cache.clear()
         _jwks_cache.update(jwks)
+        _jwks_cache_timestamp = time.monotonic()
         return jwks
+
+
+async def get_jwks(force_refresh: bool = False) -> dict[str, Any]:
+    """Fetch and cache JWKS from Supabase with a 1-hour TTL."""
+    cache_age = time.monotonic() - _jwks_cache_timestamp
+    if _jwks_cache and not force_refresh and cache_age < _JWKS_CACHE_TTL_SECONDS:
+        return _jwks_cache
+
+    return await _fetch_jwks()
 
 
 def get_signing_key(jwks: dict[str, Any], token: str) -> ECKey:
@@ -89,7 +104,28 @@ async def get_current_user(
                 detail="Invalid authentication token",
             )
         user_id = uuid_pkg.UUID(user_id_str)
-    except (JWTError, ValueError, httpx.HTTPError):
+    except (JWTError, ValueError) as first_error:
+        # Key rotation may have occurred — force a JWKS refresh and retry once
+        try:
+            logger.info("JWT validation failed with cached JWKS, forcing refresh")
+            jwks = await get_jwks(force_refresh=True)
+            signing_key = get_signing_key(jwks, token)
+            payload = jwt.decode(
+                token, signing_key, algorithms=["ES256"], audience="authenticated"
+            )
+            user_id_str = payload.get("sub")
+            if user_id_str is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication token",
+                ) from None
+            user_id = uuid_pkg.UUID(user_id_str)
+        except (JWTError, ValueError, httpx.HTTPError):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+            ) from first_error
+    except httpx.HTTPError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
