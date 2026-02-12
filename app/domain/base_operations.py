@@ -71,10 +71,14 @@ class BaseOperations(Generic[ModelType]):
         db_obj: ModelType,
         obj_in: dict,
     ) -> ModelType:
-        """Update an existing record."""
+        """Update an existing record.
+
+        All keys in obj_in are applied, including None values.
+        Callers should use model_dump(exclude_unset=True) to omit
+        fields that were not explicitly provided.
+        """
         for field, value in obj_in.items():
-            if value is not None:
-                setattr(db_obj, field, value)
+            setattr(db_obj, field, value)
         db.add(db_obj)
         await db.flush()
         await db.refresh(db_obj)

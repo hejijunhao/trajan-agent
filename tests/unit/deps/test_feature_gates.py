@@ -44,13 +44,10 @@ class TestFeatureGate:
         assert exc_info.value.status_code == 403
         assert "team_collaboration" in str(exc_info.value.detail)
 
-    @pytest.mark.asyncio
-    async def test_raises_403_for_unknown_feature(self):
-        ctx = _make_ctx(tier="scale")
-        gate = FeatureGate("nonexistent_feature")
-        with pytest.raises(HTTPException) as exc_info:
-            await gate(ctx)
-        assert exc_info.value.status_code == 403
+    def test_raises_value_error_for_unknown_feature(self):
+        """FeatureGate validates feature names at init time."""
+        with pytest.raises(ValueError, match="Unknown feature"):
+            FeatureGate("nonexistent_feature")
 
 
 class TestRequireActiveSubscription:

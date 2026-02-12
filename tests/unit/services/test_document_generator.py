@@ -13,12 +13,13 @@ from unittest.mock import MagicMock
 
 import anthropic
 
-from app.services.docs.document_generator import (
+from app.services.docs.claude_helpers import (
     COMPLEX_DOC_TYPES,
     MODEL_OPUS,
     MODEL_SONNET,
-    DocumentGenerator,
+    select_model,
 )
+from app.services.docs.document_generator import DocumentGenerator
 from app.services.docs.types import (
     BatchGeneratorResult,
     CodebaseContext,
@@ -86,29 +87,25 @@ def make_planned_document(
 class TestModelSelection:
     """Tests for model selection based on document type."""
 
-    def setup_method(self) -> None:
-        """Create generator instance for testing."""
-        self.generator = DocumentGenerator.__new__(DocumentGenerator)
-
     def test_architecture_uses_opus(self) -> None:
         """Architecture docs should use Opus for deeper reasoning."""
-        assert self.generator._select_model("architecture") == MODEL_OPUS
+        assert select_model("architecture") == MODEL_OPUS
 
     def test_concept_uses_opus(self) -> None:
         """Concept docs should use Opus for deeper reasoning."""
-        assert self.generator._select_model("concept") == MODEL_OPUS
+        assert select_model("concept") == MODEL_OPUS
 
     def test_overview_uses_sonnet(self) -> None:
         """Overview docs should use Sonnet."""
-        assert self.generator._select_model("overview") == MODEL_SONNET
+        assert select_model("overview") == MODEL_SONNET
 
     def test_guide_uses_sonnet(self) -> None:
         """Guide docs should use Sonnet."""
-        assert self.generator._select_model("guide") == MODEL_SONNET
+        assert select_model("guide") == MODEL_SONNET
 
     def test_reference_uses_sonnet(self) -> None:
         """Reference docs should use Sonnet."""
-        assert self.generator._select_model("reference") == MODEL_SONNET
+        assert select_model("reference") == MODEL_SONNET
 
     def test_complex_doc_types_constant(self) -> None:
         """Complex doc types constant should have expected values."""

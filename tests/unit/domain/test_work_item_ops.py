@@ -137,14 +137,15 @@ class TestWorkItemUpdate:
         assert result.status == "done"
 
     @pytest.mark.asyncio
-    async def test_update_skips_none_values(self):
+    async def test_update_applies_none_values(self):
+        """update() applies all keys including None — callers should exclude_unset."""
         item = make_mock_work_item(title="original")
         self.db.add = MagicMock()
         self.db.flush = AsyncMock()
         self.db.refresh = AsyncMock()
 
         await self.ops.update(self.db, item, {"title": None, "status": "done"})
-        assert item.title == "original"
+        assert item.title is None
         assert item.status == "done"
 
 

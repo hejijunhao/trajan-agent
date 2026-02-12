@@ -49,14 +49,11 @@ class PreferencesOperations:
         Encrypts github_token before storing if encryption is enabled.
         """
         for field, value in obj_in.items():
-            if value is not None and hasattr(prefs, field):
+            if hasattr(prefs, field):
                 # Encrypt GitHub token before storing
                 if field == "github_token" and value:
                     value = token_encryption.encrypt(value)
                 setattr(prefs, field, value)
-            elif value is None and field == "github_token":
-                # Allow explicit removal of token
-                setattr(prefs, field, None)
         db.add(prefs)
         await db.flush()
         await db.refresh(prefs)

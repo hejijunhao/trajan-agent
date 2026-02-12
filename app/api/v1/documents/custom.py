@@ -12,7 +12,6 @@ import logging
 import uuid as uuid_pkg
 from datetime import UTC, datetime, timedelta
 from typing import Any
-
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -178,13 +177,14 @@ async def generate_custom_document(
             user_id=str(current_user.id),
         )
 
-        # Run generation in background task
+        # Run generation in background task — pass primitive IDs only
+        # to avoid stale ORM objects after the request session closes
         asyncio.create_task(
             _run_background_generation(
                 job_id=job_id,
                 custom_request=custom_request,
-                product=product,
-                repositories=repositories,
+                product_id=product_id,
+                repository_ids=[r.id for r in repositories],
                 user_id=current_user.id,
                 github_token=github_token,
             )
@@ -224,16 +224,16 @@ async def generate_custom_document(
 async def _run_background_generation(
     job_id: str,
     custom_request: CustomDocRequest,
-    product: Any,
-    repositories: list[Any],
-    user_id: Any,
+    product_id: uuid_pkg.UUID,
+    repository_ids: list[uuid_pkg.UUID],
+    user_id: uuid_pkg.UUID,
     github_token: str,
 ) -> None:
     """
     Run custom doc generation in background with progress updates.
 
-    This function is run as an asyncio task and updates the job store
-    with progress as it runs.
+    Accepts only primitive IDs (not ORM objects) to avoid DetachedInstanceError
+    from stale objects bound to the request's closed session.
     """
     from app.core.database import async_session_maker
 
@@ -246,8 +246,18 @@ async def _run_background_generation(
             return await job_store.is_cancelled(db, job_id)
 
     try:
-        # Create a new database session for the background task
+        # Create a new database session and re-fetch ORM objects
         async with async_session_maker() as db:
+            product = await product_ops.get(db, product_id)
+            if not product:
+                raise ValueError(f"Product {product_id} not found")
+
+            repositories = [
+                repo
+                for rid in repository_ids
+                if (repo := await repository_ops.get(db, rid)) is not None
+            ]
+
             github_service = GitHubService(github_token)
             generator = CustomDocGenerator(db, github_service)
 

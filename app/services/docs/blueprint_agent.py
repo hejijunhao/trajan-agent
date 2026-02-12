@@ -6,12 +6,10 @@ Analyzes the project complexity to determine what level of
 documentation is needed.
 """
 
-import asyncio
 import logging
 from typing import Any, cast
 
 import anthropic
-from anthropic import APIError, RateLimitError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -19,17 +17,11 @@ from app.domain.document_operations import document_ops
 from app.domain.repository_operations import repository_ops
 from app.models.document import Document
 from app.models.product import Product
+from app.services.docs.claude_helpers import MODEL_SONNET, call_with_retry
 from app.services.docs.types import BlueprintPlan, BlueprintResult, DocumentSpec
 from app.services.github import GitHubService, RepoContext
 
 logger = logging.getLogger(__name__)
-
-# Model for blueprint content generation
-BLUEPRINT_MODEL = "claude-sonnet-4-20250514"
-
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAYS = [2, 4, 8]
 
 
 class BlueprintAgent:
@@ -192,33 +184,17 @@ class BlueprintAgent:
         prompt = self._build_prompt(spec, repo_contexts)
         tool_schema = self._build_tool_schema(spec)
 
-        last_error: Exception | None = None
+        async def _do_call() -> str:
+            response = await self.client.messages.create(
+                model=MODEL_SONNET,
+                max_tokens=8000,
+                tools=cast(Any, [tool_schema]),
+                tool_choice=cast(Any, {"type": "tool", "name": "save_document"}),
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return self._parse_response(response, spec)
 
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = await self.client.messages.create(
-                    model=BLUEPRINT_MODEL,
-                    max_tokens=8000,
-                    tools=cast(Any, [tool_schema]),
-                    tool_choice=cast(Any, {"type": "tool", "name": "save_document"}),
-                    messages=[{"role": "user", "content": prompt}],
-                )
-
-                return self._parse_response(response, spec)
-
-            except (RateLimitError, APIError) as e:
-                last_error = e
-                if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAYS[attempt]
-                    logger.warning(
-                        f"Blueprint generation error (attempt {attempt + 1}/{MAX_RETRIES}), "
-                        f"retrying in {delay}s: {e}"
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"Blueprint generation failed after {MAX_RETRIES} attempts: {e}")
-
-        raise last_error or RuntimeError("Blueprint generation failed after retries")
+        return await call_with_retry(_do_call, operation_name="Blueprint generation")
 
     def _build_prompt(
         self,

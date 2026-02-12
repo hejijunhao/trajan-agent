@@ -145,7 +145,8 @@ class TestBaseUpdate:
         assert record.status == "reviewed"
 
     @pytest.mark.asyncio
-    async def test_update_skips_none_values(self):
+    async def test_update_applies_none_values(self):
+        """update() applies all keys including None — callers should exclude_unset."""
         record = MagicMock()
         record.status = "new"
         self.db.add = MagicMock()
@@ -153,7 +154,7 @@ class TestBaseUpdate:
         self.db.refresh = AsyncMock()
 
         await self.ops.update(self.db, record, {"status": None})
-        assert record.status == "new"
+        assert record.status is None
 
 
 class TestBaseDelete:

@@ -11,7 +11,6 @@ Key capabilities:
 - Minimal updates — only change what's actually stale
 """
 
-import asyncio
 import logging
 import re
 import uuid as uuid_pkg
@@ -19,25 +18,18 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 import anthropic
-from anthropic import APIError, RateLimitError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.domain.document_operations import document_ops
 from app.models.document import Document
 from app.models.repository import Repository
+from app.services.docs.claude_helpers import MODEL_SONNET, call_with_retry
 from app.services.docs.codebase_analyzer import CodebaseAnalyzer
 from app.services.docs.types import CodebaseContext, FileContent
 from app.services.github import GitHubService
 
 logger = logging.getLogger(__name__)
-
-# Model configuration
-MODEL_SONNET = "claude-sonnet-4-20250514"
-
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAYS = [2, 4, 8]
 
 # Token limits
 MAX_TOKENS_REFRESH = 8000
@@ -330,33 +322,17 @@ class DocumentRefresher:
         prompt = self._build_prompt(document, relevant_files, context)
         tool_schema = self._build_tool_schema()
 
-        last_error: Exception | None = None
+        async def _do_call() -> dict[str, Any]:
+            response = await self.client.messages.create(
+                model=MODEL_SONNET,
+                max_tokens=MAX_TOKENS_REFRESH,
+                tools=cast(Any, [tool_schema]),
+                tool_choice=cast(Any, {"type": "tool", "name": "save_refresh_result"}),
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return self._parse_response(response)
 
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = await self.client.messages.create(
-                    model=MODEL_SONNET,
-                    max_tokens=MAX_TOKENS_REFRESH,
-                    tools=cast(Any, [tool_schema]),
-                    tool_choice=cast(Any, {"type": "tool", "name": "save_refresh_result"}),
-                    messages=[{"role": "user", "content": prompt}],
-                )
-
-                return self._parse_response(response)
-
-            except (RateLimitError, APIError) as e:
-                last_error = e
-                if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAYS[attempt]
-                    logger.warning(
-                        f"Refresh error (attempt {attempt + 1}/{MAX_RETRIES}), "
-                        f"retrying in {delay}s: {e}"
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"Document refresh failed after {MAX_RETRIES} attempts: {e}")
-
-        raise last_error or RuntimeError("Document refresh failed after retries")
+        return await call_with_retry(_do_call, operation_name="Document refresh")
 
     def _build_prompt(
         self,

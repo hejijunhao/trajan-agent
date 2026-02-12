@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -58,7 +59,7 @@ def integration_tracker() -> ResourceTracker:
     return ResourceTracker()
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 async def integration_db():
     """Real DB session for cleanup operations.
 
@@ -69,7 +70,7 @@ async def integration_db():
         yield session
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 async def integration_client():
     """HTTP client that hits the REAL running API (localhost:8000).
 
@@ -82,7 +83,7 @@ async def integration_client():
         yield client
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 async def test_user_primary(integration_tracker: ResourceTracker):
     """Primary test user — created once per session via Supabase Admin API.
 
@@ -93,7 +94,7 @@ async def test_user_primary(integration_tracker: ResourceTracker):
     return user
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 async def test_user_registered(
     integration_client: AsyncClient,
     test_user_primary,
@@ -140,7 +141,7 @@ def _mark_full_stack(request):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="session", autouse=True)
 async def cleanup_on_exit(integration_tracker, integration_db):
     """Guarantee cleanup runs even on test failure.
 

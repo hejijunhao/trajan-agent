@@ -1,7 +1,7 @@
 """Subscription-based feature gating dependencies."""
 
 import uuid as uuid_pkg
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dataclass_fields
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,8 @@ from app.models.organization import Organization
 from app.models.subscription import Subscription
 
 from .organization import get_current_organization
+
+_PLAN_CONFIG_FIELDS = frozenset(f.name for f in dataclass_fields(PlanConfig))
 
 
 @dataclass
@@ -129,6 +131,11 @@ class FeatureGate:
     """
 
     def __init__(self, feature: str):
+        if feature not in _PLAN_CONFIG_FIELDS:
+            raise ValueError(
+                f"Unknown feature '{feature}' for FeatureGate. "
+                f"Valid features: {sorted(_PLAN_CONFIG_FIELDS)}"
+            )
         self.feature = feature
 
     async def __call__(

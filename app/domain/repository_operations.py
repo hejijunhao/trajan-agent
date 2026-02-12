@@ -174,8 +174,7 @@ class RepositoryOperations:
     ) -> Repository:
         """Update an existing repository."""
         for field, value in obj_in.items():
-            if value is not None:
-                setattr(db_obj, field, value)
+            setattr(db_obj, field, value)
         db.add(db_obj)
         await db.flush()
         await db.refresh(db_obj)

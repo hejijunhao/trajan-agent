@@ -81,7 +81,7 @@ class UserOperations:
     ) -> User:
         """Update a user's profile fields."""
         for field, value in obj_in.items():
-            if value is not None and hasattr(user, field):
+            if hasattr(user, field):
                 setattr(user, field, value)
         db.add(user)
         await db.flush()

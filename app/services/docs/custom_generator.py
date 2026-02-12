@@ -13,7 +13,6 @@ Key features:
 5. Progress reporting for background jobs via job store
 """
 
-import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -21,7 +20,6 @@ from typing import Any, cast
 from uuid import UUID
 
 import anthropic
-from anthropic import APIError, RateLimitError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -32,6 +30,11 @@ from app.services.docs.assessment_prompts import (
     ASSESSMENT_SUBSECTIONS,
     ASSESSMENT_TITLES,
     build_assessment_prompt,
+)
+from app.services.docs.claude_helpers import (
+    MODEL_OPUS,
+    MODEL_SONNET,
+    call_with_retry,
 )
 from app.services.docs.codebase_analyzer import CodebaseAnalyzer
 from app.services.docs.content_validator import ContentValidator
@@ -53,16 +56,8 @@ from app.services.github import GitHubService
 
 logger = logging.getLogger(__name__)
 
-# Model selection
-MODEL_OPUS = "claude-opus-4-20250514"
-MODEL_SONNET = "claude-sonnet-4-20250514"
-
-# Document types that benefit from Opus's deeper reasoning
+# Document types that benefit from Opus's deeper reasoning (custom-specific)
 COMPLEX_DOC_TYPES = {"technical", "wiki"}
-
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAYS = [2, 4, 8]
 
 # Generation limits
 MAX_TOKENS_GENERATION = 8000
@@ -593,12 +588,7 @@ class CustomDocGenerator:
         return doc
 
     def _select_model(self, doc_type: str) -> str:
-        """
-        Select the appropriate model based on document complexity.
-
-        Opus 4.5 for technical and wiki docs (need deeper reasoning).
-        Sonnet for overview, guide, and how-to docs (more straightforward).
-        """
+        """Select model — Opus for technical/wiki, Sonnet otherwise."""
         if doc_type in COMPLEX_DOC_TYPES:
             return MODEL_OPUS
         return MODEL_SONNET
@@ -618,33 +608,17 @@ class CustomDocGenerator:
         prompt = build_custom_prompt(request, context)
         tool_schema = self._build_tool_schema()
 
-        last_error: Exception | None = None
+        async def _do_call() -> tuple[str, str]:
+            response = await self.client.messages.create(
+                model=model,
+                max_tokens=MAX_TOKENS_GENERATION,
+                tools=cast(Any, [tool_schema]),
+                tool_choice=cast(Any, {"type": "tool", "name": "save_document"}),
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return self._parse_response(response)
 
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = await self.client.messages.create(
-                    model=model,
-                    max_tokens=MAX_TOKENS_GENERATION,
-                    tools=cast(Any, [tool_schema]),
-                    tool_choice=cast(Any, {"type": "tool", "name": "save_document"}),
-                    messages=[{"role": "user", "content": prompt}],
-                )
-
-                return self._parse_response(response)
-
-            except (RateLimitError, APIError) as e:
-                last_error = e
-                if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAYS[attempt]
-                    logger.warning(
-                        f"Generation error (attempt {attempt + 1}/{MAX_RETRIES}), "
-                        f"retrying in {delay}s: {e}"
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"Custom doc generation failed after {MAX_RETRIES} attempts: {e}")
-
-        raise last_error or RuntimeError("Custom doc generation failed after retries")
+        return await call_with_retry(_do_call, operation_name="Custom doc generation")
 
     def _build_tool_schema(self) -> dict[str, Any]:
         """Build the tool schema for document generation."""

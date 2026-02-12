@@ -12,15 +12,14 @@ Quality and thoughtfulness matter more than speed. The planner should:
 4. Create a prioritized plan of documents to generate
 """
 
-import asyncio
 import logging
 from typing import Any, cast
 
 import anthropic
-from anthropic import APIError, RateLimitError
 
 from app.config import settings
 from app.models.document import Document
+from app.services.docs.claude_helpers import MODEL_OPUS, call_with_retry
 from app.services.docs.section_config import (
     VALID_SECTIONS,
     VALID_SUBSECTIONS,
@@ -34,13 +33,6 @@ from app.services.docs.types import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Use Opus 4.5 for high-quality planning decisions
-PLANNER_MODEL = "claude-opus-4-20250514"
-
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAYS = [2, 4, 8]
 
 # Document type categories for the planner
 DOC_TYPES = [
@@ -117,33 +109,17 @@ class DocumentationPlanner:
         prompt = self._build_prompt(context, existing_docs, mode)
         tool_schema = self._build_tool_schema()
 
-        last_error: Exception | None = None
+        async def _do_call() -> PlannerResult:
+            response = await self.client.messages.create(
+                model=MODEL_OPUS,
+                max_tokens=8000,
+                tools=cast(Any, [tool_schema]),
+                tool_choice=cast(Any, {"type": "tool", "name": "save_documentation_plan"}),
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return self._parse_response(response)
 
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = await self.client.messages.create(
-                    model=PLANNER_MODEL,
-                    max_tokens=8000,
-                    tools=cast(Any, [tool_schema]),
-                    tool_choice=cast(Any, {"type": "tool", "name": "save_documentation_plan"}),
-                    messages=[{"role": "user", "content": prompt}],
-                )
-
-                return self._parse_response(response)
-
-            except (RateLimitError, APIError) as e:
-                last_error = e
-                if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAYS[attempt]
-                    logger.warning(
-                        f"Planning error (attempt {attempt + 1}/{MAX_RETRIES}), "
-                        f"retrying in {delay}s: {e}"
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"Documentation planning failed after {MAX_RETRIES} attempts: {e}")
-
-        raise last_error or RuntimeError("Documentation planning failed after retries")
+        return await call_with_retry(_do_call, operation_name="Documentation planning")
 
     def _build_prompt(
         self,

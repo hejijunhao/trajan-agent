@@ -103,8 +103,7 @@ class SubscriptionOperations:
     ) -> Subscription:
         """Update a subscription."""
         for field, value in updates.items():
-            if value is not None:
-                setattr(subscription, field, value)
+            setattr(subscription, field, value)
         db.add(subscription)
         await db.flush()
         await db.refresh(subscription)

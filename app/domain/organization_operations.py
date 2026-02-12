@@ -213,8 +213,7 @@ class OrganizationOperations:
     ) -> Organization:
         """Update an organization."""
         for field, value in updates.items():
-            if value is not None:
-                setattr(org, field, value)
+            setattr(org, field, value)
         db.add(org)
         await db.flush()
         await db.refresh(org)

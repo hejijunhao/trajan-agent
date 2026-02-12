@@ -275,35 +275,8 @@ class DocumentOrchestrator:
             except Exception as e:
                 logger.error(f"Document generation failed: {e}")
 
-        # Stage 5: Changelog (non-critical, failures don't block completion)
-        await self._update_progress("changelog", "Processing changelog...")
-        try:
-            changelog_result = await self._run_with_timeout(
-                self.changelog_agent.run(),
-                timeout=AGENT_TIMEOUT_LIGHT,
-                stage_name="Changelog processing",
-            )
-            results.changelog = changelog_result
-            logger.info(f"Changelog result: {changelog_result.action}")
-        except TimeoutError:
-            logger.warning("Changelog processing timed out, continuing...")
-        except Exception as e:
-            logger.error(f"Changelog agent failed: {e}")
-
-        # Stage 6: Organize plans (non-critical, failures don't block completion)
-        await self._update_progress("plans", "Organizing plans...")
-        try:
-            plans_result = await self._run_with_timeout(
-                self.plans_agent.run(),
-                timeout=AGENT_TIMEOUT_LIGHT,
-                stage_name="Plans organization",
-            )
-            results.plans_structured = plans_result
-            logger.info(f"Plans result: organized {plans_result.organized_count} plans")
-        except TimeoutError:
-            logger.warning("Plans organization timed out, continuing...")
-        except Exception as e:
-            logger.error(f"Plans agent failed: {e}")
+        # Postprocessing: changelog + plans (non-critical)
+        await self._run_postprocessing_stages(results)
 
         # Complete - save fingerprint for skip-if-unchanged optimization
         if current_fingerprint:
@@ -398,7 +371,39 @@ class DocumentOrchestrator:
         # Step 2: Delegate to sub-agents (with timeouts)
         # Each agent checks what exists and fills gaps
 
-        # Changelog (non-critical)
+        # Blueprints (overview, architecture, etc.) - critical for v1
+        await self._update_progress("blueprints", "Generating blueprints...")
+        try:
+            blueprint_result = await self._run_with_timeout(
+                self.blueprint_agent.run(),
+                timeout=AGENT_TIMEOUT_HEAVY,
+                stage_name="Blueprint generation",
+            )
+            results.blueprints.extend(blueprint_result.documents)
+            logger.info(f"Blueprint result: created {blueprint_result.created_count} new docs")
+        except TimeoutError:
+            logger.error("Blueprint generation timed out")
+        except Exception as e:
+            logger.error(f"Blueprint agent failed: {e}")
+
+        # Postprocessing: changelog + plans (non-critical)
+        await self._run_postprocessing_stages(results)
+
+        await self._update_progress("complete", "Documentation generation complete")
+
+        logger.info(
+            f"V1 documentation orchestration complete for product {self.product.id}: "
+            f"imported={len(results.imported)}, blueprints={len(results.blueprints)}"
+        )
+
+        return results
+
+    async def _run_postprocessing_stages(self, results: OrchestratorResult) -> None:
+        """Run changelog and plans stages (shared between V1 and V2 flows).
+
+        These are non-critical — failures are logged but don't block completion.
+        """
+        # Changelog
         await self._update_progress("changelog", "Processing changelog...")
         try:
             changelog_result = await self._run_with_timeout(
@@ -413,23 +418,7 @@ class DocumentOrchestrator:
         except Exception as e:
             logger.error(f"Changelog agent failed: {e}")
 
-        # Blueprints (overview, architecture, etc.) - critical for v1
-        await self._update_progress("blueprints", "Generating blueprints...")
-        try:
-            blueprint_result = await self._run_with_timeout(
-                self.blueprint_agent.run(),
-                timeout=AGENT_TIMEOUT_HEAVY,
-                stage_name="Blueprint generation",
-            )
-            results.blueprints.extend(blueprint_result.documents)
-            logger.info(f"Blueprint result: created {blueprint_result.created_count} new docs")
-        except TimeoutError:
-            logger.error("Blueprint generation timed out")
-            # Continue to complete - partial docs are better than none
-        except Exception as e:
-            logger.error(f"Blueprint agent failed: {e}")
-
-        # Plans structure (non-critical)
+        # Plans organization
         await self._update_progress("plans", "Organizing plans...")
         try:
             plans_result = await self._run_with_timeout(
@@ -443,16 +432,6 @@ class DocumentOrchestrator:
             logger.warning("Plans organization timed out, continuing...")
         except Exception as e:
             logger.error(f"Plans agent failed: {e}")
-
-        # Update progress: complete
-        await self._update_progress("complete", "Documentation generation complete")
-
-        logger.info(
-            f"V1 documentation orchestration complete for product {self.product.id}: "
-            f"imported={len(results.imported)}, blueprints={len(results.blueprints)}"
-        )
-
-        return results
 
     async def _get_existing_docs(self) -> list[Document]:
         """Get existing GENERATED documents for this product (for gap analysis).

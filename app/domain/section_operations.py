@@ -117,8 +117,7 @@ class SectionOperations:
     ) -> DocumentSection:
         """Update an existing section."""
         for field, value in obj_in.items():
-            if value is not None:
-                setattr(db_obj, field, value)
+            setattr(db_obj, field, value)
         db_obj.updated_at = datetime.now(UTC)
         db.add(db_obj)
         await db.flush()
@@ -278,8 +277,7 @@ class SubsectionOperations:
     ) -> DocumentSubsection:
         """Update an existing subsection."""
         for field, value in obj_in.items():
-            if value is not None:
-                setattr(db_obj, field, value)
+            setattr(db_obj, field, value)
         db_obj.updated_at = datetime.now(UTC)
         db.add(db_obj)
         await db.flush()

@@ -189,14 +189,15 @@ class TestRepositoryUpdate:
         assert result.name == "new_name"
 
     @pytest.mark.asyncio
-    async def test_update_skips_none_values(self):
+    async def test_update_applies_none_values(self):
+        """update() applies all keys including None — callers should exclude_unset."""
         repo = make_mock_repository(name="original")
         self.db.add = MagicMock()
         self.db.flush = AsyncMock()
         self.db.refresh = AsyncMock()
 
         await self.ops.update(self.db, repo, {"name": None, "url": "https://new.url"})
-        assert repo.name == "original"
+        assert repo.name is None
         assert repo.url == "https://new.url"
 
 

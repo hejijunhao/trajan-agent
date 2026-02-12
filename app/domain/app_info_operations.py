@@ -152,8 +152,7 @@ class AppInfoOperations(BaseOperations[AppInfo]):
             obj_in["tags"] = normalize_tags(tags if isinstance(tags, list) else [])
 
         for field, field_value in obj_in.items():
-            if field_value is not None:
-                setattr(db_obj, field, field_value)
+            setattr(db_obj, field, field_value)
         db.add(db_obj)
         await db.flush()
         await db.refresh(db_obj)

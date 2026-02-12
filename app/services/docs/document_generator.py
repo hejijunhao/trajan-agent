@@ -11,18 +11,17 @@ Key design decisions:
 4. Database persistence — saves each document immediately after generation
 """
 
-import asyncio
 import logging
 from typing import Any, cast
 from uuid import UUID
 
 import anthropic
-from anthropic import APIError, RateLimitError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.document import Document
 from app.models.product import Product
+from app.services.docs.claude_helpers import call_with_retry, select_model
 from app.services.docs.custom_prompts import AUDIENCE_INSTRUCTIONS
 from app.services.docs.types import (
     BatchGeneratorResult,
@@ -34,17 +33,6 @@ from app.services.docs.types import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Model selection based on document complexity
-MODEL_OPUS = "claude-opus-4-20250514"
-MODEL_SONNET = "claude-sonnet-4-20250514"
-
-# Document types that benefit from Opus's deeper reasoning
-COMPLEX_DOC_TYPES = {"architecture", "concept"}
-
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAYS = [2, 4, 8]
 
 # Generation limits
 MAX_TOKENS_GENERATION = 8000
@@ -217,17 +205,6 @@ class DocumentGenerator:
 
         return relevant
 
-    def _select_model(self, doc_type: str) -> str:
-        """
-        Select the appropriate model based on document complexity.
-
-        Opus 4.5 for architecture and concept docs (need deeper reasoning).
-        Sonnet for overview, guide, and reference docs (more straightforward).
-        """
-        if doc_type in COMPLEX_DOC_TYPES:
-            return MODEL_OPUS
-        return MODEL_SONNET
-
     async def _call_claude(
         self,
         planned_doc: PlannedDocument,
@@ -235,37 +212,21 @@ class DocumentGenerator:
         context: CodebaseContext,
     ) -> str:
         """Call Claude API to generate document content."""
-        model = self._select_model(planned_doc.doc_type)
+        model = select_model(planned_doc.doc_type)
         prompt = self._build_prompt(planned_doc, relevant_files, context)
         tool_schema = self._build_tool_schema(planned_doc)
 
-        last_error: Exception | None = None
+        async def _do_call() -> str:
+            response = await self.client.messages.create(
+                model=model,
+                max_tokens=MAX_TOKENS_GENERATION,
+                tools=cast(Any, [tool_schema]),
+                tool_choice=cast(Any, {"type": "tool", "name": "save_document"}),
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return self._parse_response(response, planned_doc)
 
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = await self.client.messages.create(
-                    model=model,
-                    max_tokens=MAX_TOKENS_GENERATION,
-                    tools=cast(Any, [tool_schema]),
-                    tool_choice=cast(Any, {"type": "tool", "name": "save_document"}),
-                    messages=[{"role": "user", "content": prompt}],
-                )
-
-                return self._parse_response(response, planned_doc)
-
-            except (RateLimitError, APIError) as e:
-                last_error = e
-                if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAYS[attempt]
-                    logger.warning(
-                        f"Generation error (attempt {attempt + 1}/{MAX_RETRIES}), "
-                        f"retrying in {delay}s: {e}"
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"Document generation failed after {MAX_RETRIES} attempts: {e}")
-
-        raise last_error or RuntimeError("Document generation failed after retries")
+        return await call_with_retry(_do_call, operation_name="Document generation")
 
     def _build_prompt(
         self,

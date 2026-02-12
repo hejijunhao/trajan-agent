@@ -30,6 +30,36 @@ router = APIRouter(prefix="/github", tags=["github"])
 logger = logging.getLogger(__name__)
 
 
+async def resolve_renamed_repo(
+    github: GitHubService,
+    rename_exc: GitHubRepoRenamed,
+) -> object:
+    """Resolve a renamed GitHub repo and fetch fresh details.
+
+    Given a GitHubRepoRenamed exception (which may contain a new_full_name
+    or a repo_id to resolve), determines the current name and fetches
+    fresh repo details.
+
+    Returns:
+        The fresh RepoDetails object from GitHub.
+
+    Raises:
+        GitHubAPIError: If resolution or fetch fails.
+        ValueError: If the new name cannot be determined.
+    """
+    new_full_name = rename_exc.new_full_name
+
+    if not new_full_name and rename_exc.repo_id:
+        resolved = await github.get_repo_by_id(rename_exc.repo_id)
+        new_full_name = resolved.full_name
+
+    if not new_full_name:
+        raise ValueError("Repository was renamed but couldn't determine new name")
+
+    new_owner, new_repo_name = new_full_name.split("/", 1)
+    return await github.get_repo_details(new_owner, new_repo_name)
+
+
 # --- Response Models ---
 
 
@@ -422,33 +452,13 @@ async def refresh_repository_metadata(
         owner, repo_name = repo.full_name.split("/", 1)
         fresh_data = await github.get_repo_details(owner, repo_name)
     except GitHubRepoRenamed as e:
-        # Repository was renamed - resolve the new name and update
-        new_full_name = e.new_full_name
-        if not new_full_name and e.repo_id:
-            # Resolve repo ID to get current name
-            try:
-                resolved = await github.get_repo_by_id(e.repo_id)
-                new_full_name = resolved.full_name
-            except GitHubAPIError:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Repository was renamed but couldn't resolve new name (ID: {e.repo_id})",
-                ) from None
-
-        if not new_full_name:
+        # Repository was renamed — resolve new name and fetch fresh data
+        try:
+            fresh_data = await resolve_renamed_repo(github, e)
+        except (GitHubAPIError, ValueError) as resolve_err:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Repository was renamed but couldn't determine new name",
-            ) from None
-
-        # Fetch fresh data with the new name
-        new_owner, new_repo_name = new_full_name.split("/", 1)
-        try:
-            fresh_data = await github.get_repo_details(new_owner, new_repo_name)
-        except GitHubAPIError as retry_error:
-            raise HTTPException(
-                status_code=retry_error.status_code or status.HTTP_502_BAD_GATEWAY,
-                detail=f"Repository renamed to {new_full_name} but fetch failed: {retry_error.message}",
+                detail=f"Repository was renamed but resolution failed: {resolve_err}",
             ) from None
 
     except GitHubAPIError as e:
@@ -549,42 +559,15 @@ async def bulk_refresh_github_repos(
             owner, repo_name = repo.full_name.split("/", 1)
             fresh_data = await github.get_repo_details(owner, repo_name)
         except GitHubRepoRenamed as e:
-            # Repository was renamed - resolve new name and fetch fresh data
-            new_full_name = e.new_full_name
-            if not new_full_name and e.repo_id:
-                try:
-                    resolved = await github.get_repo_by_id(e.repo_id)
-                    new_full_name = resolved.full_name
-                except GitHubAPIError:
-                    failed.append(
-                        FailedRefresh(
-                            repository_id=str(repo.id),
-                            name=repo.name or "Unknown",
-                            reason=f"Renamed but couldn't resolve new name (ID: {e.repo_id})",
-                        )
-                    )
-                    continue
-
-            if not new_full_name:
-                failed.append(
-                    FailedRefresh(
-                        repository_id=str(repo.id),
-                        name=repo.name or "Unknown",
-                        reason="Renamed but couldn't determine new name",
-                    )
-                )
-                continue
-
-            # Fetch with new name
-            new_owner, new_repo_name = new_full_name.split("/", 1)
+            # Repository was renamed — resolve new name and fetch fresh data
             try:
-                fresh_data = await github.get_repo_details(new_owner, new_repo_name)
-            except GitHubAPIError as retry_error:
+                fresh_data = await resolve_renamed_repo(github, e)
+            except (GitHubAPIError, ValueError) as resolve_err:
                 failed.append(
                     FailedRefresh(
                         repository_id=str(repo.id),
                         name=repo.name or "Unknown",
-                        reason=f"Renamed to {new_full_name} but fetch failed: {retry_error.message}",
+                        reason=f"Renamed but resolution failed: {resolve_err}",
                     )
                 )
                 continue
