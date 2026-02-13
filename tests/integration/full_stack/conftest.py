@@ -147,10 +147,10 @@ async def cleanup_on_exit(integration_tracker, integration_db):
 
     This is the last line of defense. Individual tests should also
     clean up after themselves when possible.
+
+    Raises ``CleanupError`` if any cleanup operations fail, ensuring
+    the test session reports failures visibly rather than silently leaking.
     """
     yield
     logger.info("Session ending — running cleanup failsafe...")
-    try:
-        await TestCleanup().cleanup_all(integration_tracker, integration_db)
-    except Exception:
-        logger.exception("Cleanup failsafe encountered errors (resources may need manual cleanup)")
+    await TestCleanup().cleanup_all(integration_tracker, integration_db)

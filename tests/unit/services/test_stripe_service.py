@@ -101,6 +101,135 @@ class TestCreateCheckoutSession:
             )
 
 
+class TestCreatePortalSession:
+    """Tests for Stripe Customer Portal session creation."""
+
+    @patch("app.services.stripe_service.stripe")
+    def test_returns_portal_url(self, mock_stripe):
+        mock_session = MagicMock()
+        mock_session.url = "https://billing.stripe.com/portal/sess_abc"
+        mock_stripe.billing_portal.Session.create.return_value = mock_session
+
+        result = StripeService.create_portal_session("cus_123", "https://app.com/billing")
+
+        assert result == "https://billing.stripe.com/portal/sess_abc"
+        mock_stripe.billing_portal.Session.create.assert_called_once_with(
+            customer="cus_123",
+            return_url="https://app.com/billing",
+        )
+
+
+class TestCancelSubscription:
+    """Tests for subscription cancellation at period end."""
+
+    @patch("app.services.stripe_service.stripe")
+    def test_sets_cancel_at_period_end(self, mock_stripe):
+        StripeService.cancel_subscription("sub_test_456")
+
+        mock_stripe.Subscription.modify.assert_called_once_with(
+            "sub_test_456",
+            cancel_at_period_end=True,
+        )
+
+    @patch("app.services.stripe_service.stripe")
+    def test_raises_on_stripe_error(self, mock_stripe):
+        from stripe import StripeError
+
+        mock_stripe.Subscription.modify.side_effect = StripeError("API error")
+
+        with pytest.raises(StripeError):
+            StripeService.cancel_subscription("sub_test_456")
+
+
+class TestReactivateSubscription:
+    """Tests for undoing a pending cancellation."""
+
+    @patch("app.services.stripe_service.stripe")
+    def test_clears_cancel_at_period_end(self, mock_stripe):
+        StripeService.reactivate_subscription("sub_test_789")
+
+        mock_stripe.Subscription.modify.assert_called_once_with(
+            "sub_test_789",
+            cancel_at_period_end=False,
+        )
+
+
+class TestChangeSubscriptionPlan:
+    """Tests for upgrading/downgrading between plan tiers."""
+
+    @patch("app.services.stripe_service.settings")
+    @patch("app.services.stripe_service.stripe")
+    def test_updates_base_item_price(self, mock_stripe, mock_settings):
+        mock_settings.stripe_price_indie_base = "price_indie_123"
+        mock_settings.stripe_price_pro_base = "price_pro_456"
+        mock_settings.stripe_price_scale_base = "price_scale_789"
+
+        # Simulate subscription with a base item (quantity=1)
+        mock_sub = {
+            "items": {
+                "data": [
+                    {"id": "si_base_item", "quantity": 1, "price": {"id": "price_indie_123"}},
+                    {"id": "si_metered_item", "quantity": None},
+                ]
+            }
+        }
+        mock_stripe.Subscription.retrieve.return_value = mock_sub
+
+        StripeService.change_subscription_plan("sub_test", "pro")
+
+        call_kwargs = mock_stripe.Subscription.modify.call_args[1]
+        assert call_kwargs["items"] == [{"id": "si_base_item", "price": "price_pro_456"}]
+        assert call_kwargs["proration_behavior"] == "create_prorations"
+
+    @patch("app.services.stripe_service.settings")
+    @patch("app.services.stripe_service.stripe")
+    def test_raises_when_no_base_item_found(self, mock_stripe, mock_settings):
+        mock_settings.stripe_price_indie_base = "price_indie_123"
+        mock_settings.stripe_price_pro_base = "price_pro_456"
+        mock_settings.stripe_price_scale_base = "price_scale_789"
+
+        # Subscription with only metered items (no quantity=1)
+        mock_sub = {"items": {"data": [{"id": "si_metered", "quantity": None}]}}
+        mock_stripe.Subscription.retrieve.return_value = mock_sub
+
+        with pytest.raises(ValueError, match="Could not find base subscription item"):
+            StripeService.change_subscription_plan("sub_test", "pro")
+
+    @patch("app.services.stripe_service.settings")
+    def test_raises_for_unknown_tier(self, mock_settings):
+        mock_settings.stripe_price_indie_base = "price_indie_123"
+        mock_settings.stripe_price_pro_base = "price_pro_456"
+        mock_settings.stripe_price_scale_base = "price_scale_789"
+
+        with pytest.raises(ValueError, match="No price configured"):
+            StripeService.change_subscription_plan("sub_test", "enterprise")
+
+
+class TestGetSubscription:
+    """Tests for retrieving a Stripe subscription."""
+
+    @patch("app.services.stripe_service.stripe")
+    def test_returns_subscription_dict(self, mock_stripe):
+        mock_stripe.Subscription.retrieve.return_value = MagicMock(
+            __iter__=lambda self: iter([("id", "sub_123"), ("status", "active")]),
+        )
+
+        result = StripeService.get_subscription("sub_123")
+
+        assert result is not None
+        mock_stripe.Subscription.retrieve.assert_called_once_with("sub_123")
+
+    @patch("app.services.stripe_service.stripe")
+    def test_returns_none_on_stripe_error(self, mock_stripe):
+        from stripe import StripeError
+
+        mock_stripe.Subscription.retrieve.side_effect = StripeError("Not found")
+
+        result = StripeService.get_subscription("sub_invalid")
+
+        assert result is None
+
+
 class TestConstructWebhookEvent:
     """Tests for webhook signature verification."""
 

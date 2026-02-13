@@ -282,6 +282,7 @@ class CustomDocGenerator:
                 title=final_title,
                 content=content,
                 type="note",  # Assessments are technical notes
+                is_generated=True,  # AI-generated, shown in Trajan Docs tab
                 folder={"path": "blueprints"},
                 section="technical",
                 subsection=subsection,
