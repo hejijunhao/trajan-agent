@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_with_rls
 from app.domain.org_member_operations import org_member_ops
+from app.domain.organization_operations import organization_ops
 from app.domain.user_operations import user_ops
 from app.models.subscription import PlanTier
 from app.models.user import User
@@ -105,11 +106,28 @@ class AccountDeletionRequest(BaseModel):
         return v
 
 
+class CreateWorkspaceRequest(BaseModel):
+    """Request to create a personal workspace during onboarding."""
+
+    name: str
+
+
+class CreateWorkspaceResponse(BaseModel):
+    """Response after creating a personal workspace."""
+
+    id: str
+    name: str
+    slug: str
+
+
 class OnboardingContext(BaseModel):
     """Context for frontend to determine which onboarding flow to show."""
 
     # Orgs user was invited to (not owner)
     invited_orgs: list[InvitedOrgInfo]
+
+    # Does the user own any organization?
+    has_personal_org: bool
 
     # User's personal org needs setup? (owner + plan_tier = 'none')
     personal_org_incomplete: bool
@@ -287,6 +305,39 @@ async def complete_onboarding(
     return user_to_response(updated_user)
 
 
+@router.post("/me/create-workspace", response_model=CreateWorkspaceResponse)
+async def create_workspace(
+    data: CreateWorkspaceRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+):
+    """
+    Create a personal workspace during onboarding.
+
+    Guards against duplicates — returns 409 if user already owns an organization.
+    """
+    # Check if user already owns an org
+    existing_orgs = await organization_ops.get_for_user(db, current_user.id)
+    owned = [org for org in existing_orgs if org.owner_id == current_user.id]
+    if owned:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User already owns a workspace",
+        )
+
+    org = await organization_ops.create(
+        db,
+        name=data.name,
+        owner_id=current_user.id,
+    )
+
+    return CreateWorkspaceResponse(
+        id=str(org.id),
+        name=org.name,
+        slug=org.slug,
+    )
+
+
 @router.get("/me/onboarding-context", response_model=OnboardingContext)
 async def get_onboarding_context(
     current_user: User = Depends(get_current_user),
@@ -309,6 +360,7 @@ async def get_onboarding_context(
     memberships_with_inviters = await org_member_ops.get_by_user_with_details(db, current_user.id)
 
     invited_orgs: list[InvitedOrgInfo] = []
+    has_personal_org = False
     personal_org_incomplete = False
     personal_org_id: str | None = None
     personal_org_name: str | None = None
@@ -321,6 +373,7 @@ async def get_onboarding_context(
         subscription = org.subscription
 
         if org.owner_id == current_user.id:
+            has_personal_org = True
             # User owns this org - check if setup is incomplete
             plan_tier = subscription.plan_tier if subscription else PlanTier.NONE.value
             if plan_tier == PlanTier.NONE.value:
@@ -347,19 +400,20 @@ async def get_onboarding_context(
 
     if onboarding_completed:
         recommended_flow: Literal["full", "invited", "returning"] = "returning"
-    elif has_referral and personal_org_incomplete:
+    elif has_referral:
         # Referral users MUST go through full onboarding to select a plan
         # and properly redeem their referral reward (free month)
         recommended_flow = "full"
-    elif invited_orgs and personal_org_incomplete:
-        # Has invites AND personal org not set up = invited user flow
+    elif invited_orgs and not has_personal_org:
+        # Has invites AND no personal org = invited user flow
         recommended_flow = "invited"
     else:
-        # Fresh signup or returning to complete setup
+        # Direct signup, or has personal org needing plan setup
         recommended_flow = "full"
 
     return OnboardingContext(
         invited_orgs=invited_orgs,
+        has_personal_org=has_personal_org,
         personal_org_incomplete=personal_org_incomplete,
         personal_org_id=personal_org_id,
         personal_org_name=personal_org_name,

@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.database import get_db
 from app.core.rls import set_rls_user_context
-from app.domain.organization_operations import organization_ops
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -136,7 +135,7 @@ async def get_current_user(
     result = await db.execute(statement)
     user = result.scalar_one_or_none()
 
-    # Extract metadata for potential user/org creation
+    # Extract metadata for potential user creation
     app_metadata = payload.get("app_metadata", {})
     user_metadata = payload.get("user_metadata", {})
 
@@ -154,18 +153,6 @@ async def get_current_user(
         db.add(user)
         await db.flush()
         await db.refresh(user)
-
-    # Check if user has an organization (may be missing for manually-created users)
-    user_orgs = await organization_ops.get_for_user(db, user.id)
-    if not user_orgs:
-        # Create personal organization (handles users created before trigger extension)
-        display_name = user_metadata.get("full_name") or user_metadata.get("name")
-        await organization_ops.create_personal_org(
-            db,
-            user_id=user.id,
-            user_name=display_name,
-            user_email=user.email,
-        )
 
     return user
 

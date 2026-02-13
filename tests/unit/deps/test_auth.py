@@ -130,14 +130,10 @@ class TestGetCurrentUser:
             patch("app.api.deps.auth.get_jwks", new_callable=AsyncMock) as mock_jwks,
             patch("app.api.deps.auth.get_signing_key") as mock_get_key,
             patch("app.api.deps.auth.jwt") as mock_jwt,
-            patch(
-                "app.api.deps.auth.organization_ops"
-            ) as mock_org_ops,
         ):
             mock_jwks.return_value = {"keys": []}
             mock_get_key.return_value = MagicMock()
             mock_jwt.decode.return_value = self.valid_payload
-            mock_org_ops.get_for_user = AsyncMock(return_value=[MagicMock()])
 
             result = await get_current_user(credentials=credentials, db=self.db)
             assert result == existing_user
@@ -156,49 +152,15 @@ class TestGetCurrentUser:
             patch("app.api.deps.auth.get_jwks", new_callable=AsyncMock) as mock_jwks,
             patch("app.api.deps.auth.get_signing_key") as mock_get_key,
             patch("app.api.deps.auth.jwt") as mock_jwt,
-            patch(
-                "app.api.deps.auth.organization_ops"
-            ) as mock_org_ops,
         ):
             mock_jwks.return_value = {"keys": []}
             mock_get_key.return_value = MagicMock()
             mock_jwt.decode.return_value = self.valid_payload
-            mock_org_ops.get_for_user = AsyncMock(return_value=[MagicMock()])
 
             result = await get_current_user(credentials=credentials, db=self.db)
             assert result is not None
             assert result.id == self.user_id
             assert result.email == "test@example.com"
-
-    @pytest.mark.asyncio
-    async def test_creates_personal_org_when_none_exists(self):
-        existing_user = make_mock_user(id=self.user_id, email="test@example.com")
-        credentials = MagicMock()
-        credentials.credentials = "valid.jwt.token"
-
-        self.db.execute = AsyncMock(return_value=mock_scalar_result(existing_user))
-
-        with (
-            patch("app.api.deps.auth.get_jwks", new_callable=AsyncMock) as mock_jwks,
-            patch("app.api.deps.auth.get_signing_key") as mock_get_key,
-            patch("app.api.deps.auth.jwt") as mock_jwt,
-            patch(
-                "app.api.deps.auth.organization_ops"
-            ) as mock_org_ops,
-        ):
-            mock_jwks.return_value = {"keys": []}
-            mock_get_key.return_value = MagicMock()
-            mock_jwt.decode.return_value = self.valid_payload
-            mock_org_ops.get_for_user = AsyncMock(return_value=[])  # No orgs
-            mock_org_ops.create_personal_org = AsyncMock()
-
-            await get_current_user(credentials=credentials, db=self.db)
-
-            # Org creation is an external side effect — valid to verify call data
-            _, kwargs = mock_org_ops.create_personal_org.call_args
-            assert kwargs["user_id"] == self.user_id
-            assert kwargs["user_name"] == "Test User"
-            assert kwargs["user_email"] == "test@example.com"
 
 
 # ---------------------------------------------------------------------------
