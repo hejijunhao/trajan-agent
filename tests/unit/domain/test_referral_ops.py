@@ -145,5 +145,5 @@ class TestCreateCode:
         mock_get_by_code.return_value = None
 
         result = await self.ops.create_code(self.db, self.user_id)
-        # Verify db.add was called with a ReferralCode
-        self.db.add.assert_called_once()
+        assert result is not None
+        assert result.user_id == self.user_id

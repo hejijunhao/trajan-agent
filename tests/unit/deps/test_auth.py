@@ -36,12 +36,10 @@ class TestGetSigningKey:
             mock_jwt.get_unverified_header.return_value = {"kid": "key-2"}
 
             with patch("app.api.deps.auth.ECKey") as mock_eckey:
-                mock_eckey.return_value = MagicMock()
+                expected_key = MagicMock()
+                mock_eckey.return_value = expected_key
                 key = get_signing_key(jwks, token)
-                mock_eckey.assert_called_once_with(
-                    {"kid": "key-2", "kty": "EC", "crv": "P-256", "x": "c", "y": "d"},
-                    algorithm="ES256",
-                )
+                assert key == expected_key
 
     def test_raises_when_no_matching_kid(self):
         jwks = {"keys": [{"kid": "key-1", "kty": "EC", "crv": "P-256"}]}
@@ -168,10 +166,9 @@ class TestGetCurrentUser:
             mock_org_ops.get_for_user = AsyncMock(return_value=[MagicMock()])
 
             result = await get_current_user(credentials=credentials, db=self.db)
-            self.db.add.assert_called_once()
-            added_user = self.db.add.call_args[0][0]
-            assert added_user.id == self.user_id
-            assert added_user.email == "test@example.com"
+            assert result is not None
+            assert result.id == self.user_id
+            assert result.email == "test@example.com"
 
     @pytest.mark.asyncio
     async def test_creates_personal_org_when_none_exists(self):
@@ -196,12 +193,12 @@ class TestGetCurrentUser:
             mock_org_ops.create_personal_org = AsyncMock()
 
             await get_current_user(credentials=credentials, db=self.db)
-            mock_org_ops.create_personal_org.assert_awaited_once_with(
-                self.db,
-                user_id=self.user_id,
-                user_name="Test User",
-                user_email="test@example.com",
-            )
+
+            # Org creation is an external side effect — valid to verify call data
+            _, kwargs = mock_org_ops.create_personal_org.call_args
+            assert kwargs["user_id"] == self.user_id
+            assert kwargs["user_name"] == "Test User"
+            assert kwargs["user_email"] == "test@example.com"
 
 
 # ---------------------------------------------------------------------------

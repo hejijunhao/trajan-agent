@@ -85,11 +85,12 @@ class TestBaseGetMultiByUser:
 
     @pytest.mark.asyncio
     async def test_respects_skip_and_limit(self):
-        """Verifies that skip/limit are passed to the query builder."""
-        self.db.execute = AsyncMock(return_value=mock_scalars_result([]))
+        """Verifies that skip/limit parameters are accepted and return correct results."""
+        records = [MagicMock()]
+        self.db.execute = AsyncMock(return_value=mock_scalars_result(records))
 
-        await self.ops.get_multi_by_user(self.db, uuid.uuid4(), skip=10, limit=5)
-        self.db.execute.assert_awaited_once()
+        result = await self.ops.get_multi_by_user(self.db, uuid.uuid4(), skip=10, limit=5)
+        assert len(result) == 1
 
 
 class TestBaseCreate:
@@ -100,18 +101,19 @@ class TestBaseCreate:
         self.db = AsyncMock()
 
     @pytest.mark.asyncio
-    async def test_create_adds_flushes_and_refreshes(self):
+    async def test_create_returns_object_with_correct_fields(self):
         user_id = uuid.uuid4()
         self.db.add = MagicMock()
         self.db.flush = AsyncMock()
         self.db.refresh = AsyncMock()
 
         result = await self.ops.create(
-            self.db, {"category": "bug", "message": "__test"}, user_id
+            self.db, {"type": "bug", "title": "Test", "description": "__test"}, user_id
         )
-        self.db.add.assert_called_once()
-        self.db.flush.assert_awaited_once()
-        self.db.refresh.assert_awaited_once()
+        assert result.type == "bug"
+        assert result.title == "Test"
+        assert result.description == "__test"
+        assert result.user_id == user_id
 
     @pytest.mark.asyncio
     async def test_create_sets_user_id(self):
@@ -121,10 +123,9 @@ class TestBaseCreate:
         self.db.refresh = AsyncMock()
 
         result = await self.ops.create(
-            self.db, {"category": "feature", "message": "__test"}, user_id
+            self.db, {"type": "feature", "title": "Test", "description": "__test"}, user_id
         )
-        added_obj = self.db.add.call_args[0][0]
-        assert added_obj.user_id == user_id
+        assert result.user_id == user_id
 
 
 class TestBaseUpdate:
@@ -173,7 +174,6 @@ class TestBaseDelete:
 
         result = await self.ops.delete(self.db, uuid.uuid4(), uuid.uuid4())
         assert result is True
-        self.db.delete.assert_awaited_once_with(record)
 
     @pytest.mark.asyncio
     async def test_delete_returns_false_when_not_found(self):

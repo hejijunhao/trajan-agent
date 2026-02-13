@@ -97,14 +97,14 @@ class TestAdminAssignPlan:
 
     @pytest.mark.asyncio
     @patch.object(SubscriptionOperations, "log_event")
-    async def test_logs_billing_event(self, mock_log):
+    async def test_logs_billing_event_with_correct_data(self, mock_log):
         mock_log.return_value = MagicMock()
         sub = make_mock_subscription(tier="indie")
         self.db.refresh = AsyncMock()
 
         await self.ops.admin_assign_plan(self.db, sub, "scale", self.admin_id)
 
-        mock_log.assert_called_once()
+        # log_event is an external audit call — valid to assert it was called with correct data
         call_kwargs = mock_log.call_args[1]
         assert call_kwargs["new_value"]["plan_tier"] == "scale"
         assert call_kwargs["actor_user_id"] == self.admin_id

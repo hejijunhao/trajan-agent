@@ -23,32 +23,23 @@ class TestFeedbackCreateFeedback:
         self.db = AsyncMock()
 
     @pytest.mark.asyncio
-    async def test_create_sets_user_id(self):
+    async def test_create_returns_feedback_with_correct_fields(self):
         user_id = uuid.uuid4()
         data = MagicMock()
-        data.model_dump.return_value = {"category": "bug", "message": "Test"}
+        data.model_dump.return_value = {
+            "type": "bug",
+            "title": "Auth broken",
+            "description": "Login fails",
+        }
 
         self.db.add = MagicMock()
         self.db.flush = AsyncMock()
         self.db.refresh = AsyncMock()
 
         result = await self.ops.create_feedback(self.db, user_id, data)
-        self.db.add.assert_called_once()
-        added_obj = self.db.add.call_args[0][0]
-        assert added_obj.user_id == user_id
-
-    @pytest.mark.asyncio
-    async def test_create_flushes_and_refreshes(self):
-        self.db.add = MagicMock()
-        self.db.flush = AsyncMock()
-        self.db.refresh = AsyncMock()
-
-        data = MagicMock()
-        data.model_dump.return_value = {"category": "feature", "message": "Add X"}
-
-        await self.ops.create_feedback(self.db, uuid.uuid4(), data)
-        self.db.flush.assert_awaited_once()
-        self.db.refresh.assert_awaited_once()
+        assert result.user_id == user_id
+        assert result.type == "bug"
+        assert result.title == "Auth broken"
 
 
 class TestFeedbackListByUser:

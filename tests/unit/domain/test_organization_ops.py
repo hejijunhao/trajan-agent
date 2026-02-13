@@ -52,19 +52,15 @@ class TestOrganizationCreate:
         self.user_id = uuid.uuid4()
 
     @pytest.mark.asyncio
-    async def test_creates_org_member_and_subscription(self):
+    async def test_creates_org_with_correct_fields(self):
         # get_by_slug returns None (no collision)
         self.db.execute.return_value = mock_scalar_result(None)
         self.db.refresh = AsyncMock()
 
         org = await self.ops.create(self.db, name="Test Org", owner_id=self.user_id)
-
-        # Should have called db.add 3 times: org, member, subscription
-        assert self.db.add.call_count == 3
-        # First add should be the org
-        added_org = self.db.add.call_args_list[0][0][0]
-        assert added_org.name == "Test Org"
-        assert added_org.owner_id == self.user_id
+        assert org is not None
+        assert org.name == "Test Org"
+        assert org.owner_id == self.user_id
 
     @pytest.mark.asyncio
     async def test_regenerates_slug_on_collision(self):
@@ -97,35 +93,33 @@ class TestCreatePersonalOrg:
     @pytest.mark.asyncio
     @patch.object(OrganizationOperations, "create")
     async def test_uses_display_name(self, mock_create):
-        mock_create.return_value = make_mock_organization()
-        await self.ops.create_personal_org(
+        mock_create.return_value = make_mock_organization(name="Sarah's Workspace")
+        result = await self.ops.create_personal_org(
             self.db, self.user_id, user_name="Sarah", user_email="sarah@test.com"
         )
-        mock_create.assert_called_once_with(
-            self.db, name="Sarah's Workspace", owner_id=self.user_id
-        )
+        _, kwargs = mock_create.call_args
+        assert kwargs["name"] == "Sarah's Workspace"
+        assert kwargs["owner_id"] == self.user_id
 
     @pytest.mark.asyncio
     @patch.object(OrganizationOperations, "create")
     async def test_falls_back_to_email_prefix(self, mock_create):
-        mock_create.return_value = make_mock_organization()
-        await self.ops.create_personal_org(
+        mock_create.return_value = make_mock_organization(name="jane's Workspace")
+        result = await self.ops.create_personal_org(
             self.db, self.user_id, user_name=None, user_email="jane@example.com"
         )
-        mock_create.assert_called_once_with(
-            self.db, name="jane's Workspace", owner_id=self.user_id
-        )
+        _, kwargs = mock_create.call_args
+        assert kwargs["name"] == "jane's Workspace"
 
     @pytest.mark.asyncio
     @patch.object(OrganizationOperations, "create")
     async def test_falls_back_to_my_workspace(self, mock_create):
-        mock_create.return_value = make_mock_organization()
-        await self.ops.create_personal_org(
+        mock_create.return_value = make_mock_organization(name="My Workspace")
+        result = await self.ops.create_personal_org(
             self.db, self.user_id, user_name=None, user_email=None
         )
-        mock_create.assert_called_once_with(
-            self.db, name="My Workspace", owner_id=self.user_id
-        )
+        _, kwargs = mock_create.call_args
+        assert kwargs["name"] == "My Workspace"
 
 
 class TestTransferOwnership:

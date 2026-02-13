@@ -39,8 +39,8 @@ class TestAnnouncementGetActive:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_calls_execute_once(self):
+    async def test_returns_list_type(self):
         self.db.execute = AsyncMock(return_value=mock_scalars_result([]))
 
-        await self.ops.get_active(self.db)
-        self.db.execute.assert_awaited_once()
+        result = await self.ops.get_active(self.db)
+        assert isinstance(result, list)

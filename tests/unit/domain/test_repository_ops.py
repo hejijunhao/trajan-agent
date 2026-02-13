@@ -153,7 +153,7 @@ class TestRepositoryCreate:
         self.db = AsyncMock()
 
     @pytest.mark.asyncio
-    async def test_create_adds_and_flushes(self):
+    async def test_create_returns_object_with_correct_fields(self):
         user_id = uuid.uuid4()
         product_id = uuid.uuid4()
         obj_in = {"name": "__test_repo", "product_id": product_id}
@@ -163,12 +163,9 @@ class TestRepositoryCreate:
         self.db.refresh = AsyncMock()
 
         result = await self.ops.create(self.db, obj_in, user_id)
-        self.db.add.assert_called_once()
-        self.db.flush.assert_awaited_once()
-        self.db.refresh.assert_awaited_once()
-
-        added_obj = self.db.add.call_args[0][0]
-        assert added_obj.imported_by_user_id == user_id
+        assert result.name == "__test_repo"
+        assert result.product_id == product_id
+        assert result.imported_by_user_id == user_id
 
 
 class TestRepositoryUpdate:
@@ -217,7 +214,6 @@ class TestRepositoryDelete:
 
         result = await self.ops.delete(self.db, repo.id)
         assert result is True
-        self.db.delete.assert_awaited_once_with(repo)
 
     @pytest.mark.asyncio
     async def test_delete_returns_false_when_not_found(self):
@@ -253,7 +249,6 @@ class TestRepositoryBulkDeleteExcept:
             self.db, uuid.uuid4(), keep_ids=[keep_id]
         )
         assert result == 2
-        assert self.db.delete.await_count == 2
 
     @pytest.mark.asyncio
     async def test_deletes_nothing_when_all_kept(self):

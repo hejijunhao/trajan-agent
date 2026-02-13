@@ -3,15 +3,18 @@ Tests for DocumentGenerator service.
 
 Tests cover:
 - Model selection based on document type
-- File extraction from codebase context
-- Prompt building for different document types
+- Public generate() API with mocked Claude
+- Type-specific instructions
+- Tool schema structure
 - Response parsing
 - Result types
 """
 
-from unittest.mock import MagicMock
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import anthropic
+import pytest
 
 from app.services.docs.claude_helpers import (
     COMPLEX_DOC_TYPES,
@@ -114,172 +117,92 @@ class TestModelSelection:
         assert len(COMPLEX_DOC_TYPES) == 2
 
 
-class TestFileExtraction:
-    """Tests for extracting relevant files from codebase context."""
+class TestGenerate:
+    """Tests for the public generate() API with mocked Claude."""
 
     def setup_method(self) -> None:
-        """Create generator instance for testing."""
-        self.generator = DocumentGenerator.__new__(DocumentGenerator)
+        self.db = AsyncMock()
+        self.product = MagicMock()
+        self.product.id = uuid.uuid4()
+        self.user_id = uuid.uuid4()
+        self.context = make_codebase_context()
 
-    def test_exact_path_match(self) -> None:
-        """Should match files by exact path."""
-        files = [
-            FileContent("README.md", "# Project", 100, 1, 25),
-            FileContent("app/main.py", "print('hello')", 200, 2, 50),
-        ]
-        context = make_codebase_context(key_files=files)
+    def _make_mock_claude_response(self, content: str) -> MagicMock:
+        """Create a mock anthropic Message with tool_use block."""
+        tool_use_block = MagicMock()
+        tool_use_block.type = "tool_use"
+        tool_use_block.name = "save_document"
+        tool_use_block.input = {"content": content}
 
-        result = self.generator._extract_relevant_files(
-            ["README.md"],
-            context.all_key_files,
+        message = MagicMock(spec=anthropic.types.Message)
+        message.content = [tool_use_block]
+        return message
+
+    @pytest.mark.asyncio
+    async def test_generate_returns_successful_result(self) -> None:
+        """generate() should return a GeneratorResult with the saved document."""
+        planned_doc = make_planned_document(title="API Overview", doc_type="overview")
+        mock_response = self._make_mock_claude_response("# API Overview\n\nContent here.")
+
+        generator = DocumentGenerator.__new__(DocumentGenerator)
+        generator.db = self.db
+        generator.client = AsyncMock()
+        generator.client.messages.create = AsyncMock(return_value=mock_response)
+
+        result = await generator.generate(
+            planned_doc, self.context, self.product, self.user_id
         )
 
-        assert len(result) == 1
-        assert result[0].path == "README.md"
+        assert result.success is True
+        assert result.document is not None
+        assert result.document.title == "API Overview"
+        assert result.document.type == "overview"
+        assert result.document.is_generated is True
+        assert result.error is None
 
-    def test_pattern_match(self) -> None:
-        """Should match files containing the pattern."""
-        files = [
-            FileContent("backend/app/api/users.py", "def get_users():", 300, 2, 75),
-            FileContent("backend/app/api/products.py", "def get_products():", 300, 2, 75),
-            FileContent("frontend/src/App.tsx", "export default App", 200, 2, 50),
-        ]
-        context = make_codebase_context(key_files=files)
+    @pytest.mark.asyncio
+    async def test_generate_returns_failure_on_claude_error(self) -> None:
+        """generate() should return a failed result when Claude API raises."""
+        planned_doc = make_planned_document(title="Failing Doc")
 
-        result = self.generator._extract_relevant_files(
-            ["backend/app/api/"],
-            context.all_key_files,
+        generator = DocumentGenerator.__new__(DocumentGenerator)
+        generator.db = self.db
+        generator.client = AsyncMock()
+        generator.client.messages.create = AsyncMock(
+            side_effect=anthropic.APIError(
+                message="Rate limited",
+                request=MagicMock(),
+                body=None,
+            )
         )
 
-        assert len(result) == 2
-        paths = [f.path for f in result]
-        assert "backend/app/api/users.py" in paths
-        assert "backend/app/api/products.py" in paths
-
-    def test_filename_match(self) -> None:
-        """Should match by filename when path doesn't match."""
-        files = [
-            FileContent("src/components/Button.tsx", "export const Button", 150, 2, 40),
-            FileContent("src/components/Form.tsx", "export const Form", 200, 2, 50),
-        ]
-        context = make_codebase_context(key_files=files)
-
-        result = self.generator._extract_relevant_files(
-            ["Button.tsx"],
-            context.all_key_files,
+        result = await generator.generate(
+            planned_doc, self.context, self.product, self.user_id
         )
 
-        assert len(result) == 1
-        assert result[0].path == "src/components/Button.tsx"
+        assert result.success is False
+        assert result.document is None
+        assert result.error is not None
 
-    def test_fallback_to_tier_1_files(self) -> None:
-        """Should include tier 1 files if no specific matches found."""
-        files = [
-            FileContent("README.md", "# Project", 100, 1, 25),
-            FileContent("package.json", '{"name": "test"}', 150, 1, 40),
-            FileContent("src/app.ts", "const app = new App()", 200, 2, 50),
-        ]
-        context = make_codebase_context(key_files=files)
-
-        result = self.generator._extract_relevant_files(
-            ["nonexistent.py"],  # Won't match anything
-            context.all_key_files,
-        )
-
-        # Should fall back to tier 1 files
-        assert len(result) == 2
-        tiers = [f.tier for f in result]
-        assert all(t == 1 for t in tiers)
-
-    def test_respects_token_budget(self) -> None:
-        """Should not exceed token budget."""
-        # Create files that would exceed the 50k token budget
-        files = [FileContent(f"file{i}.py", "x" * 10000, 10000, 1, 30000) for i in range(5)]
-        context = make_codebase_context(key_files=files)
-
-        result = self.generator._extract_relevant_files(
-            ["file0.py", "file1.py", "file2.py"],
-            context.all_key_files,
-        )
-
-        # Should stop before exceeding budget (50k tokens)
-        total_tokens = sum(f.token_estimate for f in result)
-        assert total_tokens <= 50000
-
-
-class TestPromptBuilding:
-    """Tests for prompt construction."""
-
-    def setup_method(self) -> None:
-        """Create generator instance for testing."""
-        self.generator = DocumentGenerator.__new__(DocumentGenerator)
-
-    def test_prompt_includes_document_spec(self) -> None:
-        """Prompt should include document specification."""
+    @pytest.mark.asyncio
+    async def test_generate_sets_product_id_and_folder(self) -> None:
+        """generate() should set product_id and folder on the Document."""
         planned_doc = make_planned_document(
-            title="API Reference",
-            doc_type="reference",
-            purpose="Document all endpoints",
+            title="Architecture", doc_type="architecture", folder="blueprints/backend"
         )
-        context = make_codebase_context()
+        mock_response = self._make_mock_claude_response("# Architecture\n\nDetails.")
 
-        prompt = self.generator._build_prompt(planned_doc, [], context)
+        generator = DocumentGenerator.__new__(DocumentGenerator)
+        generator.db = self.db
+        generator.client = AsyncMock()
+        generator.client.messages.create = AsyncMock(return_value=mock_response)
 
-        assert "API Reference" in prompt
-        assert "reference" in prompt
-        assert "Document all endpoints" in prompt
-
-    def test_prompt_includes_key_topics(self) -> None:
-        """Prompt should include key topics to cover."""
-        planned_doc = make_planned_document(
-            key_topics=["Authentication", "Error handling", "Rate limits"],
+        result = await generator.generate(
+            planned_doc, self.context, self.product, self.user_id
         )
-        context = make_codebase_context()
 
-        prompt = self.generator._build_prompt(planned_doc, [], context)
-
-        assert "Authentication" in prompt
-        assert "Error handling" in prompt
-        assert "Rate limits" in prompt
-
-    def test_prompt_includes_tech_stack(self) -> None:
-        """Prompt should include technology context."""
-        tech = make_tech_stack(
-            languages=["Python", "TypeScript"],
-            frameworks=["FastAPI", "Next.js"],
-        )
-        context = make_codebase_context(tech_stack=tech)
-        planned_doc = make_planned_document()
-
-        prompt = self.generator._build_prompt(planned_doc, [], context)
-
-        assert "Python" in prompt
-        assert "TypeScript" in prompt
-        assert "FastAPI" in prompt
-        assert "Next.js" in prompt
-
-    def test_prompt_includes_source_files(self) -> None:
-        """Prompt should include source file contents."""
-        files = [
-            FileContent("app/main.py", "from fastapi import FastAPI", 100, 1, 25),
-        ]
-        context = make_codebase_context()
-        planned_doc = make_planned_document()
-
-        prompt = self.generator._build_prompt(planned_doc, files, context)
-
-        assert "app/main.py" in prompt
-        assert "from fastapi import FastAPI" in prompt
-
-    def test_prompt_includes_detected_patterns(self) -> None:
-        """Prompt should include architecture patterns."""
-        context = make_codebase_context(patterns=["REST API", "Monorepo"])
-        planned_doc = make_planned_document()
-
-        prompt = self.generator._build_prompt(planned_doc, [], context)
-
-        assert "REST API" in prompt
-        assert "Monorepo" in prompt
+        assert result.document.product_id == self.product.id
+        assert result.document.folder == {"path": "blueprints/backend"}
 
 
 class TestTypeInstructions:

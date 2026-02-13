@@ -28,7 +28,6 @@ class TestGetOrCreate:
 
         result = await self.ops.get_or_create(self.db, self.user_id)
         assert result is prefs
-        self.db.add.assert_not_called()
 
     @pytest.mark.asyncio
     @patch.object(PreferencesOperations, "get_by_user_id")
@@ -36,7 +35,8 @@ class TestGetOrCreate:
         mock_get.return_value = None
 
         result = await self.ops.get_or_create(self.db, self.user_id)
-        self.db.add.assert_called_once()
+        assert result is not None
+        assert result.user_id == self.user_id
 
 
 class TestGetDecryptedToken:

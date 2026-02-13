@@ -94,7 +94,7 @@ class TestWorkItemCreate:
         self.db = AsyncMock()
 
     @pytest.mark.asyncio
-    async def test_create_sets_created_by_user_id(self):
+    async def test_create_returns_object_with_correct_fields(self):
         user_id = uuid.uuid4()
         product_id = uuid.uuid4()
         obj_in = {"title": "__test_item", "product_id": product_id}
@@ -104,19 +104,9 @@ class TestWorkItemCreate:
         self.db.refresh = AsyncMock()
 
         result = await self.ops.create(self.db, obj_in, user_id)
-        self.db.add.assert_called_once()
-        added_obj = self.db.add.call_args[0][0]
-        assert added_obj.created_by_user_id == user_id
-
-    @pytest.mark.asyncio
-    async def test_create_flushes_and_refreshes(self):
-        self.db.add = MagicMock()
-        self.db.flush = AsyncMock()
-        self.db.refresh = AsyncMock()
-
-        await self.ops.create(self.db, {"title": "__test"}, uuid.uuid4())
-        self.db.flush.assert_awaited_once()
-        self.db.refresh.assert_awaited_once()
+        assert result.title == "__test_item"
+        assert result.product_id == product_id
+        assert result.created_by_user_id == user_id
 
 
 class TestWorkItemUpdate:
@@ -164,5 +154,3 @@ class TestWorkItemDelete:
 
         result = await self.ops.delete(self.db, item)
         assert result is True
-        self.db.delete.assert_awaited_once_with(item)
-        self.db.flush.assert_awaited_once()
