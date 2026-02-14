@@ -123,6 +123,16 @@ class Subscription(SQLModel, table=True):
         sa_column_kwargs={"comment": "Stripe subscription item ID for overage billing"},
     )
 
+    # Trial tracking
+    first_subscribed_at: datetime | None = Field(  # type: ignore[call-overload]
+        default=None,
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs={
+            "comment": "When this org first subscribed — used to determine trial eligibility",
+        },
+    )
+
     # Referral tracking
     referral_credit_cents: int = Field(
         default=0,

@@ -73,12 +73,14 @@ class StripeService:
         plan_tier: str,
         success_url: str,
         cancel_url: str,
+        include_trial: bool = True,
     ) -> str:
         """
         Create a Stripe Checkout session for plan subscription.
 
         Returns the checkout session URL.
-        Includes a 14-day free trial.
+        Includes a 14-day free trial only if include_trial is True
+        (first-time subscribers only).
         """
         base_price = StripeService.get_price_id(plan_tier)
 
@@ -92,6 +94,10 @@ class StripeService:
         if overage_price:
             line_items.append({"price": overage_price})  # Metered, no quantity
 
+        subscription_data: dict[str, object] = {"metadata": {"plan_tier": plan_tier}}
+        if include_trial:
+            subscription_data["trial_period_days"] = TRIAL_PERIOD_DAYS
+
         try:
             session = stripe.checkout.Session.create(
                 customer=customer_id,
@@ -99,13 +105,13 @@ class StripeService:
                 line_items=line_items,  # type: ignore[arg-type]
                 success_url=success_url,
                 cancel_url=cancel_url,
-                subscription_data={
-                    "trial_period_days": TRIAL_PERIOD_DAYS,
-                    "metadata": {"plan_tier": plan_tier},
-                },
+                subscription_data=subscription_data,
                 metadata={"plan_tier": plan_tier},
             )
-            logger.info(f"Created checkout session for customer {customer_id}, tier {plan_tier}")
+            logger.info(
+                f"Created checkout session for customer {customer_id}, "
+                f"tier {plan_tier}, trial={include_trial}"
+            )
             return session.url or ""
         except StripeError as e:
             logger.error(f"Failed to create checkout session: {e}")

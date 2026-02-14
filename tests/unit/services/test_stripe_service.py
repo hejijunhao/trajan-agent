@@ -90,6 +90,27 @@ class TestCreateCheckoutSession:
 
     @patch("app.services.stripe_service.settings")
     @patch("app.services.stripe_service.stripe")
+    def test_creates_session_without_trial(self, mock_stripe, mock_settings):
+        mock_settings.stripe_price_indie_base = "price_indie_123"
+        mock_settings.stripe_price_pro_base = "price_pro_456"
+        mock_settings.stripe_price_scale_base = "price_scale_789"
+        mock_settings.stripe_price_repo_overage = None
+
+        mock_session = MagicMock()
+        mock_session.url = "https://checkout.stripe.com/test_session"
+        mock_stripe.checkout.Session.create.return_value = mock_session
+
+        result = StripeService.create_checkout_session(
+            "cus_123", "indie", "https://app.com/success", "https://app.com/cancel",
+            include_trial=False,
+        )
+
+        assert result == "https://checkout.stripe.com/test_session"
+        call_kwargs = mock_stripe.checkout.Session.create.call_args[1]
+        assert "trial_period_days" not in call_kwargs["subscription_data"]
+
+    @patch("app.services.stripe_service.settings")
+    @patch("app.services.stripe_service.stripe")
     def test_raises_for_unknown_tier(self, mock_stripe, mock_settings):
         mock_settings.stripe_price_indie_base = "price_indie_123"
         mock_settings.stripe_price_pro_base = "price_pro_456"

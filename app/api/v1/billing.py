@@ -199,7 +199,7 @@ async def create_checkout(
 
     User must be owner or admin of the organization.
     Returns a URL to redirect the user to Stripe Checkout.
-    Includes a 14-day free trial.
+    Includes a 14-day free trial for first-time subscribers only.
     """
     if not settings.stripe_enabled:
         raise HTTPException(400, "Payments not configured")
@@ -249,11 +249,15 @@ async def create_checkout(
         success_url = f"{settings.frontend_url}/settings/billing?success=true"
         cancel_url = f"{settings.frontend_url}/settings/billing?canceled=true"
 
+    # Only grant a free trial if this org has never subscribed before
+    include_trial = subscription.first_subscribed_at is None
+
     checkout_url = stripe_service.create_checkout_session(
         customer_id=customer_id,
         plan_tier=request.plan_tier,
         success_url=success_url,
         cancel_url=cancel_url,
+        include_trial=include_trial,
     )
 
     return CheckoutResponse(checkout_url=checkout_url)
@@ -647,17 +651,18 @@ async def _handle_checkout_completed(
     if stripe_sub and stripe_sub.get("status") == "trialing":
         status = SubscriptionStatus.TRIALING.value
 
+    # Build update dict — stamp first_subscribed_at on first-ever checkout
+    updates: dict[str, Any] = {
+        "plan_tier": plan_tier,
+        "status": status,
+        "base_repo_limit": plan.base_repo_limit,
+        "stripe_subscription_id": stripe_subscription_id,
+    }
+    if subscription.first_subscribed_at is None:
+        updates["first_subscribed_at"] = datetime.now(UTC)
+
     # Update subscription
-    await subscription_ops.update(
-        db,
-        subscription,
-        {
-            "plan_tier": plan_tier,
-            "status": status,
-            "base_repo_limit": plan.base_repo_limit,
-            "stripe_subscription_id": stripe_subscription_id,
-        },
-    )
+    await subscription_ops.update(db, subscription, updates)
 
     # Log billing event
     await subscription_ops.log_event(
