@@ -30,6 +30,7 @@ _tree_cache: TTLCache[str, Any] = TTLCache(maxsize=100, ttl=300)  # 5 min
 _languages_cache: TTLCache[str, Any] = TTLCache(maxsize=200, ttl=3600)  # 1 hour
 _contributors_cache: TTLCache[str, Any] = TTLCache(maxsize=200, ttl=3600)  # 1 hour
 _repo_details_cache: TTLCache[str, Any] = TTLCache(maxsize=200, ttl=600)  # 10 min
+_agent_context_cache: TTLCache[str, Any] = TTLCache(maxsize=50, ttl=60)  # 60s
 
 
 def _make_cache_key(func_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
@@ -88,6 +89,7 @@ def clear_all_caches() -> None:
     _languages_cache.clear()
     _contributors_cache.clear()
     _repo_details_cache.clear()
+    _agent_context_cache.clear()
     logger.debug("Cleared all GitHub caches")
 
 
@@ -104,6 +106,10 @@ def get_cache_stats() -> dict[str, dict[str, int]]:
             "size": len(_repo_details_cache),
             "maxsize": _repo_details_cache.maxsize,
         },
+        "agent_context": {
+            "size": len(_agent_context_cache),
+            "maxsize": _agent_context_cache.maxsize,
+        },
     }
 
 
@@ -112,3 +118,4 @@ tree_cache = _tree_cache
 languages_cache = _languages_cache
 contributors_cache = _contributors_cache
 repo_details_cache = _repo_details_cache
+agent_context_cache = _agent_context_cache

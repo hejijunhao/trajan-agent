@@ -12,6 +12,7 @@ from app.api.deps import (
     get_db_with_rls,
     require_product_subscription,
 )
+from app.domain import preferences_ops
 from app.models.user import User
 from app.services.agent import CLIAgentService
 
@@ -56,12 +57,17 @@ async def agent_chat(
     """
     await require_product_subscription(db, data.product_id)
 
+    # Fetch user's GitHub token for live repo context
+    prefs = await preferences_ops.get_by_user_id(db, _current_user.id)
+    github_token = preferences_ops.get_decrypted_token(prefs) if prefs else None
+
     service = CLIAgentService()
     try:
         response_text = await service.chat(
             db,
             data.product_id,
             [m.model_dump() for m in data.messages],
+            github_token=github_token,
         )
     except anthropic.RateLimitError as err:
         raise HTTPException(

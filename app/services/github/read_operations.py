@@ -678,6 +678,92 @@ class GitHubReadOperations:
         except (httpx.TimeoutException, httpx.RequestError):
             return None
 
+    async def get_recent_commits(
+        self,
+        owner: str,
+        repo: str,
+        per_page: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Fetch recent commits for a repo (lightweight, for agent context).
+
+        Returns list of dicts with sha, message, author, date.
+        """
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/commits",
+            headers=self._headers,
+            params={"per_page": per_page},
+            timeout=10.0,
+        )
+        if response.status_code != 200:
+            return []
+        commits = response.json()
+        return [
+            {
+                "sha": c["sha"][:7],
+                "message": c.get("commit", {}).get("message", "").split("\n")[0],
+                "author": c.get("commit", {}).get("author", {}).get("name", ""),
+                "date": c.get("commit", {}).get("author", {}).get("date", ""),
+            }
+            for c in commits
+        ]
+
+    async def get_open_pulls(
+        self,
+        owner: str,
+        repo: str,
+        per_page: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Fetch open pull requests for a repo (lightweight, for agent context)."""
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/pulls",
+            headers=self._headers,
+            params={"state": "open", "per_page": per_page, "sort": "updated"},
+            timeout=10.0,
+        )
+        if response.status_code != 200:
+            return []
+        pulls = response.json()
+        return [
+            {
+                "number": pr["number"],
+                "title": pr.get("title", ""),
+                "author": pr.get("user", {}).get("login", ""),
+                "updated": pr.get("updated_at", ""),
+            }
+            for pr in pulls
+        ]
+
+    async def get_open_issues(
+        self,
+        owner: str,
+        repo: str,
+        per_page: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Fetch open issues (excluding PRs) for a repo (lightweight, for agent context)."""
+        client = get_github_client()
+        response = await client.get(
+            f"{self.BASE_URL}/repos/{owner}/{repo}/issues",
+            headers=self._headers,
+            params={"state": "open", "per_page": per_page, "sort": "updated"},
+            timeout=10.0,
+        )
+        if response.status_code != 200:
+            return []
+        issues = response.json()
+        # GitHub issues API includes PRs; filter them out
+        return [
+            {
+                "number": issue["number"],
+                "title": issue.get("title", ""),
+                "author": issue.get("user", {}).get("login", ""),
+                "labels": [lbl.get("name", "") for lbl in issue.get("labels", [])],
+            }
+            for issue in issues
+            if "pull_request" not in issue
+        ]
+
     async def get_key_files(
         self,
         owner: str,

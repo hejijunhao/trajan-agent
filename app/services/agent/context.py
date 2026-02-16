@@ -4,8 +4,11 @@ Assembles project context from existing domain operations
 into a formatted string for the agent's system prompt.
 """
 
+import hashlib
+import logging
 import uuid as uuid_pkg
 from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +19,14 @@ from app.domain import (
     repository_ops,
     work_item_ops,
 )
+from app.services.github import GitHubService
+from app.services.github.cache import agent_context_cache
+
+logger = logging.getLogger(__name__)
+
+# Max chars for the entire GitHub context section
+_GITHUB_CONTEXT_CHAR_LIMIT = 2000
+_GITHUB_MAX_REPOS = 3
 
 
 class ContextBuilder:
@@ -25,6 +36,7 @@ class ContextBuilder:
         self,
         db: AsyncSession,
         product_id: uuid_pkg.UUID,
+        github_token: str | None = None,
     ) -> str:
         """Fetch and format all relevant project context into a string."""
         sections: list[str] = []
@@ -54,7 +66,104 @@ class ContextBuilder:
         if summary:
             sections.append(self._format_progress(summary))
 
+        # Live GitHub activity
+        if github_token and repos:
+            gh_context = await self._fetch_github_context(github_token, repos)
+            if gh_context:
+                sections.append(gh_context)
+
         return "\n\n".join(sections) if sections else "No project data available."
+
+    async def _fetch_github_context(
+        self,
+        github_token: str,
+        repos: Sequence[object],
+    ) -> str | None:
+        """Fetch live GitHub activity for the product's repos.
+
+        Returns a formatted context section, or None if all calls fail.
+        Gracefully handles token revocation, rate limits, and access errors.
+        Results are cached for 60s to avoid hammering GitHub during rapid chat.
+        """
+        # Build cache key from repo names (token not included — same repos = same data)
+        repo_names = sorted(
+            getattr(r, "full_name", "") for r in repos[:_GITHUB_MAX_REPOS]
+        )
+        cache_key = hashlib.md5(
+            f"agent_ctx:{':'.join(repo_names)}".encode()
+        ).hexdigest()
+
+        cached: str | None = agent_context_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        gh = GitHubService(github_token)
+        repo_sections: list[str] = []
+
+        for repo in repos[:_GITHUB_MAX_REPOS]:
+            full_name = getattr(repo, "full_name", None)
+            if not full_name or "/" not in full_name:
+                continue
+            owner, name = full_name.split("/", 1)
+
+            try:
+                section = await self._fetch_single_repo_context(gh, owner, name)
+                if section:
+                    repo_sections.append(section)
+            except Exception:
+                logger.warning("GitHub context fetch failed for %s", full_name, exc_info=True)
+                continue
+
+        if not repo_sections:
+            return None
+
+        result = "## GitHub Activity (Live)\n" + "\n".join(repo_sections)
+        result = result[:_GITHUB_CONTEXT_CHAR_LIMIT]
+        agent_context_cache[cache_key] = result
+        return result
+
+    @staticmethod
+    async def _fetch_single_repo_context(
+        gh: GitHubService,
+        owner: str,
+        name: str,
+    ) -> str | None:
+        """Fetch commits, PRs, and issues for a single repo."""
+        lines: list[str] = [f"### {owner}/{name}"]
+        has_data = False
+
+        # Recent commits
+        commits: list[dict[str, Any]] = await gh.get_recent_commits(owner, name, per_page=5)
+        if commits:
+            has_data = True
+            lines.append("Recent commits:")
+            for c in commits:
+                msg = c["message"][:72]
+                lines.append(f"  - {c['sha']} {msg} ({c['author']})")
+
+        # Open PRs
+        pulls: list[dict[str, Any]] = await gh.get_open_pulls(owner, name, per_page=5)
+        if pulls:
+            has_data = True
+            lines.append("Open PRs:")
+            for pr in pulls:
+                title = pr["title"][:60]
+                lines.append(f"  - #{pr['number']} {title} (by {pr['author']})")
+
+        # Open issues
+        issues: list[dict[str, Any]] = await gh.get_open_issues(owner, name, per_page=5)
+        if issues:
+            has_data = True
+            lines.append("Open issues:")
+            for issue in issues:
+                title = issue["title"][:60]
+                labels = ", ".join(issue["labels"][:3])
+                line = f"  - #{issue['number']} {title}"
+                if labels:
+                    line += f" [{labels}]"
+                lines.append(line)
+
+        return "\n".join(lines) if has_data else None
 
     @staticmethod
     def _format_product(product: object) -> str:

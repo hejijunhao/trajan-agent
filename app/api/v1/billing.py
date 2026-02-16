@@ -119,6 +119,8 @@ class DowngradeResponse(BaseModel):
     success: bool
     message: str
     deleted_repo_count: int
+    overage_repo_count: int = 0
+    monthly_overage_cost: int = 0  # in cents
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -494,15 +496,25 @@ async def downgrade_subscription(
     current_repo_count = await repository_ops.count_by_org(db, request.organization_id)
 
     # Validate repos_to_keep if reduction is needed
-    # Validate repos_to_keep if reduction is needed
-    needs_repo_deletion = current_repo_count > target_plan.base_repo_limit
     deleted_count = 0
-    if needs_repo_deletion and len(request.repos_to_keep) != target_plan.base_repo_limit:
-        raise HTTPException(
-            400,
-            f"Must specify exactly {target_plan.base_repo_limit} repositories to keep. "
-            f"Got {len(request.repos_to_keep)}.",
+    if target_plan.allows_overages:
+        # Plans with overages: user can keep all repos (empty list = keep all)
+        # or optionally select repos to trim
+        needs_repo_deletion = (
+            len(request.repos_to_keep) > 0
+            and current_repo_count > len(request.repos_to_keep)
         )
+        if needs_repo_deletion and len(request.repos_to_keep) < 1:
+            raise HTTPException(400, "Must keep at least 1 repository.")
+    else:
+        # Plans without overages (Indie): must trim to base limit
+        needs_repo_deletion = current_repo_count > target_plan.base_repo_limit
+        if needs_repo_deletion and len(request.repos_to_keep) != target_plan.base_repo_limit:
+            raise HTTPException(
+                400,
+                f"Must specify exactly {target_plan.base_repo_limit} repositories to keep. "
+                f"Got {len(request.repos_to_keep)}.",
+            )
 
     # Change Stripe subscription plan FIRST (external side effect before local mutations).
     # If Stripe fails, no local data has been changed — nothing to roll back.
@@ -520,6 +532,11 @@ async def downgrade_subscription(
         deleted_count = await repository_ops.bulk_delete_except(
             db, request.organization_id, request.repos_to_keep
         )
+
+    # Report overage usage if keeping repos above base limit
+    final_repo_count = current_repo_count - deleted_count
+    if final_repo_count > target_plan.base_repo_limit and target_plan.allows_overages:
+        stripe_service.report_repo_usage(subscription, final_repo_count)
 
     # Update local subscription record
     previous_tier = subscription.plan_tier
@@ -542,6 +559,9 @@ async def downgrade_subscription(
             "plan_tier": request.target_plan_tier,
             "repo_limit": target_plan.base_repo_limit,
             "repos_deleted": deleted_count,
+            "overage_repos": max(0, final_repo_count - target_plan.base_repo_limit),
+            "overage_cost_cents": max(0, final_repo_count - target_plan.base_repo_limit)
+            * target_plan.overage_repo_price,
         },
         description=f"Downgraded from {current_plan.display_name} to {target_plan.display_name}",
     )
@@ -553,10 +573,15 @@ async def downgrade_subscription(
         f"{request.target_plan_tier}, deleted {deleted_count} repos"
     )
 
+    overage_repos = max(0, final_repo_count - target_plan.base_repo_limit)
+    overage_cost = overage_repos * target_plan.overage_repo_price
+
     return DowngradeResponse(
         success=True,
         message=f"Successfully downgraded to {target_plan.display_name}.",
         deleted_repo_count=deleted_count,
+        overage_repo_count=overage_repos,
+        monthly_overage_cost=overage_cost,
     )
 
 

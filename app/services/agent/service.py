@@ -40,6 +40,7 @@ class CLIAgentService:
         db: AsyncSession,
         product_id: uuid_pkg.UUID,
         messages: list[dict[str, str]],
+        github_token: str | None = None,
     ) -> str:
         """Send a conversational message with product context.
 
@@ -47,11 +48,14 @@ class CLIAgentService:
             db: Database session with RLS context set.
             product_id: The product to query about.
             messages: Full conversation history [{role, content}, ...].
+            github_token: Optional GitHub token for live repo context.
 
         Returns:
             The assistant's response text.
         """
-        context = await self._context_builder.build(db, product_id)
+        context = await self._context_builder.build(
+            db, product_id, github_token=github_token
+        )
         system = f"{AGENT_SYSTEM_PROMPT}\n\n---\n\n{context}"
 
         typed_messages: list[MessageParam] = [
