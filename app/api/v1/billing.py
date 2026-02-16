@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, DbSession
 from app.config import settings
 from app.config.plans import PLANS, get_plan
+from app.domain.discount_operations import discount_ops
 from app.domain.organization_operations import organization_ops
 from app.domain.referral_operations import referral_ops
 from app.domain.repository_operations import repository_ops
@@ -121,6 +122,35 @@ class DowngradeResponse(BaseModel):
     deleted_repo_count: int
     overage_repo_count: int = 0
     monthly_overage_cost: int = 0  # in cents
+
+
+class ApplyDiscountRequest(BaseModel):
+    """Request to apply a discount code."""
+
+    organization_id: UUID
+    code: str
+
+
+class ApplyDiscountResponse(BaseModel):
+    """Response after applying a discount code."""
+
+    message: str
+    discount_percent: int
+    code: str
+
+
+class DiscountInfoResponse(BaseModel):
+    """Active discount information for an organization."""
+
+    code: str
+    discount_percent: int
+    redeemed_at: str
+
+
+class RemoveDiscountRequest(BaseModel):
+    """Request to remove an active discount."""
+
+    organization_id: UUID
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -583,6 +613,175 @@ async def downgrade_subscription(
         overage_repo_count=overage_repos,
         monthly_overage_cost=overage_cost,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Discount Code Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/apply-discount", response_model=ApplyDiscountResponse)
+async def apply_discount(
+    request: ApplyDiscountRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ApplyDiscountResponse:
+    """
+    Redeem a discount code for an organization.
+
+    User must be owner or admin of the organization.
+    Creates or retrieves the Stripe coupon and applies it to the subscription.
+    One active discount per organization.
+    """
+    # Verify user is owner/admin
+    role = await organization_ops.get_member_role(db, request.organization_id, current_user.id)
+    if not role or role not in ("owner", "admin"):
+        raise HTTPException(403, "Only owners and admins can manage billing")
+
+    # Get subscription — need a Stripe subscription to apply discount
+    subscription = await subscription_ops.get_by_org(db, request.organization_id)
+    if not subscription:
+        raise HTTPException(404, "Subscription not found")
+
+    if subscription.is_manually_assigned:
+        raise HTTPException(400, "Subscription is manually managed — discounts not applicable")
+
+    if not subscription.stripe_subscription_id:
+        raise HTTPException(400, "Subscribe to a plan first")
+
+    # Validate and redeem the code
+    try:
+        discount_code = await discount_ops.validate_code(db, request.code)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+    # Create/retrieve Stripe coupon and apply to subscription
+    try:
+        coupon_id = stripe_service.get_or_create_discount_coupon(
+            discount_code.code, discount_code.discount_percent
+        )
+    except Exception as e:
+        logger.error(f"Failed to create Stripe coupon: {e}")
+        raise HTTPException(500, "Failed to create discount in Stripe") from None
+
+    applied = stripe_service.apply_discount_to_subscription(
+        subscription.stripe_subscription_id, coupon_id
+    )
+    if not applied:
+        raise HTTPException(500, "Failed to apply discount to subscription")
+
+    # Record the redemption and update stripe_coupon_id if needed
+    try:
+        await discount_ops.redeem_code(
+            db, request.code, request.organization_id, current_user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+    if not discount_code.stripe_coupon_id:
+        discount_code.stripe_coupon_id = coupon_id
+        db.add(discount_code)
+
+    # Log billing event
+    await subscription_ops.log_event(
+        db,
+        organization_id=request.organization_id,
+        event_type=BillingEventType.DISCOUNT_APPLIED,
+        new_value={
+            "code": discount_code.code,
+            "discount_percent": discount_code.discount_percent,
+            "coupon_id": coupon_id,
+        },
+        description=f"Discount code {discount_code.code} applied ({discount_code.discount_percent}% off)",
+        actor_user_id=current_user.id,
+    )
+
+    await db.commit()
+
+    logger.info(
+        f"Applied discount {discount_code.code} ({discount_code.discount_percent}% off) "
+        f"to org {request.organization_id}"
+    )
+
+    return ApplyDiscountResponse(
+        message=f"{discount_code.discount_percent}% discount applied",
+        discount_percent=discount_code.discount_percent,
+        code=discount_code.code,
+    )
+
+
+@router.get("/discount/{organization_id}", response_model=DiscountInfoResponse | None)
+async def get_discount(
+    organization_id: UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> DiscountInfoResponse | None:
+    """
+    Get the active discount for an organization.
+
+    Returns the discount info or null if no discount is active.
+    """
+    # Verify user has access to this org
+    role = await organization_ops.get_member_role(db, organization_id, current_user.id)
+    if not role:
+        raise HTTPException(403, "Not a member of this organization")
+
+    redemption = await discount_ops.get_active_discount_for_org(db, organization_id)
+    if not redemption or not redemption.discount_code:
+        return None
+
+    return DiscountInfoResponse(
+        code=redemption.discount_code.code,
+        discount_percent=redemption.discount_code.discount_percent,
+        redeemed_at=redemption.redeemed_at.isoformat(),
+    )
+
+
+@router.post("/remove-discount")
+async def remove_discount(
+    request: RemoveDiscountRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> dict[str, str]:
+    """
+    Remove the active discount from an organization's subscription.
+
+    User must be owner or admin of the organization.
+    """
+    # Verify user is owner/admin
+    role = await organization_ops.get_member_role(db, request.organization_id, current_user.id)
+    if not role or role not in ("owner", "admin"):
+        raise HTTPException(403, "Only owners and admins can manage billing")
+
+    # Get subscription
+    subscription = await subscription_ops.get_by_org(db, request.organization_id)
+    if not subscription or not subscription.stripe_subscription_id:
+        raise HTTPException(400, "No active subscription")
+
+    # Remove from Stripe
+    removed = stripe_service.remove_discount_from_subscription(
+        subscription.stripe_subscription_id
+    )
+    if not removed:
+        raise HTTPException(500, "Failed to remove discount from Stripe")
+
+    # Remove from DB
+    await discount_ops.remove_discount_for_org(db, request.organization_id)
+
+    # Log billing event
+    await subscription_ops.log_event(
+        db,
+        organization_id=request.organization_id,
+        event_type=BillingEventType.DISCOUNT_REMOVED,
+        description="Discount removed from subscription",
+        actor_user_id=current_user.id,
+    )
+
+    await db.commit()
+
+    logger.info(f"Removed discount from org {request.organization_id}")
+
+    return {"message": "Discount removed"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

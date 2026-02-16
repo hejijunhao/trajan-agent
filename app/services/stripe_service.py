@@ -351,6 +351,91 @@ class StripeService:
             logger.error(f"Failed to apply referral reward: {e}")
             return False
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Discount Coupon Management
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def get_or_create_discount_coupon(code: str, percent_off: int) -> str:
+        """
+        Get or create a Stripe coupon for a discount code.
+
+        Uses the code as part of the coupon ID for idempotency.
+        Duration is "forever" so the discount recurs every billing cycle.
+
+        Returns the Stripe coupon ID.
+        """
+        coupon_id = f"DISCOUNT_{code.upper()}"
+
+        try:
+            coupon = stripe.Coupon.retrieve(coupon_id)
+            logger.info(f"Retrieved existing discount coupon: {coupon.id}")
+            return coupon.id
+        except StripeError:
+            pass  # Doesn't exist yet, create it
+
+        try:
+            coupon = stripe.Coupon.create(
+                id=coupon_id,
+                percent_off=percent_off,
+                duration="forever",
+                name=f"Discount Code: {code.upper()} ({percent_off}% off)",
+                metadata={
+                    "type": "discount_code",
+                    "code": code.upper(),
+                },
+            )
+            logger.info(f"Created discount coupon: {coupon.id}")
+            return coupon.id
+        except StripeError as e:
+            if "already exists" in str(e).lower():
+                return coupon_id
+            logger.error(f"Failed to create discount coupon: {e}")
+            raise
+
+    @staticmethod
+    def apply_discount_to_subscription(
+        stripe_subscription_id: str,
+        coupon_id: str,
+    ) -> bool:
+        """
+        Apply a discount coupon to a subscription.
+
+        Replaces any existing discount on the subscription.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            stripe.Subscription.modify(
+                stripe_subscription_id,
+                discounts=[{"coupon": coupon_id}],
+            )
+            logger.info(
+                f"Applied discount coupon {coupon_id} to subscription "
+                f"{stripe_subscription_id}"
+            )
+            return True
+        except StripeError as e:
+            logger.error(f"Failed to apply discount to subscription: {e}")
+            return False
+
+    @staticmethod
+    def remove_discount_from_subscription(stripe_subscription_id: str) -> bool:
+        """
+        Remove all discounts from a subscription.
+
+        Returns True if successful, False otherwise.
+        """
+        try:
+            stripe.Subscription.modify(
+                stripe_subscription_id,
+                discounts=[],
+            )
+            logger.info(f"Removed discount from subscription {stripe_subscription_id}")
+            return True
+        except StripeError as e:
+            logger.error(f"Failed to remove discount from subscription: {e}")
+            return False
+
     @staticmethod
     def get_customer_subscriptions(stripe_customer_id: str) -> list[dict[str, object]]:
         """

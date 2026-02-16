@@ -28,6 +28,8 @@ class BillingEventType(str, Enum):
     REFERRAL_CREDIT_APPLIED = "referral.credit_applied"
     REFERRAL_EARNED = "referral.earned"
     MANUAL_ASSIGNMENT = "manual.assignment"
+    DISCOUNT_APPLIED = "discount.applied"
+    DISCOUNT_REMOVED = "discount.removed"
 
 
 class UsageSnapshot(SQLModel, table=True):
