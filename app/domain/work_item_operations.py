@@ -1,4 +1,5 @@
 import uuid as uuid_pkg
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +38,10 @@ class WorkItemOperations:
 
         RLS enforces that the caller has product access.
         """
-        statement = select(WorkItem).where(WorkItem.product_id == product_id)
+        statement = select(WorkItem).where(
+            WorkItem.product_id == product_id,
+            WorkItem.deleted_at.is_(None),
+        )
 
         if status:
             statement = statement.where(WorkItem.status == status)
@@ -45,6 +49,29 @@ class WorkItemOperations:
             statement = statement.where(WorkItem.type == type)
 
         statement = statement.order_by(WorkItem.created_at.desc()).offset(skip).limit(limit)
+
+        result = await db.execute(statement)
+        return list(result.scalars().all())
+
+    async def get_all_accessible(
+        self,
+        db: AsyncSession,
+        status: str | None = None,
+        product_id: uuid_pkg.UUID | None = None,
+    ) -> list[WorkItem]:
+        """Get all work items accessible to the user across products.
+
+        RLS restricts results to products the user can access.
+        Excludes soft-deleted items by default.
+        """
+        statement = select(WorkItem).where(WorkItem.deleted_at.is_(None))
+
+        if status:
+            statement = statement.where(WorkItem.status == status)
+        if product_id:
+            statement = statement.where(WorkItem.product_id == product_id)
+
+        statement = statement.order_by(WorkItem.created_at.desc())
 
         result = await db.execute(statement)
         return list(result.scalars().all())
@@ -83,17 +110,52 @@ class WorkItemOperations:
         await db.refresh(db_obj)
         return db_obj
 
+    async def complete(
+        self,
+        db: AsyncSession,
+        work_item: WorkItem,
+        commit_sha: str,
+        commit_url: str | None = None,
+    ) -> WorkItem:
+        """Mark a work item as completed and link a commit.
+
+        Caller must verify product editor access before calling.
+        """
+        work_item.status = "completed"
+        work_item.completed_at = datetime.now(UTC)
+        work_item.commit_sha = commit_sha
+        work_item.commit_url = commit_url
+        db.add(work_item)
+        await db.flush()
+        await db.refresh(work_item)
+        return work_item
+
+    async def soft_delete(
+        self,
+        db: AsyncSession,
+        work_item: WorkItem,
+    ) -> WorkItem:
+        """Soft-delete a work item (sets deleted_at, preserves audit trail).
+
+        Caller must verify product editor access before calling.
+        """
+        work_item.status = "deleted"
+        work_item.deleted_at = datetime.now(UTC)
+        db.add(work_item)
+        await db.flush()
+        await db.refresh(work_item)
+        return work_item
+
     async def delete(
         self,
         db: AsyncSession,
         work_item: WorkItem,
     ) -> bool:
-        """Delete a work item.
+        """Soft-delete a work item (preserves audit trail).
 
         Caller must verify product editor access before calling.
         """
-        await db.delete(work_item)
-        await db.flush()
+        await self.soft_delete(db, work_item)
         return True
 
 

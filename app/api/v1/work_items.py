@@ -12,7 +12,7 @@ from app.api.deps import (
 )
 from app.domain import work_item_ops
 from app.models.user import User
-from app.models.work_item import WorkItem, WorkItemCreate, WorkItemUpdate
+from app.models.work_item import WorkItem, WorkItemComplete, WorkItemCreate, WorkItemUpdate
 
 router = APIRouter(prefix="/work-items", tags=["work items"])
 
@@ -31,6 +31,12 @@ def _serialize_work_item(item: WorkItem) -> dict:
         "created_by_user_id": str(item.created_by_user_id),
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
+        "completed_at": item.completed_at.isoformat() if item.completed_at else None,
+        "commit_sha": item.commit_sha,
+        "commit_url": item.commit_url,
+        "plans": item.plans,
+        "tags": item.tags,
+        "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
     }
 
 
@@ -55,6 +61,26 @@ async def list_work_items(
         type=type,
         skip=skip,
         limit=limit,
+    )
+    return [_serialize_work_item(w) for w in items]
+
+
+@router.get("/all", response_model=list[dict])
+async def list_all_work_items(
+    status: str | None = Query(None, description="Filter by status"),
+    product_id: uuid_pkg.UUID | None = Query(None, description="Filter by product"),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+):
+    """List all work items accessible to the user across products.
+
+    RLS restricts results to products the user can access.
+    Excludes soft-deleted items.
+    """
+    items = await work_item_ops.get_all_accessible(
+        db,
+        status=status,
+        product_id=product_id,
     )
     return [_serialize_work_item(w) for w in items]
 
@@ -98,6 +124,31 @@ async def create_work_item(
         created_by_user_id=current_user.id,
     )
     return _serialize_work_item(item)
+
+
+@router.patch("/{work_item_id}/complete")
+async def complete_work_item(
+    work_item_id: uuid_pkg.UUID,
+    body: WorkItemComplete,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+):
+    """Complete a work item and link a commit. Requires Editor or Admin access."""
+    item = await work_item_ops.get(db, work_item_id=work_item_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Work item not found",
+        )
+
+    if item.product_id:
+        await check_product_editor_access(db, item.product_id, current_user.id)
+        await require_product_subscription(db, item.product_id)
+
+    completed = await work_item_ops.complete(
+        db, work_item=item, commit_sha=body.commit_sha, commit_url=body.commit_url
+    )
+    return _serialize_work_item(completed)
 
 
 @router.patch("/{work_item_id}")

@@ -61,7 +61,7 @@ from app.models.subscription import (
 )
 from app.models.user import User
 from app.models.user_preferences import UserPreferences
-from app.models.work_item import WorkItem, WorkItemCreate, WorkItemUpdate
+from app.models.work_item import WorkItem, WorkItemComplete, WorkItemCreate, WorkItemUpdate
 
 __all__ = [
     "Announcement",
@@ -104,6 +104,7 @@ __all__ = [
     "RepositoryCreate",
     "RepositoryUpdate",
     "WorkItem",
+    "WorkItemComplete",
     "WorkItemCreate",
     "WorkItemUpdate",
     "Document",

@@ -120,9 +120,11 @@ class TestWorkItemMutations:
     async def test_delete_work_item(
         self, db_session: AsyncSession, test_work_item
     ):
-        """Can delete a work item."""
+        """Can soft-delete a work item."""
         deleted = await work_item_ops.delete(db_session, test_work_item)
         assert deleted is True
 
         found = await work_item_ops.get(db_session, test_work_item.id)
-        assert found is None
+        assert found is not None
+        assert found.status == "deleted"
+        assert found.deleted_at is not None

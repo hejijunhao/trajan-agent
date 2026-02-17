@@ -1,6 +1,9 @@
 import uuid as uuid_pkg
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
+from sqlalchemy import Column, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.base import TimestampMixin, UUIDMixin
@@ -33,6 +36,8 @@ class WorkItemCreate(SQLModel):
     status: str | None = None
     priority: int | None = None
     repository_id: uuid_pkg.UUID | None = None
+    plans: list[dict] | None = None
+    tags: list[str] | None = None
 
 
 class WorkItemUpdate(SQLModel):
@@ -43,6 +48,19 @@ class WorkItemUpdate(SQLModel):
     type: str | None = None
     status: str | None = None
     priority: int | None = None
+    completed_at: datetime | None = None
+    commit_sha: str | None = None
+    commit_url: str | None = None
+    plans: list[dict] | None = None
+    tags: list[str] | None = None
+    deleted_at: datetime | None = None
+
+
+class WorkItemComplete(SQLModel):
+    """Schema for completing a work item with a commit link."""
+
+    commit_sha: str = Field(min_length=7, max_length=40)
+    commit_url: str | None = None
 
 
 class WorkItem(WorkItemBase, UUIDMixin, TimestampMixin, table=True):
@@ -72,6 +90,18 @@ class WorkItem(WorkItemBase, UUIDMixin, TimestampMixin, table=True):
         default=None,
         foreign_key="repositories.id",
         index=True,
+    )
+
+    # Feedback ticket fields
+    completed_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    commit_sha: str | None = Field(default=None, max_length=40)
+    commit_url: str | None = Field(default=None)
+    plans: list[dict] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    tags: list[str] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    deleted_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
 
     # Relationships

@@ -34,6 +34,7 @@ from app.api.v1.organizations.members import (
 from app.api.v1.organizations.repositories import list_org_repositories
 from app.api.v1.organizations.settings import get_settings, update_settings
 from app.api.v1.organizations.subscriptions import get_repo_limit_status, get_subscription
+from app.api.v1.organizations.team_activity import get_team_activity
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
@@ -70,5 +71,8 @@ router.add_api_route(
 # Settings routes
 router.add_api_route("/{org_id}/settings", get_settings, methods=["GET"])
 router.add_api_route("/{org_id}/settings", update_settings, methods=["PATCH"])
+
+# Team activity routes
+router.add_api_route("/{org_id}/team-activity", get_team_activity, methods=["GET"])
 
 __all__ = ["router"]

@@ -134,3 +134,71 @@ class RepoLimitStatusResponse(BaseModel):
     base_limit: int  # Repos included in plan
     allows_overages: bool  # Whether plan allows adding beyond limit
     overage_price_cents: int  # Cost per additional repo (e.g., 1000 = $10)
+
+
+# --- Team Activity Schemas ---
+
+
+class TeamMemberProduct(BaseModel):
+    """Per-product commit breakdown for a team member."""
+
+    product_id: str
+    product_name: str
+    commits: int
+
+
+class TeamMemberStats(BaseModel):
+    """Aggregated stats for a team member across all products."""
+
+    commits: int
+    additions: int
+    deletions: int
+    files_changed: int
+    last_active: str | None
+    streak_days: int
+    daily_activity: list[dict[str, Any]]
+    focus_areas: list[str]
+    products: list[TeamMemberProduct]
+
+
+class TeamMemberRecentCommit(BaseModel):
+    """A recent commit with product context."""
+
+    sha: str
+    message: str
+    repository: str
+    product_name: str
+    timestamp: str
+    url: str | None
+
+
+class TeamMember(BaseModel):
+    """A team member with activity data."""
+
+    user_id: str | None  # None for external contributors (GitHub-only)
+    display_name: str
+    email: str | None
+    avatar_url: str | None
+    role: str | None  # None for external contributors
+    joined_at: str | None
+    status: str  # "active" | "idle" | "pending"
+    stats: TeamMemberStats | None  # None for pending invites
+    recent_commits: list[TeamMemberRecentCommit]
+
+
+class TeamActivityAggregate(BaseModel):
+    """Summary stats for the team activity response."""
+
+    active_contributors: int
+    total_commits: int
+    total_additions: int
+    total_deletions: int
+    products_touched: int
+
+
+class TeamActivityResponse(BaseModel):
+    """Response for the team activity endpoint."""
+
+    period_days: int
+    aggregate: TeamActivityAggregate
+    members: list[TeamMember]
