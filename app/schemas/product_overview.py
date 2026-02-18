@@ -50,6 +50,9 @@ class OverviewStats(BaseModel):
     last_activity: str | None = Field(
         default=None, description="Human-readable relative time, e.g., '2 hours ago'"
     )
+    last_activity_at: str | None = Field(
+        default=None, description="ISO 8601 datetime of most recent push for client-side formatting"
+    )
 
     # Code metrics
     total_lines_of_code: int | None = Field(default=None, description="Total LOC across all repos")

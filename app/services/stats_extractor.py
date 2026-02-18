@@ -172,6 +172,7 @@ class StatsExtractor:
             first_commit=_format_date_iso(earliest_first_commit),
             last_commit=_format_date_iso(latest_last_commit),
             last_activity=_format_relative_time(latest_pushed),
+            last_activity_at=latest_pushed.isoformat() if latest_pushed else None,
             # Code metrics
             total_lines_of_code=total_loc if total_loc > 0 else None,
             total_files=total_files if total_files > 0 else None,
