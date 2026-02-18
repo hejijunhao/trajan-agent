@@ -30,6 +30,7 @@ from .product_access import (
     ProductAccessContext,
     check_product_admin_access,
     check_product_editor_access,
+    check_product_viewer_access,
     get_product_access,
     require_product_admin,
     require_product_editor,
@@ -66,6 +67,7 @@ __all__ = [
     "require_product_editor",
     "require_product_admin",
     "require_variables_access",
+    "check_product_viewer_access",
     "check_product_editor_access",
     "check_product_admin_access",
 ]

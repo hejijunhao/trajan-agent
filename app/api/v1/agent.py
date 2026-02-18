@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    check_product_viewer_access,
     get_current_user,
     get_db_with_rls,
     require_product_subscription,
@@ -52,9 +53,9 @@ async def agent_chat(
 ) -> ChatResponse:
     """Chat with the CLI agent about a project.
 
-    RLS ensures the user can only access products they have permission for.
     Full message history is sent per request (stateless backend).
     """
+    await check_product_viewer_access(db, data.product_id, _current_user.id)
     await require_product_subscription(db, data.product_id)
 
     # Fetch user's GitHub token for live repo context

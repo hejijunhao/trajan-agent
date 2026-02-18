@@ -183,6 +183,20 @@ async def _check_product_access(
         )
 
 
+async def check_product_viewer_access(
+    db: AsyncSession,
+    product_id: uuid_pkg.UUID,
+    user_id: uuid_pkg.UUID,
+) -> None:
+    """
+    Check if user has viewer (or higher) access to a product.
+
+    Raises 403 if user doesn't have any access.
+    Use this for read-only endpoints where product_id comes from the request body.
+    """
+    await _check_product_access(db, product_id, user_id, "viewer")
+
+
 async def check_product_editor_access(
     db: AsyncSession,
     product_id: uuid_pkg.UUID,
