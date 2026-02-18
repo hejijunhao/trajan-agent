@@ -132,6 +132,91 @@ class VelocityInsight:
 
 
 @dataclass
+class LeaderboardEntry:
+    """A single contributor entry in the leaderboard."""
+
+    rank: int
+    author: str
+    avatar_url: str | None
+    commits: int
+    additions: int
+    deletions: int
+    net_loc: int
+    files_changed: int
+    repos_contributed_to: int
+    active_days: int
+    avg_commits_per_active_day: float
+    daily_activity: list[dict[str, Any]]
+    period_days: int
+
+
+@dataclass
+class CommitTypeBreakdown:
+    """Breakdown of commits by conventional type."""
+
+    type: str
+    count: int
+    percentage: float
+
+
+@dataclass
+class CommitQuality:
+    """Aggregate commit quality metrics."""
+
+    commit_types: list[dict[str, Any]]
+    avg_commit_size_loc: int
+    avg_files_per_commit: float
+    large_commits: int
+    conventional_commit_pct: float
+    total_analyzed: int
+
+
+@dataclass
+class HeatmapRow:
+    """A single contributor's row in the activity heatmap."""
+
+    author: str
+    avatar_url: str | None
+    cells: list[dict[str, Any]]  # [{date, commits}]
+
+
+@dataclass
+class DayOfWeekEntry:
+    """Commit count for a single day of the week."""
+
+    day: str  # "Mon", "Tue", ...
+    commits: int
+
+
+@dataclass
+class RepoComparison:
+    """Per-repository comparison stats for the velocity tab."""
+
+    repository_name: str
+    repository_full_name: str
+    commits: int
+    additions: int
+    deletions: int
+    net_loc: int
+    contributors: int
+    bus_factor: int
+    churn_ratio: float
+    cadence: str  # "daily" | "sporadic" | "inactive"
+    active_days: int
+
+
+@dataclass
+class PulseData:
+    """Development pulse metrics for the summary card."""
+
+    velocity_trend: float  # % change vs previous period
+    velocity_label: str  # "faster" | "slower" | "steady"
+    team_streak_days: int  # consecutive days with ≥1 commit
+    active_days_in_period: int  # days with commits in this period
+    period_days: int  # total days in period
+
+
+@dataclass
 class ProductShippedSummary:
     """Shipped summary for a single product in the dashboard."""
 

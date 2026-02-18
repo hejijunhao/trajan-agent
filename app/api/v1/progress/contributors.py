@@ -18,8 +18,8 @@ from app.models import User
 from app.services.github.timeline_types import TimelineEvent
 
 from .commit_fetcher import fetch_commit_stats, fetch_product_commits
-from .types import ContributorDetail
-from .utils import generate_daily_activity
+from .types import ContributorDetail, DayOfWeekEntry, HeatmapRow
+from .utils import generate_daily_activity, get_period_days
 
 router = APIRouter()
 
@@ -54,7 +54,7 @@ async def get_progress_contributors(
     )
 
     if not result:
-        return {"contributors": []}
+        return {"contributors": [], "heatmap": {"rows": [], "dates": []}, "day_of_week_pattern": []}
 
     # Fetch commit stats for LOC calculation
     events = await fetch_commit_stats(db, result.github, result.repos, result.events)
@@ -62,7 +62,15 @@ async def get_progress_contributors(
     # Compute per-contributor details
     contributors = _compute_contributors(events, period, sort_by)
 
-    return {"contributors": contributors}
+    # Compute heatmap and day-of-week pattern
+    heatmap = _compute_heatmap(events, period)
+    day_of_week = _compute_day_of_week(events)
+
+    return {
+        "contributors": contributors,
+        "heatmap": heatmap,
+        "day_of_week_pattern": [asdict(d) for d in day_of_week],
+    }
 
 
 def _compute_contributors(
@@ -143,3 +151,57 @@ def _compute_contributors(
         contributors.sort(key=lambda c: c.commits, reverse=True)
 
     return [asdict(c) for c in contributors]
+
+
+def _compute_heatmap(events: list[TimelineEvent], period: str) -> dict[str, Any]:
+    """Compute activity heatmap: contributors × dates grid."""
+    from datetime import UTC, datetime, timedelta
+
+    period_days = get_period_days(period)
+    today = datetime.now(UTC).date()
+    dates = [
+        (today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(period_days - 1, -1, -1)
+    ]
+
+    # Group events by author → date → count
+    author_date_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    author_totals: dict[str, int] = defaultdict(int)
+    author_avatars: dict[str, str | None] = {}
+
+    for event in events:
+        author = event.commit_author
+        date = event.timestamp.split("T")[0]
+        author_date_counts[author][date] += 1
+        author_totals[author] += 1
+        if author not in author_avatars:
+            author_avatars[author] = event.commit_author_avatar
+
+    # Sort by total commits descending (most active on top)
+    sorted_authors = sorted(author_totals.keys(), key=lambda a: author_totals[a], reverse=True)
+
+    rows = [
+        asdict(
+            HeatmapRow(
+                author=author,
+                avatar_url=author_avatars.get(author),
+                cells=[{"date": d, "commits": author_date_counts[author].get(d, 0)} for d in dates],
+            )
+        )
+        for author in sorted_authors
+    ]
+
+    return {"rows": rows, "dates": dates}
+
+
+def _compute_day_of_week(events: list[TimelineEvent]) -> list[DayOfWeekEntry]:
+    """Compute commit counts grouped by day of the week (Mon–Sun)."""
+    from datetime import datetime
+
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    counts: dict[int, int] = defaultdict(int)
+
+    for event in events:
+        dt = datetime.fromisoformat(event.timestamp.replace("Z", "+00:00"))
+        counts[dt.weekday()] += 1  # 0=Mon, 6=Sun
+
+    return [DayOfWeekEntry(day=day_names[i], commits=counts.get(i, 0)) for i in range(7)]

@@ -25,8 +25,14 @@ from app.services.github.exceptions import GitHubRepoRenamed
 from app.services.github.timeline_types import TimelineEvent
 
 from .commit_fetcher import fetch_commit_stats
-from .types import VelocityInsight
-from .utils import get_extended_period, get_period_start, handle_repo_rename, resolve_github_token
+from .types import RepoComparison, VelocityInsight
+from .utils import (
+    get_extended_period,
+    get_period_days,
+    get_period_start,
+    handle_repo_rename,
+    resolve_github_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +198,9 @@ def _compute_velocity(
     # Compute insights
     insights = _compute_velocity_insights(velocity_data, current_totals, previous_totals, period)
 
+    # Compute repo comparison
+    repo_comparison = _compute_repo_comparison(current_events, period)
+
     return {
         "velocity_data": velocity_data,
         "loc_data": loc_data,
@@ -199,13 +208,13 @@ def _compute_velocity(
         "current_totals": current_totals,
         "previous_totals": previous_totals,
         "insights": insights,
+        "repo_comparison": [asdict(r) for r in repo_comparison],
     }
 
 
 def _compute_daily_velocity(events: list[TimelineEvent], period: str) -> list[dict[str, Any]]:
     """Compute daily velocity data points."""
-    period_days = {"24h": 1, "48h": 2, "7d": 7, "14d": 14, "30d": 30, "90d": 90, "365d": 365}
-    days = period_days.get(period, 30)
+    days = get_period_days(period)
 
     today = datetime.now(UTC).date()
     daily_data: dict[str, dict[str, Any]] = {}
@@ -232,13 +241,15 @@ def _compute_daily_velocity(events: list[TimelineEvent], period: str) -> list[di
     result = []
     for date_str in sorted(daily_data.keys()):
         data = daily_data[date_str]
-        result.append({
-            "date": data["date"],
-            "commits": data["commits"],
-            "additions": data["additions"],
-            "deletions": data["deletions"],
-            "contributors": len(data["contributors"]),
-        })
+        result.append(
+            {
+                "date": data["date"],
+                "commits": data["commits"],
+                "additions": data["additions"],
+                "deletions": data["deletions"],
+                "contributors": len(data["contributors"]),
+            }
+        )
 
     return result
 
@@ -352,15 +363,70 @@ def _compute_velocity_insights(
         if active_days > 0:
             avg_per_active = total_commits / active_days
             avg_overall = total_commits / len(velocity_data)
-            msg = (
-                f"Average: {avg_overall:.1f} commits/day "
-                f"({avg_per_active:.1f} on active days)"
-            )
+            msg = f"Average: {avg_overall:.1f} commits/day ({avg_per_active:.1f} on active days)"
             insights.append(
                 VelocityInsight(type="pattern", message=msg, value=f"{avg_overall:.1f}")
             )
 
     return [asdict(i) for i in insights]
+
+
+def _compute_repo_comparison(events: list[TimelineEvent], period: str) -> list[RepoComparison]:
+    """Compute per-repository comparison stats."""
+    period_days = get_period_days(period)
+
+    # Group events by repository
+    repo_events: dict[str, list[TimelineEvent]] = defaultdict(list)
+    repo_full_names: dict[str, str] = {}
+
+    for event in events:
+        repo_events[event.repository_name].append(event)
+        if event.repository_name not in repo_full_names:
+            repo_full_names[event.repository_name] = event.repository_full_name
+
+    results: list[RepoComparison] = []
+    for repo_name, repo_evts in repo_events.items():
+        commits = len(repo_evts)
+        additions = sum(e.additions or 0 for e in repo_evts)
+        deletions = sum(e.deletions or 0 for e in repo_evts)
+        unique_authors: set[str] = set()
+        active_dates: set[str] = set()
+
+        for e in repo_evts:
+            unique_authors.add(e.commit_author)
+            active_dates.add(e.timestamp.split("T")[0])
+
+        active_days = len(active_dates)
+        contributors = len(unique_authors)
+        churn_ratio = round(deletions / additions, 2) if additions > 0 else 0.0
+
+        active_ratio = active_days / period_days if period_days > 0 else 0
+        if active_ratio >= 0.7:
+            cadence = "daily"
+        elif active_ratio >= 0.3:
+            cadence = "sporadic"
+        else:
+            cadence = "inactive"
+
+        results.append(
+            RepoComparison(
+                repository_name=repo_name,
+                repository_full_name=repo_full_names.get(repo_name, repo_name),
+                commits=commits,
+                additions=additions,
+                deletions=deletions,
+                net_loc=additions - deletions,
+                contributors=contributors,
+                bus_factor=contributors,
+                churn_ratio=churn_ratio,
+                cadence=cadence,
+                active_days=active_days,
+            )
+        )
+
+    # Sort by commits descending
+    results.sort(key=lambda r: r.commits, reverse=True)
+    return results
 
 
 def _empty_velocity_response() -> dict[str, Any]:
@@ -379,4 +445,5 @@ def _empty_velocity_response() -> dict[str, Any]:
         "current_totals": empty_totals.copy(),
         "previous_totals": empty_totals.copy(),
         "insights": [],
+        "repo_comparison": [],
     }

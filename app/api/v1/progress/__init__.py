@@ -16,6 +16,7 @@ from .ai_summary import router as ai_summary_router
 from .commit_fetcher import MAX_CONCURRENT_STAT_FETCHES
 from .contributors import router as contributors_router
 from .dashboard import router as dashboard_router
+from .leaderboard import router as leaderboard_router
 from .summary import router as summary_router
 from .utils import (
     _handle_repo_rename,
@@ -31,6 +32,7 @@ router.include_router(contributors_router)
 router.include_router(ai_summary_router)
 router.include_router(active_code_router)
 router.include_router(velocity_router)
+router.include_router(leaderboard_router)
 router.include_router(dashboard_router)
 
 __all__ = [
