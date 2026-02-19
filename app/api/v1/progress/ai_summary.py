@@ -98,7 +98,7 @@ async def generate_ai_summary(
     events = await fetch_commit_stats(db, result.github, result.repos, result.events)
 
     # Compute summary data (reuse existing function)
-    summary_data = _compute_summary(events, period)
+    summary_data = _compute_summary(events, [], period)
 
     # Build ProgressData for the AI summarizer
     progress_data = ProgressData(
