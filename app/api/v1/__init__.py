@@ -1,4 +1,5 @@
 from app.api.v1 import (
+    api_keys,
     app_info,
     billing,
     documents,
@@ -7,6 +8,7 @@ from app.api.v1 import (
     preferences,
     products,
     progress,
+    public_tickets,
     quick_access,
     referrals,
     repositories,
@@ -16,6 +18,7 @@ from app.api.v1 import (
 )
 
 __all__ = [
+    "api_keys",
     "products",
     "repositories",
     "work_items",
@@ -29,5 +32,6 @@ __all__ = [
     "referrals",
     "timeline",
     "progress",
+    "public_tickets",
     "quick_access",
 ]

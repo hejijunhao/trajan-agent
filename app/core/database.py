@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
@@ -105,4 +106,13 @@ async def init_db() -> None:
     Uses direct connection since DDL operations require it.
     """
     async with direct_engine.begin() as conn:
+        # Enable pg_trgm for fuzzy duplicate detection in work items
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(SQLModel.metadata.create_all)
+        # GIN trigram index for fast similarity queries on work item titles
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_work_items_title_trgm "
+                "ON work_items USING gin (title gin_trgm_ops)"
+            )
+        )

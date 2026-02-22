@@ -4,6 +4,7 @@ from app.api.v1 import (
     admin,
     agent,
     announcements,
+    api_keys,
     app_info,
     billing,
     documents,
@@ -14,6 +15,7 @@ from app.api.v1 import (
     preferences,
     products,
     progress,
+    public_tickets,
     quick_access,
     referrals,
     repositories,
@@ -42,4 +44,6 @@ api_router.include_router(billing.router)
 api_router.include_router(referrals.router)
 api_router.include_router(announcements.router)
 api_router.include_router(agent.router)
+api_router.include_router(api_keys.router)
+api_router.include_router(public_tickets.router)
 api_router.include_router(internal.router)

@@ -8,6 +8,7 @@ from app.domain.org_member_operations import org_member_ops
 from app.domain.organization_operations import organization_ops
 from app.domain.preferences_operations import preferences_ops
 from app.domain.product_access_operations import product_access_ops
+from app.domain.product_api_key_operations import api_key_ops
 from app.domain.product_operations import product_ops
 from app.domain.progress_summary_operations import progress_summary_ops
 from app.domain.referral_operations import referral_ops
@@ -37,4 +38,5 @@ __all__ = [
     "org_member_ops",
     "subscription_ops",
     "feedback_ops",
+    "api_key_ops",
 ]

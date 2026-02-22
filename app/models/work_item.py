@@ -24,6 +24,9 @@ class WorkItemBase(SQLModel):
         default=None, max_length=50, index=True
     )  # e.g. todo, in_progress, done
     priority: int | None = Field(default=None)
+    source: str | None = Field(default="web", max_length=30)  # web, api, api_interpreted
+    reporter_email: str | None = Field(default=None, max_length=255)
+    reporter_name: str | None = Field(default=None, max_length=255)
 
 
 class WorkItemCreate(SQLModel):
@@ -38,6 +41,10 @@ class WorkItemCreate(SQLModel):
     repository_id: uuid_pkg.UUID | None = None
     plans: list[dict] | None = None
     tags: list[str] | None = None
+    source: str | None = None
+    reporter_email: str | None = None
+    reporter_name: str | None = None
+    ticket_metadata: dict[str, object] | None = None
 
 
 class WorkItemUpdate(SQLModel):
@@ -54,6 +61,9 @@ class WorkItemUpdate(SQLModel):
     plans: list[dict] | None = None
     tags: list[str] | None = None
     deleted_at: datetime | None = None
+    reporter_email: str | None = None
+    reporter_name: str | None = None
+    ticket_metadata: dict[str, object] | None = None
 
 
 class WorkItemComplete(SQLModel):
@@ -100,6 +110,9 @@ class WorkItem(WorkItemBase, UUIDMixin, TimestampMixin, table=True):
     commit_url: str | None = Field(default=None)
     plans: list[dict] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
     tags: list[str] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    ticket_metadata: dict[str, object] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
     deleted_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )

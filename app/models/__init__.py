@@ -50,6 +50,12 @@ from app.models.product_access import (
     ProductAccessWithUser,
     UserBasicInfo,
 )
+from app.models.product_api_key import (
+    ProductApiKey,
+    ProductApiKeyCreate,
+    ProductApiKeyCreateResponse,
+    ProductApiKeyRead,
+)
 from app.models.progress_summary import ProgressSummary
 from app.models.referral_code import ReferralCode
 from app.models.repository import Repository, RepositoryCreate, RepositoryUpdate
@@ -100,6 +106,10 @@ __all__ = [
     "ProductAccessLevel",
     "ProductAccessWithUser",
     "UserBasicInfo",
+    "ProductApiKey",
+    "ProductApiKeyCreate",
+    "ProductApiKeyCreateResponse",
+    "ProductApiKeyRead",
     "Repository",
     "RepositoryCreate",
     "RepositoryUpdate",

@@ -25,6 +25,11 @@ class RateLimitConfig:
 REVEAL_LIMIT = RateLimitConfig(requests=30, window_seconds=60)  # 30 reveals per minute
 EXPORT_LIMIT = RateLimitConfig(requests=10, window_seconds=60)  # 10 exports per minute
 
+# Public API rate limits (keyed by API key ID)
+PUBLIC_WRITE_LIMIT = RateLimitConfig(requests=120, window_seconds=60)
+PUBLIC_INTERPRET_LIMIT = RateLimitConfig(requests=30, window_seconds=60)
+PUBLIC_READ_LIMIT = RateLimitConfig(requests=120, window_seconds=60)
+
 
 # Type alias for clarity
 UserId: TypeAlias = uuid_pkg.UUID
