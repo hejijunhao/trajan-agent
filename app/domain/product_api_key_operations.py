@@ -2,6 +2,7 @@
 
 import hashlib
 import secrets
+import time
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
@@ -10,6 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.base_operations import BaseOperations
 from app.models.product_api_key import ProductApiKey
+
+# In-memory cache: key_hash -> last write timestamp (monotonic seconds).
+# Used to debounce last_used_at updates — only write if >60s since last update.
+_last_used_write_cache: dict[str, float] = {}
+_LAST_USED_DEBOUNCE_SECONDS = 60
 
 
 class ProductApiKeyOperations(BaseOperations[ProductApiKey]):
@@ -97,9 +103,15 @@ class ProductApiKeyOperations(BaseOperations[ProductApiKey]):
         if api_key is None:
             return None
 
-        api_key.last_used_at = datetime.now(UTC)
-        db.add(api_key)
-        await db.flush()
+        # Debounce last_used_at writes — only flush to DB if >60s since last update.
+        now_mono = time.monotonic()
+        last_write = _last_used_write_cache.get(key_hash, 0.0)
+        if now_mono - last_write > _LAST_USED_DEBOUNCE_SECONDS:
+            api_key.last_used_at = datetime.now(UTC)
+            db.add(api_key)
+            await db.flush()
+            _last_used_write_cache[key_hash] = now_mono
+
         return api_key
 
     @staticmethod
