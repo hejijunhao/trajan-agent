@@ -47,12 +47,12 @@ VALID_TYPES = {"bug", "feature", "task", "question"}
 class PublicTicketCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    title: str
-    description: str | None = None
+    title: str = Field(max_length=500)
+    description: str | None = Field(default=None, max_length=50_000)
     type: str | None = None
     priority: str | None = None
-    reporter_email: str | None = None
-    reporter_name: str | None = None
+    reporter_email: str | None = Field(default=None, max_length=255)
+    reporter_name: str | None = Field(default=None, max_length=255)
     tags: list[str] | None = None
     extra_metadata: dict[str, Any] | None = Field(default=None, alias="metadata")
 
@@ -60,10 +60,10 @@ class PublicTicketCreate(BaseModel):
 class PublicTicketInterpret(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    message: str
-    title: str | None = None
-    reporter_email: str | None = None
-    reporter_name: str | None = None
+    message: str = Field(max_length=50_000)
+    title: str | None = Field(default=None, max_length=500)
+    reporter_email: str | None = Field(default=None, max_length=255)
+    reporter_name: str | None = Field(default=None, max_length=255)
     extra_metadata: dict[str, Any] | None = Field(default=None, alias="metadata")
 
 
