@@ -1,6 +1,6 @@
 import uuid as uuid_pkg
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Column, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
@@ -39,7 +39,7 @@ class WorkItemCreate(SQLModel):
     status: str | None = None
     priority: int | None = None
     repository_id: uuid_pkg.UUID | None = None
-    plans: list[dict] | None = None
+    plans: list[dict[str, Any]] | None = None
     tags: list[str] | None = None
     source: str | None = None
     reporter_email: str | None = None
@@ -58,7 +58,7 @@ class WorkItemUpdate(SQLModel):
     completed_at: datetime | None = None
     commit_sha: str | None = None
     commit_url: str | None = None
-    plans: list[dict] | None = None
+    plans: list[dict[str, Any]] | None = None
     tags: list[str] | None = None
     deleted_at: datetime | None = None
     reporter_email: str | None = None
@@ -108,7 +108,7 @@ class WorkItem(WorkItemBase, UUIDMixin, TimestampMixin, table=True):
     )
     commit_sha: str | None = Field(default=None, max_length=40)
     commit_url: str | None = Field(default=None)
-    plans: list[dict] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    plans: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
     tags: list[str] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
     ticket_metadata: dict[str, object] | None = Field(
         default=None, sa_column=Column(JSONB, nullable=True)

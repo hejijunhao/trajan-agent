@@ -49,8 +49,8 @@ class ProductApiKey(UUIDMixin, TimestampMixin, SQLModel, table=True):
 class ProductApiKeyCreate(SQLModel):
     """Schema for creating an API key."""
 
-    name: str
-    scopes: list[str]
+    name: str = Field(max_length=255)
+    scopes: list[str] = Field(min_length=1)
 
 
 class ProductApiKeyRead(SQLModel):
