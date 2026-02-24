@@ -165,6 +165,56 @@ class ContextBuilder:
 
         return "\n".join(lines) if has_data else None
 
+    async def build_summary(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        github_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Build a structured summary of what the agent can access."""
+        product = await product_ops.get(db, product_id)
+        repos = await repository_ops.get_by_product(db, product_id, limit=50)
+        items = await work_item_ops.get_by_product(db, product_id, limit=50)
+        docs = await document_ops.get_by_product(db, product_id, limit=50)
+        summary = await progress_summary_ops.get_by_product_period(db, product_id, "7d")
+
+        has_github = bool(github_token and repos)
+        repo_names = [
+            getattr(r, "full_name", "")
+            for r in (repos or [])[:_GITHUB_MAX_REPOS]
+            if getattr(r, "full_name", "")
+        ]
+
+        return {
+            "project": {
+                "name": {"accessible": bool(product), "value": getattr(product, "name", None)},
+                "description": {
+                    "accessible": bool(product and getattr(product, "description", None))
+                },
+                "overview": {
+                    "accessible": bool(product and getattr(product, "product_overview", None))
+                },
+                "repositories": {"accessible": bool(repos), "count": len(repos or [])},
+                "work_items": {"accessible": bool(items), "count": len(items or [])},
+                "documents": {"accessible": bool(docs), "count": len(docs or [])},
+                "progress_summary": {"accessible": bool(summary), "window_days": 7},
+                "environment_variables": {
+                    "accessible": False,
+                    "reason": "Excluded for security",
+                },
+                "app_info": {"accessible": False, "reason": "Not included in agent context"},
+            },
+            "github": {
+                "connected": has_github,
+                "capabilities": {
+                    "recent_commits": {"per_repo": 5, "max_repos": _GITHUB_MAX_REPOS},
+                    "open_pull_requests": {"per_repo": 5, "max_repos": _GITHUB_MAX_REPOS},
+                    "open_issues": {"per_repo": 5, "max_repos": _GITHUB_MAX_REPOS},
+                },
+                "repos_in_scope": repo_names if has_github else [],
+            },
+        }
+
     @staticmethod
     def _format_product(product: object) -> str:
         """Format product info section."""

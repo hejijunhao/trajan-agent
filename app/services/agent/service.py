@@ -1,6 +1,7 @@
 """CLI Agent service for conversational project queries."""
 
 import uuid as uuid_pkg
+from collections.abc import AsyncIterator
 from typing import Literal, cast
 
 import anthropic
@@ -20,7 +21,7 @@ class CLIAgentService:
     conversations by accepting full message history.
     """
 
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     max_tokens: int = 1024
 
     def __init__(self, api_key: str | None = None) -> None:
@@ -75,3 +76,33 @@ class CLIAgentService:
 
         first_block = response.content[0]
         return first_block.text if hasattr(first_block, "text") else str(first_block)
+
+    async def chat_stream(
+        self,
+        db: AsyncSession,
+        product_id: uuid_pkg.UUID,
+        messages: list[dict[str, str]],
+        github_token: str | None = None,
+    ) -> AsyncIterator[str]:
+        """Stream a conversational response, yielding text deltas."""
+        context = await self._context_builder.build(
+            db, product_id, github_token=github_token
+        )
+        system = f"{AGENT_SYSTEM_PROMPT}\n\n---\n\n{context}"
+
+        typed_messages: list[MessageParam] = [
+            {
+                "role": cast(Literal["user", "assistant"], m["role"]),
+                "content": m["content"],
+            }
+            for m in messages
+        ]
+
+        async with self.client.messages.stream(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            system=system,
+            messages=typed_messages,
+        ) as stream:
+            async for text in stream.text_stream:
+                yield text

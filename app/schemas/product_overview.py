@@ -198,7 +198,7 @@ class ProductOverview(BaseModel):
     # Metadata
     analyzed_at: datetime = Field(description="When analysis was completed")
     analyzer_model: str = Field(
-        default="claude-sonnet-4-20250514", description="Model used for analysis"
+        default="claude-sonnet-4-6", description="Model used for analysis"
     )
 
 

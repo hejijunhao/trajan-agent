@@ -28,7 +28,7 @@ from app.services.github import RepoContext
 logger = logging.getLogger(__name__)
 
 # Model for architecture extraction - Sonnet for accurate code understanding
-ARCHITECTURE_MODEL = "claude-sonnet-4-20250514"
+ARCHITECTURE_MODEL = "claude-sonnet-4-6"
 
 # Retry configuration
 MAX_RETRIES = 3

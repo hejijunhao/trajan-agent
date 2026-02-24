@@ -38,7 +38,7 @@ from app.services.stats_extractor import StatsExtractor
 logger = logging.getLogger(__name__)
 
 # Model name for tracking in ProductOverview
-ORCHESTRATOR_MODEL = "claude-sonnet-4-20250514"
+ORCHESTRATOR_MODEL = "claude-sonnet-4-6"
 
 
 class AnalysisOrchestrator:

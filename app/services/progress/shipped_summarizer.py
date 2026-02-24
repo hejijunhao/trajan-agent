@@ -61,7 +61,7 @@ class ShippedSummarizer(BaseInterpreter[ShippedAnalysisInput, ShippedSummary]):
     Filters out noise like dependency updates, linting, or trivial changes.
     """
 
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     max_tokens: int = 500
 
     def get_system_prompt(self) -> str:

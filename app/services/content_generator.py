@@ -24,7 +24,7 @@ from app.services.github import RepoContext
 logger = logging.getLogger(__name__)
 
 # Model for content generation - Sonnet for quality prose
-CONTENT_MODEL = "claude-sonnet-4-20250514"
+CONTENT_MODEL = "claude-sonnet-4-6"
 
 # Retry configuration
 MAX_RETRIES = 3

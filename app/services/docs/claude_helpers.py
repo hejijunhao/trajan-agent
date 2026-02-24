@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Model constants
 # ---------------------------------------------------------------------------
-MODEL_OPUS = "claude-opus-4-20250514"
-MODEL_SONNET = "claude-sonnet-4-20250514"
+MODEL_OPUS = "claude-opus-4-6"
+MODEL_SONNET = "claude-sonnet-4-6"
 
 # Document types that benefit from Opus's deeper reasoning
 COMPLEX_DOC_TYPES = {"architecture", "concept"}

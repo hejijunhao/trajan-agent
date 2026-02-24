@@ -5,7 +5,7 @@ Contains model settings, limits, and pattern definitions used for file selection
 """
 
 # Model for file selection - Haiku for speed and cost efficiency
-FILE_SELECTOR_MODEL = "claude-3-5-haiku-20241022"
+FILE_SELECTOR_MODEL = "claude-haiku-4-5-20251001"
 
 # Limits
 MAX_FILES_TO_SELECT = 50

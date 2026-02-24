@@ -26,7 +26,7 @@ class BaseInterpreter(ABC, Generic[TInput, TOutput]):
     """
 
     # Override in subclasses
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     max_tokens: int = 1000
 
     def __init__(self, api_key: str | None = None):

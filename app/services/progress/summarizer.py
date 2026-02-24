@@ -40,7 +40,7 @@ class ProgressSummarizer(BaseInterpreter[ProgressData, ProgressNarrative]):
     activity into a PM-friendly 2-4 sentence update.
     """
 
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     max_tokens: int = 300
 
     def get_system_prompt(self) -> str:
