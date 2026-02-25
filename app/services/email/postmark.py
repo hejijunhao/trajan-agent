@@ -77,12 +77,16 @@ class PostmarkService:
             client = getattr(self, "_shared_client", None)
             if client:
                 response = await client.post(
-                    POSTMARK_API_URL, json=payload, headers=headers,
+                    POSTMARK_API_URL,
+                    json=payload,
+                    headers=headers,
                 )
             else:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     response = await client.post(
-                        POSTMARK_API_URL, json=payload, headers=headers,
+                        POSTMARK_API_URL,
+                        json=payload,
+                        headers=headers,
                     )
             response.raise_for_status()
             logger.info(f"[postmark] Sent to {to}: {subject}")
@@ -96,6 +100,56 @@ class PostmarkService:
         except httpx.RequestError as e:
             logger.error(f"[postmark] Request failed sending to {to}: {e}")
             return False
+
+    async def send_team_invite(
+        self,
+        to: str,
+        inviter_name: str | None,
+        org_name: str | None,
+        magic_link: str,
+    ) -> bool:
+        """Send a team invite email with an embedded magic link.
+
+        Used when the invited user already has a Supabase auth account,
+        so `invite_user_by_email` can't be used.
+
+        Returns True on success, False on failure (never raises).
+        """
+        inviter = inviter_name or "A team member"
+        workspace = org_name or "a workspace"
+
+        subject = f"{inviter} invited you to {workspace} on Trajan"
+
+        html_body = f"""\
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 0;">
+  <h2 style="margin: 0 0 16px;">You've been invited to {workspace}</h2>
+  <p style="color: #374151; line-height: 1.6; margin: 0 0 8px;">
+    {inviter} has invited you to join <strong>{workspace}</strong> on Trajan.
+  </p>
+  <p style="color: #374151; line-height: 1.6; margin: 0 0 24px;">
+    You already have an account — clicking the button below will log you in
+    and take you to your new workspace.
+  </p>
+  <a href="{magic_link}"
+     style="display: inline-block; background: #c2410c; color: #fff;
+            padding: 12px 28px; border-radius: 6px; text-decoration: none;
+            font-weight: 600;">
+    Join Workspace
+  </a>
+  <p style="color: #6b7280; font-size: 13px; margin: 24px 0 0;">
+    If the button doesn't work, copy and paste this link into your browser:<br/>
+    <a href="{magic_link}" style="color: #c2410c;">{magic_link}</a>
+  </p>
+</div>"""
+
+        text_body = (
+            f"{inviter} invited you to {workspace} on Trajan.\n\n"
+            f"You already have an account — use the link below to log in "
+            f"and access your new workspace:\n\n"
+            f"{magic_link}\n"
+        )
+
+        return await self.send(to=to, subject=subject, html_body=html_body, text_body=text_body)
 
     _shared_client: httpx.AsyncClient | None = None
 

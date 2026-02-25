@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.config.settings import settings
 from app.models.organization import MemberRole, OrganizationMember
 from app.models.user import User
+from app.services.email.postmark import postmark_service
 from app.services.supabase import get_supabase_admin_client
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,8 @@ class OrgMemberOperations:
         self,
         db: AsyncSession,
         email: str,
+        inviter_name: str | None = None,
+        org_name: str | None = None,
     ) -> User:
         """
         Create a user via Supabase Admin API.
@@ -238,21 +241,35 @@ class OrgMemberOperations:
                 logger.info(f"User {email} already exists in Supabase, syncing to local DB")
 
                 # First check our local database
-                existing_user = await self.find_user_by_email(db, email)
-                if existing_user:
-                    return existing_user
+                resolved_user = await self.find_user_by_email(db, email)
 
                 # User exists in Supabase but not locally - fetch and sync
-                try:
-                    synced_user = await self._sync_user_from_supabase(db, email)
-                    if synced_user:
-                        return synced_user
-                except Exception as sync_error:
-                    logger.error(f"Failed to sync Supabase user {email}: {sync_error}")
+                if not resolved_user:
+                    try:
+                        resolved_user = await self._sync_user_from_supabase(db, email)
+                    except Exception as sync_error:
+                        logger.error(f"Failed to sync Supabase user {email}: {sync_error}")
 
-                raise SupabaseInviteError(
-                    "User exists in auth system but sync failed. Please try again."
-                ) from e
+                if not resolved_user:
+                    raise SupabaseInviteError(
+                        "User exists in auth system but sync failed. Please try again."
+                    ) from e
+
+                # Send invite email via magic link (Supabase invite can't be used
+                # for existing users, so we generate a magic link and email it)
+                try:
+                    await self._send_invite_to_existing_user(
+                        email=email,
+                        inviter_name=inviter_name,
+                        org_name=org_name,
+                    )
+                except SupabaseInviteError:
+                    logger.warning(
+                        f"Could not send invite email to existing user {email} "
+                        f"(member record will still be created)"
+                    )
+
+                return resolved_user
 
             # Log and re-raise other errors with cleaner message
             logger.error(f"Supabase invite failed for {email}: {e}")
@@ -293,15 +310,69 @@ class OrgMemberOperations:
         logger.info(f"Synced Supabase user {email} to local database")
         return user
 
-    async def resend_invite(self, email: str) -> None:
+    async def _send_invite_to_existing_user(
+        self,
+        email: str,
+        inviter_name: str | None,
+        org_name: str | None,
+    ) -> bool:
+        """Generate a magic link and send a team invite email for an existing Supabase user.
+
+        Used as a fallback when `invite_user_by_email` fails because the user
+        already has a Supabase auth account.
+
+        Returns True if the email was sent, False if Postmark delivery failed
+        (non-fatal — the member record is still created by the caller).
+
+        Raises:
+            SupabaseInviteError: If `generate_link` itself fails.
+        """
+        try:
+            supabase = get_supabase_admin_client()
+            redirect_url = f"{settings.frontend_url}/auth/callback"
+            response = await asyncio.to_thread(
+                supabase.auth.admin.generate_link,
+                {
+                    "type": "magiclink",
+                    "email": email,
+                    "options": {"redirect_to": redirect_url},
+                },
+            )
+            magic_link = response.properties.action_link
+        except Exception as e:
+            logger.error(f"Failed to generate magic link for {email}: {e}")
+            raise SupabaseInviteError(
+                "Failed to generate login link for existing user. Please try again later."
+            ) from e
+
+        sent = await postmark_service.send_team_invite(
+            to=email,
+            inviter_name=inviter_name,
+            org_name=org_name,
+            magic_link=magic_link,
+        )
+        if not sent:
+            logger.warning(
+                f"Postmark delivery failed for team invite to {email} "
+                f"(member record was still created)"
+            )
+        return sent
+
+    async def resend_invite(
+        self,
+        email: str,
+        inviter_name: str | None = None,
+        org_name: str | None = None,
+    ) -> None:
         """
         Resend invite email to a pending user via Supabase Admin API.
 
         Calling invite_user_by_email on an existing user resends the invite
-        with a fresh link.
+        with a fresh link. If the user already has a confirmed Supabase account,
+        falls back to generating a magic link and sending a team invite email.
 
         Raises:
-            SupabaseInviteError: If Supabase API call fails.
+            SupabaseInviteError: If both invite and magic link fallback fail.
         """
         try:
             supabase = get_supabase_admin_client()
@@ -311,6 +382,20 @@ class OrgMemberOperations:
             await asyncio.to_thread(supabase.auth.admin.invite_user_by_email, email, invite_options)
             logger.info(f"Resent invite email to {email}")
         except Exception as e:
+            error_msg = str(e).lower()
+
+            if "already been registered" in error_msg or "already exists" in error_msg:
+                logger.info(
+                    f"User {email} already registered in Supabase, "
+                    f"resending via magic link fallback"
+                )
+                await self._send_invite_to_existing_user(
+                    email=email,
+                    inviter_name=inviter_name,
+                    org_name=org_name,
+                )
+                return
+
             logger.error(f"Failed to resend invite to {email}: {e}")
             raise SupabaseInviteError(
                 "Failed to resend invite email. Please try again later."

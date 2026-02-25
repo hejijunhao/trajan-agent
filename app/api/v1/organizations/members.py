@@ -92,7 +92,12 @@ async def add_member(
     if not target_user:
         try:
             # Create user via Supabase Admin API (sends invite email automatically)
-            target_user = await org_member_ops.create_user_via_supabase(db, data.email)
+            target_user = await org_member_ops.create_user_via_supabase(
+                db,
+                data.email,
+                inviter_name=user.display_name,
+                org_name=org.name,
+            )
         except InvalidEmailError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -333,7 +338,11 @@ async def resend_invite(
 
     # Resend invite via Supabase
     try:
-        await org_member_ops.resend_invite(member.user.email)
+        await org_member_ops.resend_invite(
+            member.user.email,
+            inviter_name=user.display_name,
+            org_name=org.name,
+        )
     except SupabaseInviteError as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
