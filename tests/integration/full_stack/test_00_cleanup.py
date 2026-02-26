@@ -130,7 +130,7 @@ class TestCleanupInfrastructure:
             id=uuid.uuid4(),
             title="Cleanup Task",
             type="feature",
-            status="todo",
+            status="reported",
             product_id=product.id,
             created_by_user_id=user.id,
         )

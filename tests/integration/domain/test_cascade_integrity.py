@@ -187,7 +187,7 @@ class TestProductCascade:
             obj_in={
                 "title": "Cascade Task",
                 "type": "feature",
-                "status": "todo",
+                "status": "reported",
                 "product_id": pid,
             },
             created_by_user_id=test_user.id,

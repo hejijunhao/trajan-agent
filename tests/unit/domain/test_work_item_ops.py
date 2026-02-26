@@ -61,10 +61,10 @@ class TestWorkItemGetByProduct:
 
     @pytest.mark.asyncio
     async def test_accepts_status_filter(self):
-        items = [make_mock_work_item(status="done")]
+        items = [make_mock_work_item(status="completed")]
         self.db.execute = AsyncMock(return_value=mock_scalars_result(items))
 
-        result = await self.ops.get_by_product(self.db, uuid.uuid4(), status="done")
+        result = await self.ops.get_by_product(self.db, uuid.uuid4(), status="completed")
         assert len(result) == 1
 
     @pytest.mark.asyncio
@@ -123,8 +123,8 @@ class TestWorkItemUpdate:
         self.db.flush = AsyncMock()
         self.db.refresh = AsyncMock()
 
-        result = await self.ops.update(self.db, item, {"status": "done"})
-        assert result.status == "done"
+        result = await self.ops.update(self.db, item, {"status": "completed"})
+        assert result.status == "completed"
 
     @pytest.mark.asyncio
     async def test_update_applies_none_values(self):
@@ -134,9 +134,9 @@ class TestWorkItemUpdate:
         self.db.flush = AsyncMock()
         self.db.refresh = AsyncMock()
 
-        await self.ops.update(self.db, item, {"title": None, "status": "done"})
+        await self.ops.update(self.db, item, {"title": None, "status": "completed"})
         assert item.title is None
-        assert item.status == "done"
+        assert item.status == "completed"
 
 
 class TestWorkItemDelete:

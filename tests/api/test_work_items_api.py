@@ -33,7 +33,7 @@ async def test_get_work_item(
     data = resp.json()
     assert data["id"] == str(test_work_item.id)
     assert data["title"] == test_work_item.title
-    assert data["status"] == "todo"
+    assert data["status"] == "reported"
 
 
 @pytest.mark.anyio
@@ -54,7 +54,7 @@ async def test_create_work_item(
             "product_id": str(test_product.id),
             "title": f"New Task {uuid.uuid4().hex[:8]}",
             "type": "feature",
-            "status": "todo",
+            "status": "reported",
         },
     )
     assert resp.status_code == 201
@@ -89,7 +89,7 @@ async def test_delete_work_item(
             "product_id": test_product.id,
             "title": f"Throwaway {uuid.uuid4().hex[:8]}",
             "type": "feature",
-            "status": "todo",
+            "status": "reported",
         },
         created_by_user_id=test_user.id,
     )

@@ -33,10 +33,10 @@ async def find_duplicate_work_item(
     if not clean_title:
         return None
 
-    # Base filter: same product, not done, not deleted
+    # Base filter: same product, not completed, not deleted
     base_filters = [
         WorkItem.product_id == product_id,
-        WorkItem.status.notin_(["done", "completed", "deleted"]),  # type: ignore[union-attr]
+        WorkItem.status.notin_(["completed", "deleted"]),  # type: ignore[union-attr]
         WorkItem.deleted_at.is_(None),  # type: ignore[union-attr]
     ]
 

@@ -31,7 +31,7 @@ class TestWorkItemsRequireAuth:
                     "product_id": FAKE_ID,
                     "title": "t",
                     "type": "feature",
-                    "status": "todo",
+                    "status": "reported",
                 },
             ),
             ("patch", f"/api/v1/work-items/{FAKE_ID}", {"title": "t"}),
@@ -85,7 +85,7 @@ class TestWorkItemsNonMemberBlocked:
                 "product_id": str(test_product.id),
                 "title": "evil",
                 "type": "feature",
-                "status": "todo",
+                "status": "reported",
             },
         )
 
@@ -128,7 +128,7 @@ class TestWorkItemsViewerCannotWrite:
                 "product_id": str(test_product.id),
                 "title": "sneaky",
                 "type": "feature",
-                "status": "todo",
+                "status": "reported",
             },
         )
 

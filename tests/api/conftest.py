@@ -72,7 +72,7 @@ async def test_work_item(db_session: AsyncSession, test_user, test_product):
             "title": f"Test Work Item {uuid.uuid4().hex[:8]}",
             "description": "Test work item description.",
             "type": "feature",
-            "status": "todo",
+            "status": "reported",
         },
         created_by_user_id=test_user.id,
     )

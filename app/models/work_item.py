@@ -21,8 +21,8 @@ class WorkItemBase(SQLModel):
         default=None, max_length=50
     )  # e.g. feature, fix, refactor, investigation
     status: str | None = Field(
-        default=None, max_length=50, index=True
-    )  # e.g. todo, in_progress, done
+        default="reported", max_length=50, index=True
+    )  # e.g. reported, in_progress, completed
     priority: int | None = Field(default=None)
     source: str | None = Field(default="web", max_length=30)  # web, api, api_interpreted
     reporter_email: str | None = Field(default=None, max_length=255)

@@ -36,8 +36,8 @@ router = APIRouter(prefix="/public/tickets", tags=["Public API"])
 # Priority mapping
 # ---------------------------------------------------------------------------
 
-PRIORITY_MAP = {"critical": 1, "high": 2, "medium": 3, "low": 4}
-VALID_TYPES = {"bug", "feature", "task", "question"}
+PRIORITY_MAP = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+VALID_TYPES = {"feature", "fix", "refactor", "investigation", "bug", "task", "question"}
 
 # ---------------------------------------------------------------------------
 # Request schemas
@@ -191,7 +191,7 @@ async def create_ticket(
             "title": data.title,
             "description": data.description,
             "type": data.type,
-            "status": "todo",
+            "status": "reported",
             "priority": PRIORITY_MAP.get(data.priority, 3) if data.priority else 3,
             "source": "api",
             "reporter_email": data.reporter_email,
@@ -205,7 +205,7 @@ async def create_ticket(
     return PublicTicketResponse(
         id=work_item.id,
         title=work_item.title or "",
-        status=work_item.status or "todo",
+        status=work_item.status or "reported",
         type=work_item.type,
         priority=work_item.priority,
         created_at=work_item.created_at,
@@ -270,7 +270,7 @@ async def interpret_ticket(
             "title": title,
             "description": description,
             "type": ticket.ticket_type,
-            "status": "todo",
+            "status": "reported",
             "priority": PRIORITY_MAP.get(ticket.priority, 3),
             "source": "api_interpreted",
             "tags": ticket.suggested_labels,
@@ -284,7 +284,7 @@ async def interpret_ticket(
     return PublicTicketInterpretResponse(
         id=work_item.id,
         title=work_item.title or "",
-        status=work_item.status or "todo",
+        status=work_item.status or "reported",
         type=work_item.type,
         priority=work_item.priority,
         created_at=work_item.created_at,

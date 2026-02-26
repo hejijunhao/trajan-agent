@@ -37,6 +37,9 @@ def _serialize_work_item(item: WorkItem) -> dict:
         "plans": item.plans,
         "tags": item.tags,
         "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
+        "source": item.source,
+        "reporter_email": item.reporter_email,
+        "reporter_name": item.reporter_name,
     }
 
 

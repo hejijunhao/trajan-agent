@@ -24,7 +24,7 @@ class TestWorkItemCRUD:
                 "title": "Implement dark mode",
                 "description": "Add theme toggle",
                 "type": "feature",
-                "status": "todo",
+                "status": "reported",
                 "priority": 1,
                 "product_id": test_product.id,
             },
@@ -34,7 +34,7 @@ class TestWorkItemCRUD:
         assert item.id is not None
         assert item.title == "Implement dark mode"
         assert item.type == "feature"
-        assert item.status == "todo"
+        assert item.status == "reported"
         assert item.priority == 1
         assert item.created_by_user_id == test_user.id
 
@@ -58,9 +58,9 @@ class TestWorkItemFilters:
         await work_item_ops.create(
             db_session,
             obj_in={
-                "title": "Done task",
+                "title": "Completed task",
                 "type": "fix",
-                "status": "done",
+                "status": "completed",
                 "product_id": test_product.id,
             },
             created_by_user_id=test_user.id,
@@ -68,19 +68,19 @@ class TestWorkItemFilters:
         await work_item_ops.create(
             db_session,
             obj_in={
-                "title": "Todo task",
+                "title": "Reported task",
                 "type": "fix",
-                "status": "todo",
+                "status": "reported",
                 "product_id": test_product.id,
             },
             created_by_user_id=test_user.id,
         )
 
-        done_items = await work_item_ops.get_by_product(
-            db_session, test_product.id, status="done"
+        completed_items = await work_item_ops.get_by_product(
+            db_session, test_product.id, status="completed"
         )
-        assert all(i.status == "done" for i in done_items)
-        assert len(done_items) >= 1
+        assert all(i.status == "completed" for i in completed_items)
+        assert len(completed_items) >= 1
 
     async def test_type_filter(
         self, db_session: AsyncSession, test_user, test_product
@@ -91,7 +91,7 @@ class TestWorkItemFilters:
             obj_in={
                 "title": "Refactor auth",
                 "type": "refactor",
-                "status": "todo",
+                "status": "reported",
                 "product_id": test_product.id,
             },
             created_by_user_id=test_user.id,

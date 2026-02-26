@@ -18,7 +18,7 @@ def _work_item_payload(product_id: str) -> dict:
         "product_id": product_id,
         "title": "Test gating work item",
         "type": "feature",
-        "status": "todo",
+        "status": "reported",
     }
 
 
