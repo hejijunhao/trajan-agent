@@ -193,8 +193,8 @@ class OrgMemberOperations:
         db: AsyncSession,
         email: str,
     ) -> User | None:
-        """Find a user by email for invitations."""
-        statement = select(User).where(User.email == email)
+        """Find a user by email for invitations (case-insensitive)."""
+        statement = select(User).where(func.lower(User.email) == email.lower())
         result = await db.execute(statement)
         return result.scalar_one_or_none()
 
@@ -275,6 +275,12 @@ class OrgMemberOperations:
             logger.error(f"Supabase invite failed for {email}: {e}")
             raise SupabaseInviteError("Failed to send invite email. Please try again later.") from e
 
+        # Return existing public.users record if present (e.g. Supabase
+        # reactivated a soft-deleted auth user with the same UUID)
+        existing = await db.get(User, supabase_user_id)
+        if existing:
+            return existing
+
         # Create public.users record
         user = User(id=supabase_user_id, email=email)
         db.add(user)
@@ -302,8 +308,15 @@ class OrgMemberOperations:
         if not supabase_user:
             return None
 
+        # Check if user already exists locally by ID (email case mismatch)
+        supabase_id = uuid_pkg.UUID(supabase_user.id)
+        existing = await db.get(User, supabase_id)
+        if existing:
+            logger.info(f"User {email} already exists locally (id={supabase_id})")
+            return existing
+
         # Create local record
-        user = User(id=uuid_pkg.UUID(supabase_user.id), email=email)
+        user = User(id=supabase_id, email=email)
         db.add(user)
         await db.flush()
         await db.refresh(user)

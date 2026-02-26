@@ -52,6 +52,7 @@ class TestEmailValidation:
         self.ops = OrgMemberOperations()
         self.db = MagicMock()
         self.db.execute = AsyncMock()
+        self.db.get = AsyncMock(return_value=None)
         self.db.flush = AsyncMock()
         self.db.refresh = AsyncMock()
 
@@ -151,6 +152,7 @@ class TestCreateUserViaSupabaseNewUserNoFallback:
         self.ops = OrgMemberOperations()
         self.db = MagicMock()
         self.db.execute = AsyncMock()
+        self.db.get = AsyncMock(return_value=None)
         self.db.flush = AsyncMock()
         self.db.refresh = AsyncMock()
 
