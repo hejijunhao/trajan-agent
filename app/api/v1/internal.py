@@ -89,9 +89,30 @@ async def trigger_weekly_digest(
     """
     _verify_cron_secret(x_cron_secret)
 
-    from app.services.email.weekly_digest import send_weekly_digests
+    from app.services.email.weekly_digest import send_digests
 
-    report = await send_weekly_digests(db)
+    report = await send_digests(db, frequency="weekly")
+    await db.commit()
+
+    return asdict(report)
+
+
+@router.post("/send-daily-digest")
+async def trigger_daily_digest(
+    x_cron_secret: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Manually trigger the daily digest email for all opted-in users.
+
+    Protected by X-Cron-Secret header. Useful for testing or forcing a send.
+    Note: This job runs automatically via APScheduler — see services/scheduler.py.
+    """
+    _verify_cron_secret(x_cron_secret)
+
+    from app.services.email.weekly_digest import send_digests
+
+    report = await send_digests(db, frequency="daily")
     await db.commit()
 
     return asdict(report)

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 AUTO_PROGRESS_LOCK_ID = 891247
 PLAN_PROMPT_LOCK_ID = 891248
 WEEKLY_DIGEST_LOCK_ID = 891249
+DAILY_DIGEST_LOCK_ID = 891250
 
 
 @asynccontextmanager
@@ -143,10 +144,10 @@ async def run_weekly_digest() -> dict[str, Any] | None:
             from dataclasses import asdict
 
             from app.core.database import async_session_maker
-            from app.services.email.weekly_digest import send_weekly_digests
+            from app.services.email.weekly_digest import send_digests
 
             async with async_session_maker() as db:
-                report = await send_weekly_digests(db)
+                report = await send_digests(db, frequency="weekly")
                 await db.commit()
 
             logger.info(
@@ -159,6 +160,42 @@ async def run_weekly_digest() -> dict[str, Any] | None:
 
         except Exception as e:
             logger.exception(f"[scheduler] Weekly-digest: failed with error: {e}")
+            return None
+
+
+async def run_daily_digest() -> dict[str, Any] | None:
+    """
+    Execute the daily digest email job with advisory lock protection.
+
+    Returns the report dict if executed, None if skipped (lock held by another instance).
+    """
+    async with advisory_lock(DAILY_DIGEST_LOCK_ID) as acquired:
+        if not acquired:
+            logger.info("[scheduler] Daily-digest: skipped (another instance is running)")
+            return None
+
+        logger.info("[scheduler] Daily-digest: starting")
+
+        try:
+            from dataclasses import asdict
+
+            from app.core.database import async_session_maker
+            from app.services.email.weekly_digest import send_digests
+
+            async with async_session_maker() as db:
+                report = await send_digests(db, frequency="daily")
+                await db.commit()
+
+            logger.info(
+                f"[scheduler] Daily-digest: completed "
+                f"({report.users_emailed} emailed, "
+                f"{report.emails_sent} emails sent, "
+                f"{report.duration_seconds}s)"
+            )
+            return asdict(report)
+
+        except Exception as e:
+            logger.exception(f"[scheduler] Daily-digest: failed with error: {e}")
             return None
 
 
@@ -203,12 +240,21 @@ class Scheduler:
             replace_existing=True,
         )
 
+        # Daily digest: hourly check (same timezone-aware pattern as weekly)
+        self._scheduler.add_job(
+            run_daily_digest,
+            trigger=CronTrigger(minute=0),
+            id="daily_digest",
+            name="Daily Digest Emails",
+            replace_existing=True,
+        )
+
         self._scheduler.start()
         logger.info(
             f"[scheduler] Started with auto-progress at "
             f"{settings.auto_progress_hour:02d}:00 UTC, "
             f"plan-prompt at {settings.plan_prompt_email_hour:02d}:30 UTC, "
-            f"weekly-digest hourly (per-user timezone)"
+            f"digest emails hourly (per-user timezone)"
         )
 
     def stop(self) -> None:
@@ -229,6 +275,8 @@ class Scheduler:
             return await run_plan_prompt_emails()
         if job_id == "weekly_digest":
             return await run_weekly_digest()
+        if job_id == "daily_digest":
+            return await run_daily_digest()
         return None
 
 

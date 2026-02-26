@@ -1,5 +1,5 @@
 """
-Tests for the weekly digest email job.
+Tests for the digest email job (daily and weekly).
 
 Verifies:
 - Consolidated mode (all projects, single email)
@@ -11,6 +11,9 @@ Verifies:
 - Postmark disabled → early return
 - Partial send failure counting
 - users_emailed only increments on success (Phase 1 fix)
+- Daily digest: subject lines, period, no day-of-week gate
+- Progress review HTML: contributor blocks, overflow, commit ref badges
+- Plain-text contributor summaries
 """
 
 import uuid
@@ -24,6 +27,8 @@ from app.services.email.weekly_digest import (
     _build_email_html,
     _build_plain_text,
     _build_product_html,
+    _build_progress_review_html,
+    send_digests,
     send_weekly_digests,
 )
 
@@ -87,10 +92,24 @@ def _make_mock_membership(org_id: uuid.UUID, org: MagicMock | None = None) -> Ma
     return membership
 
 
-def _make_mock_summary(text: str = "Great progress this week.") -> MagicMock:
+def _make_mock_prefs_daily(
+    user: MagicMock | None = None,
+    digest_product_ids: list[str] | None = None,
+) -> MagicMock:
+    """Create a mock UserPreferences configured for daily digest."""
+    prefs = _make_mock_prefs(user=user, digest_product_ids=digest_product_ids)
+    prefs.email_digest = "daily"
+    return prefs
+
+
+def _make_mock_summary(
+    text: str = "Great progress this week.",
+    contributor_summaries: list[dict] | None = None,
+) -> MagicMock:
     """Create a mock ProgressSummary."""
     summary = MagicMock()
     summary.summary_text = text
+    summary.contributor_summaries = contributor_summaries
     return summary
 
 
@@ -664,7 +683,9 @@ class TestEmailTemplates:
         assert "Open Trajan" in html
 
     def test_plain_text_contains_product_data(self) -> None:
-        data = [("My App", "Good week", [{"description": "New feature", "category": "feature"}])]
+        data = [
+            ("My App", "Good week", [{"description": "New feature", "category": "feature"}], None)
+        ]
         text = _build_plain_text(data)
         assert "My App" in text
         assert "Good week" in text
@@ -672,7 +693,7 @@ class TestEmailTemplates:
 
     def test_plain_text_caps_at_8_items(self) -> None:
         items = [{"description": f"Item {i}", "category": "fix"} for i in range(10)]
-        text = _build_plain_text([("App", "Narrative", items)])
+        text = _build_plain_text([("App", "Narrative", items, None)])
         assert "Item 7" in text
         assert "Item 8" not in text
         assert "… and 2 more" in text
@@ -700,3 +721,508 @@ class TestWeeklyDigestReport:
         report.skipped_reasons["no_email"] = 2
         report.skipped_reasons["no_products"] = 1
         assert report.skipped_reasons == {"no_email": 2, "no_products": 1}
+
+
+# ---------------------------------------------------------------------------
+# send_digests — daily frequency path
+# ---------------------------------------------------------------------------
+
+
+class TestSendDailyDigests:
+    """Tests for the daily digest path via send_digests(frequency='daily')."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.email.weekly_digest.postmark_service")
+    @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
+    @patch("app.services.email.weekly_digest.progress_summary_ops")
+    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest.settings")
+    async def test_daily_sends_with_daily_subject(
+        self,
+        mock_settings: MagicMock,
+        mock_get_products: MagicMock,
+        mock_progress_ops: MagicMock,
+        mock_shipped_ops: MagicMock,
+        mock_postmark: MagicMock,
+    ) -> None:
+        """Daily digest uses 'Your Daily Progress' subject and '1d' period."""
+        _configure_digest_settings(mock_settings)
+        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
+        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_postmark.send = AsyncMock(return_value=True)
+
+        product = _make_mock_product("My Project")
+        mock_get_products.return_value = [product]
+
+        mock_progress_ops.get_by_product_period = AsyncMock(
+            return_value=_make_mock_summary("Daily progress")
+        )
+        mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
+
+        prefs = _make_mock_prefs_daily(digest_product_ids=None)
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
+
+        report = await send_digests(db, frequency="daily")
+
+        assert report.users_emailed == 1
+        assert report.emails_sent == 1
+
+        call_kwargs = mock_postmark.send.call_args.kwargs
+        assert call_kwargs["subject"] == "Your Daily Progress"
+        assert "Daily Progress" in call_kwargs["html_body"]
+
+        # Verify it queries the "1d" period, not "7d"
+        # Call signature: get_by_product_period(db, product_id, period)
+        period_args = [
+            c.kwargs.get("period") or c.args[2]
+            for c in mock_progress_ops.get_by_product_period.call_args_list
+        ]
+        assert all(p == "1d" for p in period_args)
+
+    @pytest.mark.asyncio
+    @patch("app.services.email.weekly_digest.postmark_service")
+    @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
+    @patch("app.services.email.weekly_digest.progress_summary_ops")
+    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest.settings")
+    async def test_daily_per_project_uses_daily_subject(
+        self,
+        mock_settings: MagicMock,
+        mock_get_products: MagicMock,
+        mock_progress_ops: MagicMock,
+        mock_shipped_ops: MagicMock,
+        mock_postmark: MagicMock,
+    ) -> None:
+        """Per-project daily digest uses 'Daily Progress: {name}' subjects."""
+        _configure_digest_settings(mock_settings)
+        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
+        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_postmark.send = AsyncMock(return_value=True)
+
+        product = _make_mock_product("Acme App")
+        mock_get_products.return_value = [product]
+
+        mock_progress_ops.get_by_product_period = AsyncMock(
+            return_value=_make_mock_summary("Daily update")
+        )
+        mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
+
+        prefs = _make_mock_prefs_daily(digest_product_ids=[str(product.id)])
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
+
+        report = await send_digests(db, frequency="daily")
+
+        assert report.emails_sent == 1
+        call_kwargs = mock_postmark.send.call_args.kwargs
+        assert call_kwargs["subject"] == "Daily Progress: Acme App"
+
+    @pytest.mark.asyncio
+    @patch("app.services.email.weekly_digest.postmark_service")
+    @patch("app.services.email.weekly_digest.settings")
+    async def test_daily_runs_any_day_of_week(
+        self, mock_settings: MagicMock, mock_postmark: MagicMock
+    ) -> None:
+        """Daily digest doesn't gate on day-of-week — eligible any day."""
+        _configure_digest_settings(mock_settings)
+        # Set weekly_digest_day to a day that is NOT today — daily should still work
+        mock_settings.weekly_digest_day = "zzz"  # impossible day
+        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
+        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        prefs = _make_mock_prefs_daily()
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
+
+        report = await send_digests(db, frequency="daily")
+
+        # The user should be eligible (hour matches), even though day is wrong
+        # They'll be skipped for no_products, but the point is they weren't
+        # filtered out by day-of-week
+        assert report.users_checked == 1
+
+    @pytest.mark.asyncio
+    @patch("app.services.email.weekly_digest.postmark_service")
+    @patch("app.services.email.weekly_digest.settings")
+    async def test_weekly_skips_wrong_day(
+        self, mock_settings: MagicMock, mock_postmark: MagicMock
+    ) -> None:
+        """Weekly digest skips users when day-of-week doesn't match (contrast with daily)."""
+        _configure_digest_settings(mock_settings)
+        mock_settings.weekly_digest_day = "zzz"  # impossible day
+        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
+        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        prefs = _make_mock_prefs()  # weekly
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
+
+        report = await send_digests(db, frequency="weekly")
+
+        # No eligible users because the day is wrong
+        assert report.users_checked == 1
+        assert report.users_emailed == 0
+
+
+# ---------------------------------------------------------------------------
+# send_digests — contributor summaries in emails
+# ---------------------------------------------------------------------------
+
+
+class TestDigestWithContributorSummaries:
+    """Tests that contributor summaries flow through to the email."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.email.weekly_digest.postmark_service")
+    @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
+    @patch("app.services.email.weekly_digest.progress_summary_ops")
+    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest.settings")
+    async def test_contributor_summaries_appear_in_email(
+        self,
+        mock_settings: MagicMock,
+        mock_get_products: MagicMock,
+        mock_progress_ops: MagicMock,
+        mock_shipped_ops: MagicMock,
+        mock_postmark: MagicMock,
+    ) -> None:
+        """Contributor summaries from ProgressSummary should appear in both HTML and text."""
+        _configure_digest_settings(mock_settings)
+        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
+        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_postmark.send = AsyncMock(return_value=True)
+
+        product = _make_mock_product("Project X")
+        mock_get_products.return_value = [product]
+
+        contribs = [
+            {
+                "name": "Alice",
+                "summary_text": "Implemented OAuth flow.",
+                "commit_count": 5,
+                "additions": 200,
+                "deletions": 30,
+                "commit_refs": [{"sha": "abc1234", "branch": "main"}],
+            },
+        ]
+        mock_progress_ops.get_by_product_period = AsyncMock(
+            return_value=_make_mock_summary("Good week.", contributor_summaries=contribs)
+        )
+        mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
+
+        prefs = _make_mock_prefs(digest_product_ids=None)
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
+
+        report = await send_weekly_digests(db)
+
+        assert report.emails_sent == 1
+        call_kwargs = mock_postmark.send.call_args.kwargs
+
+        # HTML should contain contributor name and summary
+        assert "Alice" in call_kwargs["html_body"]
+        assert "Implemented OAuth flow." in call_kwargs["html_body"]
+        assert "abc1234" in call_kwargs["html_body"]
+        assert "Progress Review" in call_kwargs["html_body"]
+
+        # Plain text too
+        assert "Alice" in call_kwargs["text_body"]
+        assert "Implemented OAuth flow." in call_kwargs["text_body"]
+
+
+# ---------------------------------------------------------------------------
+# _build_progress_review_html — progress review rendering
+# ---------------------------------------------------------------------------
+
+
+class TestBuildProgressReviewHtml:
+    """Tests for the per-contributor progress review HTML builder."""
+
+    def test_empty_list_returns_empty_string(self) -> None:
+        assert _build_progress_review_html([]) == ""
+
+    def test_renders_contributor_name_and_summary(self) -> None:
+        data = [
+            {
+                "name": "Bob",
+                "summary_text": "Fixed login bug.",
+                "commit_count": 3,
+                "commit_refs": [],
+            },
+        ]
+        html = _build_progress_review_html(data)
+        assert "Bob" in html
+        assert "Fixed login bug." in html
+        assert "3 commits" in html
+        assert "Progress Review" in html
+
+    def test_singular_commit_label(self) -> None:
+        data = [{"name": "Solo", "summary_text": "One fix.", "commit_count": 1, "commit_refs": []}]
+        html = _build_progress_review_html(data)
+        assert "1 commit)" in html
+        assert "1 commits" not in html
+
+    def test_renders_commit_ref_badges(self) -> None:
+        data = [
+            {
+                "name": "Charlie",
+                "summary_text": "Refactored auth.",
+                "commit_count": 2,
+                "commit_refs": [
+                    {"sha": "a1b2c3d", "branch": "main"},
+                    {"sha": "e4f5g6h", "branch": "feature/x"},
+                ],
+            },
+        ]
+        html = _build_progress_review_html(data)
+        assert "a1b2c3d" in html
+        assert "e4f5g6h" in html
+
+    def test_caps_ref_badges_at_3(self) -> None:
+        refs = [{"sha": f"sha{i}abc", "branch": "main"} for i in range(5)]
+        data = [{"name": "Dev", "summary_text": "Busy.", "commit_count": 5, "commit_refs": refs}]
+        html = _build_progress_review_html(data)
+        assert "sha0abc" in html
+        assert "sha2abc" in html
+        assert "sha3abc" not in html  # 4th ref should be omitted
+
+    def test_caps_contributors_at_5_with_overflow(self) -> None:
+        data = [
+            {"name": f"Dev{i}", "summary_text": f"Work {i}.", "commit_count": 1, "commit_refs": []}
+            for i in range(7)
+        ]
+        html = _build_progress_review_html(data)
+        assert "Dev0" in html
+        assert "Dev4" in html
+        assert "Dev5" not in html  # 6th contributor hidden
+        assert "… and 2 more contributors" in html
+
+    def test_overflow_singular(self) -> None:
+        data = [
+            {"name": f"Dev{i}", "summary_text": "Work.", "commit_count": 1, "commit_refs": []}
+            for i in range(6)
+        ]
+        html = _build_progress_review_html(data)
+        assert "… and 1 more contributor" in html
+        assert "contributors" not in html
+
+    def test_html_escapes_names(self) -> None:
+        data = [
+            {
+                "name": "<script>alert('xss')</script>",
+                "summary_text": "Normal work.",
+                "commit_count": 1,
+                "commit_refs": [],
+            },
+        ]
+        html = _build_progress_review_html(data)
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+
+
+# ---------------------------------------------------------------------------
+# Email template tests — daily frequency
+# ---------------------------------------------------------------------------
+
+
+class TestEmailTemplatesDaily:
+    """Tests for frequency-aware email templates."""
+
+    def test_daily_email_html_heading(self) -> None:
+        html = _build_email_html(["<div>Section</div>"], "https://app.test.com", frequency="daily")
+        assert "Daily Progress" in html
+        assert "Your projects today" in html
+        assert "daily digests" in html
+
+    def test_weekly_email_html_heading(self) -> None:
+        html = _build_email_html(
+            ["<div>Section</div>"], "https://app.test.com", frequency="weekly"
+        )
+        assert "Weekly Progress" in html
+        assert "Your projects this week" in html
+        assert "weekly digests" in html
+
+    def test_daily_plain_text_heading(self) -> None:
+        data = [("App", "Progress.", [{"description": "Fix", "category": "fix"}], None)]
+        text = _build_plain_text(data, frequency="daily")
+        assert "Daily Progress" in text
+        assert "Your projects today" in text
+
+    def test_plain_text_includes_contributor_summaries(self) -> None:
+        contribs = [
+            {"name": "Alice", "summary_text": "Shipped auth flow.", "commit_count": 4},
+            {"name": "Bob", "summary_text": "Fixed tests.", "commit_count": 2},
+        ]
+        data = [("App", "Good week.", [{"description": "Feature", "category": "feature"}], contribs)]
+        text = _build_plain_text(data)
+        assert "Progress Review:" in text
+        assert "Alice (4 commits)" in text
+        assert "Shipped auth flow." in text
+        assert "Bob (2 commits)" in text
+        assert "Fixed tests." in text
+
+    def test_plain_text_contributor_overflow(self) -> None:
+        contribs = [
+            {"name": f"Dev{i}", "summary_text": f"Work {i}.", "commit_count": 1} for i in range(7)
+        ]
+        data = [("App", "Busy.", [], contribs)]
+        text = _build_plain_text(data)
+        assert "Dev4" in text
+        assert "Dev5" not in text
+        assert "… and 2 more contributors" in text
+
+    def test_product_html_with_contributor_summaries(self) -> None:
+        contribs = [
+            {
+                "name": "Dana",
+                "summary_text": "Built the API.",
+                "commit_count": 8,
+                "commit_refs": [{"sha": "f1a2b3c", "branch": "main"}],
+            }
+        ]
+        html = _build_product_html("My App", "Narrative.", [], contributor_summaries=contribs)
+        assert "Dana" in html
+        assert "Built the API." in html
+        assert "f1a2b3c" in html
+        assert "Progress Review" in html
+
+    def test_product_html_without_contributor_summaries(self) -> None:
+        html = _build_product_html("My App", "Narrative.", [], contributor_summaries=None)
+        assert "Progress Review" not in html
+
+
+# ---------------------------------------------------------------------------
+# ContributorSummarizer — output parsing
+# ---------------------------------------------------------------------------
+
+
+class TestContributorSummarizer:
+    """Tests for the ContributorSummarizer parse/build logic."""
+
+    def test_parse_output_single_contributor(self) -> None:
+        from app.services.progress.summarizer import ContributorSummarizer
+
+        summarizer = ContributorSummarizer()
+        raw = (
+            "CONTRIBUTOR: Alice\n"
+            "Implemented OAuth login with Google and GitHub providers [a1b2c3d]. "
+            "Also fixed a session timeout bug [e4f5a6b]."
+        )
+        result = summarizer.parse_output(raw)
+
+        assert len(result.items) == 1
+        assert result.items[0].name == "Alice"
+        assert "OAuth" in result.items[0].summary_text
+        assert len(result.items[0].commit_refs) == 2
+        assert result.items[0].commit_refs[0]["sha"] == "a1b2c3d"
+        assert result.items[0].commit_refs[1]["sha"] == "e4f5a6b"
+
+    def test_parse_output_multiple_contributors(self) -> None:
+        from app.services.progress.summarizer import ContributorSummarizer
+
+        summarizer = ContributorSummarizer()
+        raw = (
+            "CONTRIBUTOR: Alice\n"
+            "Built the auth system [a1b2c3d].\n"
+            "\n"
+            "CONTRIBUTOR: Bob\n"
+            "Fixed database migrations [f7a8b9c]."
+        )
+        result = summarizer.parse_output(raw)
+
+        assert len(result.items) == 2
+        assert result.items[0].name == "Alice"
+        assert result.items[1].name == "Bob"
+        assert result.items[1].commit_refs[0]["sha"] == "f7a8b9c"
+
+    def test_parse_output_empty_text(self) -> None:
+        from app.services.progress.summarizer import ContributorSummarizer
+
+        summarizer = ContributorSummarizer()
+        result = summarizer.parse_output("")
+
+        assert len(result.items) == 0
+
+    def test_parse_output_no_sha_refs(self) -> None:
+        from app.services.progress.summarizer import ContributorSummarizer
+
+        summarizer = ContributorSummarizer()
+        raw = "CONTRIBUTOR: Charlie\nDid some work without specific commits."
+        result = summarizer.parse_output(raw)
+
+        assert len(result.items) == 1
+        assert result.items[0].name == "Charlie"
+        assert result.items[0].commit_refs == []
+
+    def test_build_item_extracts_sha_refs(self) -> None:
+        from app.services.progress.summarizer import ContributorSummarizer
+
+        summarizer = ContributorSummarizer()
+        item = summarizer._build_item("Alice", ["Shipped OAuth [a1b2c3d] and SSO [e4f5a6b]."])
+
+        assert item.name == "Alice"
+        assert len(item.commit_refs) == 2
+        assert item.commit_refs[0] == {"sha": "a1b2c3d", "branch": ""}
+        assert item.commit_refs[1] == {"sha": "e4f5a6b", "branch": ""}
+        # Stats are zero — caller fills them in
+        assert item.commit_count == 0
+
+    @pytest.mark.asyncio
+    async def test_interpret_empty_contributors(self) -> None:
+        """Empty contributor list returns immediately without calling AI."""
+        from app.services.progress.summarizer import ContributorInput, ContributorSummarizer
+
+        summarizer = ContributorSummarizer()
+        result = await summarizer.interpret(
+            ContributorInput(period="7d", product_name="Test", contributors=[])
+        )
+
+        assert result.items == []
+
+    def test_format_input_caps_at_5_contributors(self) -> None:
+        from app.services.progress.summarizer import (
+            ContributorCommitData,
+            ContributorInput,
+            ContributorSummarizer,
+        )
+
+        summarizer = ContributorSummarizer()
+        contributors = [
+            ContributorCommitData(
+                name=f"Dev{i}",
+                commits=[{"message": "fix", "sha": f"sha{i}abc"}],
+                commit_count=1,
+            )
+            for i in range(8)
+        ]
+        text = summarizer.format_input(
+            ContributorInput(period="7d", product_name="App", contributors=contributors)
+        )
+
+        assert "Dev4" in text
+        assert "Dev5" not in text  # 6th contributor omitted
+
+    def test_format_input_caps_at_10_commits_per_contributor(self) -> None:
+        from app.services.progress.summarizer import (
+            ContributorCommitData,
+            ContributorInput,
+            ContributorSummarizer,
+        )
+
+        summarizer = ContributorSummarizer()
+        # Use 7-char hex SHAs since format_input truncates to [:7]
+        commits = [{"message": f"commit {i}", "sha": f"a{i:02d}b{i:02d}c"} for i in range(15)]
+        contributors = [ContributorCommitData(name="Alice", commits=commits, commit_count=15)]
+        text = summarizer.format_input(
+            ContributorInput(period="7d", product_name="App", contributors=contributors)
+        )
+
+        assert "commit 9" in text  # 10th commit present
+        assert "commit 10" not in text  # 11th commit omitted
+        assert "and 5 more commits" in text

@@ -2,6 +2,7 @@
 
 import uuid as uuid_pkg
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
@@ -58,6 +59,7 @@ class ProgressSummaryOperations:
         total_additions: int = 0,
         total_deletions: int = 0,
         last_activity_at: datetime | None = None,
+        contributor_summaries: list[dict[str, Any]] | None = None,
     ) -> ProgressSummary:
         """
         Create or update a progress summary.
@@ -74,6 +76,7 @@ class ProgressSummaryOperations:
             total_additions: Stats snapshot
             total_deletions: Stats snapshot
             last_activity_at: Timestamp of the newest commit seen
+            contributor_summaries: Per-contributor AI summaries (JSONB)
 
         Returns:
             The created or updated ProgressSummary
@@ -91,6 +94,7 @@ class ProgressSummaryOperations:
                 total_additions=total_additions,
                 total_deletions=total_deletions,
                 last_activity_at=last_activity_at,
+                contributor_summaries=contributor_summaries,
                 generated_at=now,
                 created_at=now,
                 updated_at=now,
@@ -104,6 +108,7 @@ class ProgressSummaryOperations:
                     "total_additions": total_additions,
                     "total_deletions": total_deletions,
                     "last_activity_at": last_activity_at,
+                    "contributor_summaries": contributor_summaries,
                     "generated_at": now,
                     "updated_at": now,
                 },

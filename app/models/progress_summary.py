@@ -2,8 +2,10 @@
 
 import uuid as uuid_pkg
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import DateTime, Index, text
+from sqlalchemy import Column, DateTime, Index, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 
@@ -59,6 +61,20 @@ class ProgressSummary(SQLModel, table=True):
     total_contributors: int = Field(default=0, nullable=False)
     total_additions: int = Field(default=0, nullable=False)
     total_deletions: int = Field(default=0, nullable=False)
+
+    # Per-contributor AI summaries for email digest progress review
+    contributor_summaries: list[dict[str, Any]] | None = Field(
+        default=None,
+        sa_column=Column(
+            JSONB,
+            nullable=True,
+            comment=(
+                "Per-contributor AI summaries. "
+                "Array of {name, summary_text, commit_count, additions, deletions, "
+                "commit_refs: [{sha, branch}]}"
+            ),
+        ),
+    )
 
     # Activity tracking for auto-progress smart-skip logic
     last_activity_at: datetime | None = Field(  # type: ignore[call-overload]

@@ -76,11 +76,12 @@ RULES:
 4. Use active voice: "Added X", "Fixed Y", "Improved Z"
 5. Be concise: max 3-5 items, each 5-15 words
 6. If nothing significant was shipped, output NO_SIGNIFICANT_CHANGES
+7. Include 1-2 commit SHA short refs per item in square brackets at the end, referencing the most relevant commits for that item
 
 OUTPUT FORMAT (use exactly this structure):
-ITEM: feature | <description>
-ITEM: fix | <description>
-ITEM: improvement | <description>
+ITEM: feature | <description> [<sha>, ...]
+ITEM: fix | <description> [<sha>]
+ITEM: improvement | <description> [<sha>, <sha>]
 
 Categories:
 - feature: New functionality or capability
@@ -92,9 +93,9 @@ If no significant changes:
 NO_SIGNIFICANT_CHANGES
 
 Example output:
-ITEM: feature | Added user authentication flow with OAuth support
-ITEM: fix | Fixed login redirect bug affecting Safari users
-ITEM: improvement | Improved search performance with indexed queries"""
+ITEM: feature | Added user authentication flow with OAuth support [a1b2c3d, e4f5g6h]
+ITEM: fix | Fixed login redirect bug affecting Safari users [i7j8k9l]
+ITEM: improvement | Improved search performance with indexed queries [m0n1o2p]"""
 
     def format_input(self, input_data: ShippedAnalysisInput) -> str:
         """Format commit data into a prompt for the AI."""
@@ -119,7 +120,8 @@ ITEM: improvement | Improved search performance with indexed queries"""
             if len(commit.message) > 120:
                 message += "..."
 
-            lines.append(f"- {message}")
+            sha_short = commit.sha[:7] if commit.sha else ""
+            lines.append(f"- [{sha_short}] {message} ({commit.author})")
 
             # Include top 5 file paths if available (helps identify scope)
             if commit.files:
