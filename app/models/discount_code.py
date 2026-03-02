@@ -4,7 +4,7 @@ import uuid as uuid_pkg
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, String, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -20,7 +20,12 @@ class DiscountCode(UUIDMixin, TimestampMixin, SQLModel, table=True):
     Platform-managed discount codes.
 
     Created by platform admins directly in the DB. Org owners/admins
-    redeem codes from billing settings to get a recurring % off via Stripe.
+    redeem codes from billing settings to get a % off via Stripe.
+
+    Duration modes (mirrors Stripe coupon durations):
+    - ``forever`` — discount applies to every future invoice (default).
+    - ``once`` — discount applies to a single invoice only.
+    - ``repeating`` — discount applies for ``duration_in_months`` billing cycles.
     """
 
     __tablename__ = "discount_codes"
@@ -35,6 +40,13 @@ class DiscountCode(UUIDMixin, TimestampMixin, SQLModel, table=True):
     times_redeemed: int = Field(default=0, nullable=False)
     is_active: bool = Field(default=True, nullable=False)
     stripe_coupon_id: str | None = Field(default=None, max_length=255, nullable=True)
+    duration: str = Field(
+        sa_column=Column(String(20), nullable=False, server_default="forever"),
+    )
+    duration_in_months: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
 
 
 class DiscountRedemption(UUIDMixin, SQLModel, table=True):

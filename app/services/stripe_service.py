@@ -58,7 +58,9 @@ class StripeService:
                 metadata={
                     "organization_id": str(org.id),
                     "owner_user_id": str(user.id),
-                    "environment": "production" if "live" in (settings.stripe_secret_key or "") else "test",
+                    "environment": "production"
+                    if "live" in (settings.stripe_secret_key or "")
+                    else "test",
                 },
             )
             logger.info(f"Created Stripe customer {customer.id} for org {org.id}")
@@ -373,12 +375,17 @@ class StripeService:
     # ─────────────────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def get_or_create_discount_coupon(code: str, percent_off: int) -> str:
+    def get_or_create_discount_coupon(
+        code: str,
+        percent_off: int,
+        duration: str = "forever",
+        duration_in_months: int | None = None,
+    ) -> str:
         """
         Get or create a Stripe coupon for a discount code.
 
         Uses the code as part of the coupon ID for idempotency.
-        Duration is "forever" so the discount recurs every billing cycle.
+        Supports all Stripe duration modes: forever, once, repeating.
 
         Returns the Stripe coupon ID.
         """
@@ -386,22 +393,39 @@ class StripeService:
 
         try:
             coupon = stripe.Coupon.retrieve(coupon_id)
-            logger.info(f"Retrieved existing discount coupon: {coupon.id}")
-            return coupon.id
+            # Verify the existing coupon's parameters still match our request.
+            # Stripe coupons are immutable, so if the admin changed duration in
+            # the DB we must delete the stale coupon and recreate it.
+            mismatch = coupon.duration != duration or (
+                duration == "repeating" and coupon.duration_in_months != duration_in_months
+            )
+            if mismatch:
+                logger.warning(
+                    f"Stripe coupon {coupon_id} has stale params "
+                    f"(duration={coupon.duration}/{duration}), recreating"
+                )
+                stripe.Coupon.delete(coupon_id)
+            else:
+                logger.info(f"Retrieved existing discount coupon: {coupon.id}")
+                return coupon.id
         except StripeError:
             pass  # Doesn't exist yet, create it
 
+        coupon_kwargs: dict[str, object] = {
+            "id": coupon_id,
+            "percent_off": percent_off,
+            "duration": duration,
+            "name": f"Discount Code: {code.upper()} ({percent_off}% off)",
+            "metadata": {
+                "type": "discount_code",
+                "code": code.upper(),
+            },
+        }
+        if duration == "repeating" and duration_in_months is not None:
+            coupon_kwargs["duration_in_months"] = duration_in_months
+
         try:
-            coupon = stripe.Coupon.create(
-                id=coupon_id,
-                percent_off=percent_off,
-                duration="forever",
-                name=f"Discount Code: {code.upper()} ({percent_off}% off)",
-                metadata={
-                    "type": "discount_code",
-                    "code": code.upper(),
-                },
-            )
+            coupon = stripe.Coupon.create(**coupon_kwargs)  # type: ignore[arg-type]
             logger.info(f"Created discount coupon: {coupon.id}")
             return coupon.id
         except StripeError as e:
@@ -427,8 +451,7 @@ class StripeService:
                 discounts=[{"coupon": coupon_id}],
             )
             logger.info(
-                f"Applied discount coupon {coupon_id} to subscription "
-                f"{stripe_subscription_id}"
+                f"Applied discount coupon {coupon_id} to subscription {stripe_subscription_id}"
             )
             return True
         except StripeError as e:

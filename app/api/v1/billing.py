@@ -138,6 +138,8 @@ class ApplyDiscountResponse(BaseModel):
     message: str
     discount_percent: int
     code: str
+    duration: str
+    duration_in_months: int | None = None
 
 
 class DiscountInfoResponse(BaseModel):
@@ -146,6 +148,8 @@ class DiscountInfoResponse(BaseModel):
     code: str
     discount_percent: int
     redeemed_at: str
+    duration: str
+    duration_in_months: int | None = None
 
 
 class ValidateDiscountRequest(BaseModel):
@@ -160,6 +164,8 @@ class ValidateDiscountResponse(BaseModel):
     valid: bool
     discount_percent: int
     code: str
+    duration: str
+    duration_in_months: int | None = None
 
 
 class RemoveDiscountRequest(BaseModel):
@@ -310,7 +316,10 @@ async def create_checkout(
 
         try:
             coupon_id = stripe_service.get_or_create_discount_coupon(
-                discount.code, discount.discount_percent
+                discount.code,
+                discount.discount_percent,
+                duration=discount.duration,
+                duration_in_months=discount.duration_in_months,
             )
             discount_code_value = discount.code
         except Exception as e:
@@ -565,9 +574,8 @@ async def downgrade_subscription(
     if target_plan.allows_overages:
         # Plans with overages: user can keep all repos (empty list = keep all)
         # or optionally select repos to trim
-        needs_repo_deletion = (
-            len(request.repos_to_keep) > 0
-            and current_repo_count > len(request.repos_to_keep)
+        needs_repo_deletion = len(request.repos_to_keep) > 0 and current_repo_count > len(
+            request.repos_to_keep
         )
         if needs_repo_deletion and len(request.repos_to_keep) < 1:
             raise HTTPException(400, "Must keep at least 1 repository.")
@@ -676,6 +684,8 @@ async def validate_discount(
         valid=True,
         discount_percent=discount.discount_percent,
         code=discount.code,
+        duration=discount.duration,
+        duration_in_months=discount.duration_in_months,
     )
 
 
@@ -708,16 +718,23 @@ async def apply_discount(
     if not subscription.stripe_subscription_id:
         raise HTTPException(400, "Subscribe to a plan first")
 
-    # Validate and redeem the code
+    # Validate code and check org eligibility BEFORE touching Stripe
     try:
         discount_code = await discount_ops.validate_code(db, request.code)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
 
+    existing = await discount_ops.get_active_discount_for_org(db, request.organization_id)
+    if existing:
+        raise HTTPException(400, "Organization already has an active discount")
+
     # Create/retrieve Stripe coupon and apply to subscription
     try:
         coupon_id = stripe_service.get_or_create_discount_coupon(
-            discount_code.code, discount_code.discount_percent
+            discount_code.code,
+            discount_code.discount_percent,
+            duration=discount_code.duration,
+            duration_in_months=discount_code.duration_in_months,
         )
     except Exception as e:
         logger.error(f"Failed to create Stripe coupon: {e}")
@@ -729,12 +746,12 @@ async def apply_discount(
     if not applied:
         raise HTTPException(500, "Failed to apply discount to subscription")
 
-    # Record the redemption and update stripe_coupon_id if needed
+    # Record the redemption — rollback Stripe discount on failure
     try:
-        await discount_ops.redeem_code(
-            db, request.code, request.organization_id, current_user.id
-        )
+        await discount_ops.redeem_code(db, request.code, request.organization_id, current_user.id)
     except ValueError as e:
+        logger.warning(f"DB redemption failed after Stripe apply, rolling back: {e}")
+        stripe_service.remove_discount_from_subscription(subscription.stripe_subscription_id)
         raise HTTPException(400, str(e)) from None
 
     if not discount_code.stripe_coupon_id:
@@ -766,6 +783,8 @@ async def apply_discount(
         message=f"{discount_code.discount_percent}% discount applied",
         discount_percent=discount_code.discount_percent,
         code=discount_code.code,
+        duration=discount_code.duration,
+        duration_in_months=discount_code.duration_in_months,
     )
 
 
@@ -793,6 +812,8 @@ async def get_discount(
         code=redemption.discount_code.code,
         discount_percent=redemption.discount_code.discount_percent,
         redeemed_at=redemption.redeemed_at.isoformat(),
+        duration=redemption.discount_code.duration,
+        duration_in_months=redemption.discount_code.duration_in_months,
     )
 
 
@@ -818,9 +839,7 @@ async def remove_discount(
         raise HTTPException(400, "No active subscription")
 
     # Remove from Stripe
-    removed = stripe_service.remove_discount_from_subscription(
-        subscription.stripe_subscription_id
-    )
+    removed = stripe_service.remove_discount_from_subscription(subscription.stripe_subscription_id)
     if not removed:
         raise HTTPException(500, "Failed to remove discount from Stripe")
 

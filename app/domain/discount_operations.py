@@ -45,6 +45,14 @@ class DiscountOperations(BaseOperations[DiscountCode]):
         ):
             raise ValueError(f"Discount code has reached its redemption limit: {code}")
 
+        # Duration integrity check
+        if discount.duration not in ("forever", "once", "repeating"):
+            raise ValueError(f"Invalid duration '{discount.duration}' on code {discount.code}")
+        if discount.duration == "repeating" and (
+            not discount.duration_in_months or discount.duration_in_months < 1
+        ):
+            raise ValueError("Repeating discount must have positive duration_in_months")
+
         return discount
 
     async def redeem_code(
