@@ -12,7 +12,6 @@ from app.domain.product_access_operations import product_access_ops
 from app.domain.product_api_key_operations import api_key_ops
 from app.domain.product_operations import product_ops
 from app.domain.progress_summary_operations import progress_summary_ops
-from app.domain.referral_operations import referral_ops
 from app.domain.repository_operations import repository_ops
 from app.domain.section_operations import section_ops, subsection_ops
 from app.domain.subscription_operations import subscription_ops
@@ -26,7 +25,6 @@ __all__ = [
     "progress_summary_ops",
     "product_ops",
     "product_access_ops",
-    "referral_ops",
     "repository_ops",
     "work_item_ops",
     "document_ops",

@@ -1,4 +1,7 @@
-"""Domain operations for Subscription model."""
+"""Domain operations for Subscription model — Community Edition.
+
+Same CRUD operations as production, without billing event audit logging.
+"""
 
 import uuid as uuid_pkg
 from dataclasses import dataclass
@@ -9,7 +12,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.plans import get_plan
-from app.models.billing import BillingEvent, BillingEventType
 from app.models.subscription import PlanTier, Subscription, SubscriptionStatus
 
 
@@ -50,18 +52,6 @@ class SubscriptionOperations:
         result = await db.execute(statement)
         return result.scalar_one_or_none()
 
-    async def get_by_stripe_customer(
-        self,
-        db: AsyncSession,
-        stripe_customer_id: str,
-    ) -> Subscription | None:
-        """Get subscription by Stripe customer ID."""
-        statement = select(Subscription).where(
-            Subscription.stripe_customer_id == stripe_customer_id
-        )
-        result = await db.execute(statement)
-        return result.scalar_one_or_none()
-
     async def create(
         self,
         db: AsyncSession,
@@ -84,14 +74,6 @@ class SubscriptionOperations:
         db.add(subscription)
         await db.flush()
         await db.refresh(subscription)
-
-        # Log billing event
-        await self.log_event(
-            db,
-            organization_id=organization_id,
-            event_type=BillingEventType.SUBSCRIPTION_CREATED,
-            new_value={"plan_tier": plan_tier},
-        )
 
         return subscription
 
@@ -122,7 +104,6 @@ class SubscriptionOperations:
 
         Bypasses Stripe and sets the plan directly.
         """
-        previous_tier = subscription.plan_tier
         plan = get_plan(plan_tier)
 
         # Update subscription
@@ -137,21 +118,6 @@ class SubscriptionOperations:
         db.add(subscription)
         await db.flush()
         await db.refresh(subscription)
-
-        # Log billing event
-        await self.log_event(
-            db,
-            organization_id=subscription.organization_id,
-            event_type=BillingEventType.MANUAL_ASSIGNMENT,
-            previous_value={"plan_tier": previous_tier},
-            new_value={
-                "plan_tier": plan_tier,
-                "manually_assigned": True,
-                "note": note,
-            },
-            actor_user_id=admin_user_id,
-            description=f"Admin assigned {plan.display_name} tier",
-        )
 
         return subscription
 
@@ -207,49 +173,6 @@ class SubscriptionOperations:
             overage_cost_cents=overage_cost,
             allows_overages=plan.allows_overages,
         )
-
-    async def log_event(
-        self,
-        db: AsyncSession,
-        organization_id: uuid_pkg.UUID,
-        event_type: BillingEventType,
-        previous_value: dict[str, Any] | None = None,
-        new_value: dict[str, Any] | None = None,
-        description: str | None = None,
-        actor_user_id: uuid_pkg.UUID | None = None,
-        stripe_event_id: str | None = None,
-    ) -> BillingEvent:
-        """Log a billing event for audit trail."""
-        event = BillingEvent(
-            organization_id=organization_id,
-            event_type=event_type.value,
-            previous_value=previous_value,
-            new_value=new_value,
-            description=description,
-            actor_user_id=actor_user_id,
-            stripe_event_id=stripe_event_id,
-        )
-        db.add(event)
-        await db.flush()
-        return event
-
-    async def get_events(
-        self,
-        db: AsyncSession,
-        organization_id: uuid_pkg.UUID,
-        skip: int = 0,
-        limit: int = 50,
-    ) -> list[BillingEvent]:
-        """Get billing events for an organization."""
-        statement = (
-            select(BillingEvent)
-            .where(BillingEvent.organization_id == organization_id)
-            .order_by(BillingEvent.created_at.desc())
-            .offset(skip)
-            .limit(limit)
-        )
-        result = await db.execute(statement)
-        return list(result.scalars().all())
 
 
 subscription_ops = SubscriptionOperations()

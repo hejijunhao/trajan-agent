@@ -5,15 +5,9 @@ from app.models.announcement import (
     AnnouncementVariant,
 )
 from app.models.app_info import AppInfo, AppInfoCreate, AppInfoUpdate
-from app.models.billing import (
-    BillingEvent,
-    BillingEventType,
-    UsageSnapshot,
-)
 from app.models.commit_stats_cache import CommitStatsCache
 from app.models.custom_doc_job import CustomDocJob, JobStatus
 from app.models.dashboard_shipped_summary import DashboardShippedSummary
-from app.models.discount_code import DiscountCode, DiscountRedemption
 from app.models.document import Document, DocumentCreate, DocumentUpdate
 from app.models.document_section import (
     DocumentSection,
@@ -58,7 +52,6 @@ from app.models.product_api_key import (
     ProductApiKeyRead,
 )
 from app.models.progress_summary import ProgressSummary
-from app.models.referral_code import ReferralCode
 from app.models.repository import Repository, RepositoryCreate, RepositoryUpdate
 from app.models.subscription import (
     PlanTier,
@@ -76,8 +69,6 @@ __all__ = [
     "AnnouncementVariant",
     "AnnouncementTargetAudience",
     "CommitStatsCache",
-    "DiscountCode",
-    "DiscountRedemption",
     "DashboardShippedSummary",
     "ProgressSummary",
     "User",
@@ -93,10 +84,6 @@ __all__ = [
     "SubscriptionUpdate",
     "PlanTier",
     "SubscriptionStatus",
-    "UsageSnapshot",
-    "BillingEvent",
-    "BillingEventType",
-    "ReferralCode",
     "Product",
     "ProductCreate",
     "ProductUpdate",

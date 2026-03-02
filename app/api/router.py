@@ -6,7 +6,6 @@ from app.api.v1 import (
     announcements,
     api_keys,
     app_info,
-    billing,
     documents,
     feedback,
     github,
@@ -18,7 +17,6 @@ from app.api.v1 import (
     progress,
     public_tickets,
     quick_access,
-    referrals,
     repositories,
     timeline,
     users,
@@ -41,8 +39,6 @@ api_router.include_router(feedback.router)
 api_router.include_router(timeline.router)
 api_router.include_router(progress.router)
 api_router.include_router(quick_access.router)
-api_router.include_router(billing.router)
-api_router.include_router(referrals.router)
 api_router.include_router(announcements.router)
 api_router.include_router(agent.router)
 api_router.include_router(api_keys.router)

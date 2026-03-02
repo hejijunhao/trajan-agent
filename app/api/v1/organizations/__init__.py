@@ -33,7 +33,6 @@ from app.api.v1.organizations.members import (
 )
 from app.api.v1.organizations.repositories import list_org_repositories
 from app.api.v1.organizations.settings import get_settings, update_settings
-from app.api.v1.organizations.subscriptions import get_repo_limit_status, get_subscription
 from app.api.v1.organizations.team_activity import get_team_activity
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
@@ -57,8 +56,6 @@ router.add_api_route(
 router.add_api_route("/{org_id}/members/{member_id}/resend-invite", resend_invite, methods=["POST"])
 
 # Subscription routes
-router.add_api_route("/{org_id}/subscription", get_subscription, methods=["GET"])
-router.add_api_route("/{org_id}/repo-limit-status", get_repo_limit_status, methods=["GET"])
 
 # Repository routes (for downgrade flows)
 router.add_api_route("/{org_id}/repositories", list_org_repositories, methods=["GET"])
