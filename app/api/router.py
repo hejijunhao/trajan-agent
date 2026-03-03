@@ -10,6 +10,7 @@ from app.api.v1 import (
     feedback,
     github,
     infra,
+    integrations,
     internal,
     organizations,
     preferences,
@@ -20,6 +21,7 @@ from app.api.v1 import (
     repositories,
     timeline,
     users,
+    webhooks,
     work_items,
 )
 
@@ -45,3 +47,5 @@ api_router.include_router(api_keys.router)
 api_router.include_router(infra.router)
 api_router.include_router(public_tickets.router)
 api_router.include_router(internal.router)
+api_router.include_router(webhooks.router)
+api_router.include_router(integrations.router)

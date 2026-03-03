@@ -17,6 +17,10 @@ from app.models.document_section import (
     DocumentSubsectionCreate,
     DocumentSubsectionUpdate,
 )
+from app.models.github_app_installation import (
+    GitHubAppInstallation,
+    GitHubAppInstallationRepo,
+)
 from app.models.feedback import (
     Feedback,
     FeedbackCreate,
@@ -128,4 +132,6 @@ __all__ = [
     "FeedbackType",
     "FeedbackStatus",
     "FeedbackSeverity",
+    "GitHubAppInstallation",
+    "GitHubAppInstallationRepo",
 ]

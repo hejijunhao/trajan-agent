@@ -23,6 +23,7 @@ from app.domain.subscription_operations import subscription_ops
 from app.models.user import User
 from app.services.github import GitHubAPIError, GitHubService
 from app.services.github.exceptions import GitHubRepoRenamed
+from app.services.github.token_resolver import TokenResolver
 
 router = APIRouter(prefix="/github", tags=["github"])
 logger = logging.getLogger(__name__)
@@ -154,15 +155,18 @@ class BulkRefreshResponse(BaseModel):
 async def get_github_token(db: AsyncSession, user_id: uuid_pkg.UUID) -> str:
     """Get GitHub token for user, raising 400 if not configured.
 
-    Automatically decrypts the token if encryption is enabled.
+    Uses the TokenResolver which checks GitHub App installation first,
+    then falls back to the user's PAT.
     """
-    prefs = await preferences_ops.get_by_user_id(db, user_id)
-    if not prefs or not prefs.github_token:
+    resolver = TokenResolver(db)
+    token, method = await resolver.resolve_token_for_user(user_id)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GitHub token not configured. Add your token in Settings > General.",
+            detail="GitHub is not connected. Please install the GitHub App "
+            "or add a Personal Access Token in Settings.",
         )
-    return preferences_ops.get_decrypted_token(prefs) or ""
+    return token
 
 
 # --- Endpoints ---
@@ -177,6 +181,9 @@ async def list_github_repos(
     product_id: uuid_pkg.UUID | None = Query(
         None, description="Product ID to check import status against (product-specific check)"
     ),
+    organization_id: uuid_pkg.UUID | None = Query(
+        None, description="Organization ID for GitHub App token resolution"
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GitHubReposListResponse:
@@ -186,9 +193,23 @@ async def list_github_repos(
     Returns repos with their import status. When product_id is provided,
     marks repos as 'already_imported' only if they exist in THAT specific product.
     Without product_id, checks globally across all accessible products.
-    Requires a GitHub token to be configured in user preferences.
+
+    When organization_id is provided, attempts to use the org's GitHub App
+    installation token first, falling back to the user's PAT.
     """
-    token = await get_github_token(db, current_user.id)
+    if organization_id:
+        resolver = TokenResolver(db)
+        token, _method = await resolver.resolve_token_for_org(
+            organization_id, current_user.id
+        )
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No GitHub access configured. Install the GitHub App "
+                "or add a Personal Access Token in Settings.",
+            )
+    else:
+        token = await get_github_token(db, current_user.id)
     github = GitHubService(token)
 
     try:

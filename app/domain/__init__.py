@@ -4,6 +4,10 @@ from app.domain.commit_stats_cache_operations import commit_stats_cache_ops
 from app.domain.dashboard_shipped_operations import dashboard_shipped_ops
 from app.domain.document_operations import document_ops
 from app.domain.feedback_operations import feedback_ops
+from app.domain.github_app_installation_operations import (
+    github_app_installation_ops,
+    github_app_installation_repo_ops,
+)
 from app.domain.infra_component_operations import infra_component_ops
 from app.domain.org_member_operations import org_member_ops
 from app.domain.organization_operations import organization_ops
@@ -39,4 +43,6 @@ __all__ = [
     "feedback_ops",
     "infra_component_ops",
     "api_key_ops",
+    "github_app_installation_ops",
+    "github_app_installation_repo_ops",
 ]

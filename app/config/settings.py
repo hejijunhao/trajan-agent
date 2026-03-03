@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str = ""
 
+    # GitHub App (org-level repo access via short-lived installation tokens)
+    # Register at https://github.com/settings/apps — see docs/executing/repository-access-implementation.md
+    github_app_id: str = ""
+    github_app_private_key: str = ""  # PEM-encoded RSA private key (newlines as \n in env var)
+    github_app_client_id: str = ""
+    github_app_client_secret: str = ""
+    github_app_webhook_secret: str = ""
+
     # Stripe - Payment processing
     # Use sk_test_*/pk_test_* for development, sk_live_*/pk_live_* for production
     # Empty string = Stripe disabled (feature gating still works, just no payments)
