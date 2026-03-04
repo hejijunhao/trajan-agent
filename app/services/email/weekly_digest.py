@@ -205,7 +205,7 @@ def _build_email_html(
       <a href="{frontend_url}" style="font-size:13px;color:#c2410c;text-decoration:none;">Open Trajan</a>
       <p style="font-size:11px;color:#cbd5e1;margin:8px 0 0;">
         You're receiving this because you enabled {unsub_reason}.
-        <a href="{frontend_url}/settings/general" style="color:#94a3b8;">Unsubscribe</a>
+        <a href="{frontend_url}/settings/notifications" style="color:#94a3b8;">Unsubscribe</a>
       </p>
     </div>
   </div>
@@ -254,7 +254,7 @@ def _build_plain_text(
         lines.append("")
 
     lines.append(f"Open Trajan: {settings.frontend_url}")
-    lines.append(f"Unsubscribe: {settings.frontend_url}/settings/general")
+    lines.append(f"Unsubscribe: {settings.frontend_url}/settings/notifications")
     return "\n".join(lines)
 
 

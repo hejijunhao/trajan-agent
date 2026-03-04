@@ -87,6 +87,9 @@ class DashboardShippedOperations:
         total_commits: int = 0,
         total_additions: int = 0,
         total_deletions: int = 0,
+        merged_prs: int = 0,
+        top_contributors: list[dict[str, Any]] | None = None,
+        repositories: list[dict[str, Any]] | None = None,
         last_activity_at: datetime | None = None,
     ) -> DashboardShippedSummary:
         """
@@ -103,6 +106,9 @@ class DashboardShippedOperations:
             total_commits: Stats snapshot
             total_additions: Stats snapshot
             total_deletions: Stats snapshot
+            merged_prs: Number of merged PRs in the period
+            top_contributors: Top 3 contributors [{author, avatar_url, additions, deletions}]
+            repositories: Linked repos [{name, full_name, url}]
             last_activity_at: Timestamp of the newest commit seen
 
         Returns:
@@ -120,6 +126,9 @@ class DashboardShippedOperations:
                 total_commits=total_commits,
                 total_additions=total_additions,
                 total_deletions=total_deletions,
+                merged_prs=merged_prs,
+                top_contributors=top_contributors or [],
+                repositories=repositories or [],
                 last_activity_at=last_activity_at,
                 generated_at=now,
                 created_at=now,
@@ -133,6 +142,9 @@ class DashboardShippedOperations:
                     "total_commits": total_commits,
                     "total_additions": total_additions,
                     "total_deletions": total_deletions,
+                    "merged_prs": merged_prs,
+                    "top_contributors": top_contributors or [],
+                    "repositories": repositories or [],
                     "last_activity_at": last_activity_at,
                     "generated_at": now,
                     "updated_at": now,

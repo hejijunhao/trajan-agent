@@ -143,9 +143,7 @@ class GitHubReadOperations:
                 )
             raise GitHubAPIError("GitHub API forbidden", 403)
         elif response.status_code != 200:
-            raise GitHubAPIError(
-                f"GitHub API error: {response.status_code}", response.status_code
-            )
+            raise GitHubAPIError(f"GitHub API error: {response.status_code}", response.status_code)
 
         data = response.json()
         repos = [self._normalize_repo(r) for r in data]
@@ -196,9 +194,7 @@ class GitHubReadOperations:
                 )
             raise GitHubAPIError("GitHub API forbidden", 403)
         elif response.status_code != 200:
-            raise GitHubAPIError(
-                f"GitHub API error: {response.status_code}", response.status_code
-            )
+            raise GitHubAPIError(f"GitHub API error: {response.status_code}", response.status_code)
 
         return self._normalize_repo(response.json())
 
@@ -236,9 +232,7 @@ class GitHubReadOperations:
                 )
             raise GitHubAPIError("GitHub API forbidden", 403)
         elif response.status_code != 200:
-            raise GitHubAPIError(
-                f"GitHub API error: {response.status_code}", response.status_code
-            )
+            raise GitHubAPIError(f"GitHub API error: {response.status_code}", response.status_code)
 
         return self._normalize_repo(response.json())
 
@@ -259,9 +253,7 @@ class GitHubReadOperations:
         if response.status_code == 401:
             raise GitHubAPIError("Invalid or expired GitHub token", 401)
         elif response.status_code != 200:
-            raise GitHubAPIError(
-                f"GitHub API error: {response.status_code}", response.status_code
-            )
+            raise GitHubAPIError(f"GitHub API error: {response.status_code}", response.status_code)
 
         result: dict[str, Any] = response.json()
         return result
@@ -707,6 +699,67 @@ class GitHubReadOperations:
             }
             for c in commits
         ]
+
+    async def get_merged_pulls_count(
+        self,
+        owner: str,
+        repo: str,
+        since: str,
+        per_page: int = 100,
+    ) -> int:
+        """Count merged pull requests since a given date.
+
+        Fetches closed PRs sorted by updated date and counts those with
+        merged_at >= since. Stops early when PRs are older than the cutoff.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            since: ISO date string cutoff (e.g. "2026-03-01T00:00:00Z")
+            per_page: Page size for the API call
+
+        Returns:
+            Number of merged PRs since the cutoff date
+        """
+        client = get_github_client()
+        merged_count = 0
+        page = 1
+
+        while True:
+            response = await client.get(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/pulls",
+                headers=self._headers,
+                params={
+                    "state": "closed",
+                    "sort": "updated",
+                    "direction": "desc",
+                    "per_page": per_page,
+                    "page": page,
+                },
+                timeout=10.0,
+            )
+            if response.status_code != 200:
+                break
+
+            pulls = response.json()
+            if not pulls:
+                break
+
+            for pr in pulls:
+                updated_at = pr.get("updated_at", "")
+                if updated_at < since:
+                    return merged_count
+                merged_at = pr.get("merged_at")
+                if merged_at and merged_at >= since:
+                    merged_count += 1
+
+            if len(pulls) < per_page:
+                break
+            page += 1
+            if page > 3:
+                break
+
+        return merged_count
 
     async def get_open_pulls(
         self,

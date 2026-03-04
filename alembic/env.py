@@ -16,6 +16,7 @@ from app.models import (  # noqa: F401
     BillingEvent,
     CommitStatsCache,
     CustomDocJob,
+    DashboardShippedSummary,
     DiscountCode,
     DiscountRedemption,
     Document,

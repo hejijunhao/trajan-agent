@@ -228,5 +228,8 @@ class ProductShippedSummary:
     total_commits: int
     total_additions: int
     total_deletions: int
+    merged_prs: int
+    top_contributors: list[dict[str, Any]]  # [{author, avatar_url, additions, deletions}]
+    repositories: list[dict[str, str]]  # [{name, full_name, url}]
     generated_at: str | None
     last_activity_at: str | None

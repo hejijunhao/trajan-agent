@@ -674,7 +674,7 @@ class TestEmailTemplates:
 
     def test_email_html_contains_unsubscribe_link(self) -> None:
         html = _build_email_html(["<div>Section</div>"], "https://app.trajancloud.com")
-        assert "settings/general" in html
+        assert "settings/notifications" in html
         assert "Unsubscribe" in html
 
     def test_email_html_contains_open_trajan_link(self) -> None:

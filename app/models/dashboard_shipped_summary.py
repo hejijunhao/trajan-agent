@@ -76,6 +76,28 @@ class DashboardShippedSummary(SQLModel, table=True):
     total_commits: int = Field(default=0, nullable=False)
     total_additions: int = Field(default=0, nullable=False)
     total_deletions: int = Field(default=0, nullable=False)
+    merged_prs: int = Field(default=0, nullable=False)
+
+    # Per-product enrichment data (cached alongside summary)
+    top_contributors: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_column=Column(
+            JSONB,
+            nullable=False,
+            server_default=text("'[]'::jsonb"),
+            comment="Top contributors: [{author, avatar_url, additions, deletions}]",
+        ),
+    )
+
+    repositories: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_column=Column(
+            JSONB,
+            nullable=False,
+            server_default=text("'[]'::jsonb"),
+            comment="Linked repos: [{name, full_name, url}]",
+        ),
+    )
 
     # Activity tracking for auto-progress smart-skip logic
     last_activity_at: datetime | None = Field(  # type: ignore[call-overload]

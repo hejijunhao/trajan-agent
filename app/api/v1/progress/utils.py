@@ -92,6 +92,8 @@ def get_period_start(period: str) -> datetime:
     now = datetime.now(UTC)
 
     period_map = {
+        "1d": timedelta(days=1),
+        "2d": timedelta(days=2),
         "24h": timedelta(hours=24),
         "48h": timedelta(hours=48),
         "7d": timedelta(days=7),
@@ -108,6 +110,8 @@ def get_period_start(period: str) -> datetime:
 def get_extended_period(period: str) -> str:
     """Get an extended period string for fetching comparison data."""
     period_map = {
+        "1d": "2d",
+        "2d": "7d",
         "24h": "48h",
         "48h": "7d",
         "7d": "14d",
@@ -122,6 +126,8 @@ def get_extended_period(period: str) -> str:
 def get_period_days(period: str) -> int:
     """Get the number of days for a period string."""
     period_days = {
+        "1d": 1,
+        "2d": 2,
         "24h": 1,
         "48h": 2,
         "7d": 7,
