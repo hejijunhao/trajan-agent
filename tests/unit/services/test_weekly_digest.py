@@ -73,7 +73,7 @@ def _configure_digest_settings(mock_settings: MagicMock) -> None:
     """Set required settings fields so the digest job runs normally."""
     mock_settings.postmark_enabled = True
     mock_settings.weekly_digest_day = _CURRENT_DAY
-    mock_settings.frontend_url = "https://app.trajancloud.com"
+    mock_settings.frontend_url = "https://www.trajancloud.com"
 
 
 def _make_mock_product(name: str = "Test Product") -> MagicMock:
@@ -673,13 +673,13 @@ class TestEmailTemplates:
         assert "… and 4 more" in html
 
     def test_email_html_contains_unsubscribe_link(self) -> None:
-        html = _build_email_html(["<div>Section</div>"], "https://app.trajancloud.com")
+        html = _build_email_html(["<div>Section</div>"], "https://www.trajancloud.com")
         assert "settings/notifications" in html
         assert "Unsubscribe" in html
 
     def test_email_html_contains_open_trajan_link(self) -> None:
-        html = _build_email_html(["<div>Section</div>"], "https://app.trajancloud.com")
-        assert "https://app.trajancloud.com" in html
+        html = _build_email_html(["<div>Section</div>"], "https://www.trajancloud.com")
+        assert "https://www.trajancloud.com" in html
         assert "Open Trajan" in html
 
     def test_plain_text_contains_product_data(self) -> None:
