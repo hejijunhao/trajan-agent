@@ -295,10 +295,7 @@ class ProductAccessOperations:
         # Combine counts for each product
         # Note: This may slightly overcount if an org admin also has explicit access,
         # but for list views this approximation is acceptable and much faster
-        return {
-            pid: org_admin_count + collab_counts.get(pid, 0)
-            for pid in product_ids
-        }
+        return {pid: org_admin_count + collab_counts.get(pid, 0) for pid in product_ids}
 
     async def set_access(
         self,
@@ -432,6 +429,35 @@ class ProductAccessOperations:
         access_records = result.scalars().all()
 
         return {record.product_id: record.access_level for record in access_records}
+
+    async def get_all_access_for_org(
+        self,
+        db: AsyncSession,
+        org_id: uuid_pkg.UUID,
+    ) -> dict[uuid_pkg.UUID, dict[uuid_pkg.UUID, str]]:
+        """
+        Get all explicit product access records for an entire organization.
+
+        Returns a nested dict: user_id -> { product_id -> access_level }.
+        Single query via JOIN on products table — avoids N+1 when building
+        the members list with inline access data.
+        """
+        from app.models.product import Product
+
+        statement = (
+            select(ProductAccess)
+            .join(Product, ProductAccess.product_id == Product.id)  # type: ignore[arg-type]
+            .where(Product.organization_id == org_id)  # type: ignore[arg-type]
+        )
+        result = await db.execute(statement)
+        access_records = result.scalars().all()
+
+        access_by_user: dict[uuid_pkg.UUID, dict[uuid_pkg.UUID, str]] = {}
+        for record in access_records:
+            user_map = access_by_user.setdefault(record.user_id, {})
+            user_map[record.product_id] = record.access_level
+
+        return access_by_user
 
 
 product_access_ops = ProductAccessOperations()

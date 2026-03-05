@@ -3,7 +3,7 @@
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -159,10 +159,10 @@ class OrganizationMemberCreate(SQLModel):
     """Schema for adding a member to an organization."""
 
     email: str
-    role: str = MemberRole.MEMBER.value
+    role: Literal["owner", "admin", "member", "viewer"] = MemberRole.MEMBER.value
 
 
 class OrganizationMemberUpdate(SQLModel):
     """Schema for updating a member's role."""
 
-    role: str
+    role: Literal["owner", "admin", "member", "viewer"]

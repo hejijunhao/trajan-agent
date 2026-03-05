@@ -15,9 +15,10 @@ from app.api.deps import (
     get_subscription_context,
     require_product_subscription,
 )
-from app.domain import product_ops
+from app.domain import org_member_ops, product_ops
 from app.domain.organization_operations import organization_ops
 from app.domain.product_access_operations import product_access_ops
+from app.models.organization import MemberRole
 from app.models.product import ProductCreate, ProductUpdate
 from app.models.user import User
 
@@ -237,7 +238,7 @@ async def create_product(
         )
 
     # Include organization_id from subscription context
-    product_data = data.model_dump()
+    product_data = data.model_dump(exclude={"member_access"})
     product_data["organization_id"] = sub_ctx.organization.id
 
     product = await product_ops.create(
@@ -245,6 +246,24 @@ async def create_product(
         obj_in=product_data,
         user_id=current_user.id,
     )
+
+    # Auto-grant viewer access to existing org members/viewers
+    org_id = sub_ctx.organization.id
+    members = await org_member_ops.get_by_org(db, org_id)
+
+    # Build override map from optional member_access input
+    override_map: dict[str, str] = {}
+    if data.member_access:
+        override_map = {str(o.user_id): o.access_level for o in data.member_access}
+
+    for m in members:
+        if m.role not in (MemberRole.MEMBER.value, MemberRole.VIEWER.value):
+            continue  # owners/admins have implicit access
+        level = override_map.get(str(m.user_id), "viewer")
+        if level == "none":
+            continue  # explicitly excluded
+        await product_access_ops.set_access(db, product.id, m.user_id, level)
+
     return {
         "id": str(product.id),
         "name": product.name,

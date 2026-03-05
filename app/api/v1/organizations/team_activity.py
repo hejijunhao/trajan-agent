@@ -304,6 +304,7 @@ async def get_team_activity(
         matched = _match_contributor_to_member(author, member_map)
         if matched:
             uid = matched["user_id"]
+            gh_username = matched.get("github_username")
             matched_member_ids.add(uid)
             team_members.append(
                 TeamMember(
@@ -316,6 +317,9 @@ async def get_team_activity(
                     status="active",
                     stats=stats,
                     recent_commits=recent_commits,
+                    github_username=gh_username,
+                    github_author=None,
+                    is_linked=bool(gh_username),
                 )
             )
         else:
@@ -331,6 +335,9 @@ async def get_team_activity(
                     status="active",
                     stats=stats,
                     recent_commits=recent_commits,
+                    github_username=None,
+                    github_author=author,
+                    is_linked=False,
                 )
             )
 
@@ -340,6 +347,7 @@ async def get_team_activity(
             continue
 
         member_status = "pending" if not member["has_signed_in"] else "idle"
+        gh_username = member.get("github_username")
 
         team_members.append(
             TeamMember(
@@ -352,6 +360,9 @@ async def get_team_activity(
                 status=member_status,
                 stats=None,
                 recent_commits=[],
+                github_username=gh_username,
+                github_author=None,
+                is_linked=bool(gh_username),
             )
         )
 
@@ -414,6 +425,7 @@ async def _build_empty_response(
     members = []
     for m in org_members:
         has_signed_in = m.user.onboarding_completed_at is not None if m.user else False
+        gh_username = m.user.github_username if m.user else None
         members.append(
             TeamMember(
                 user_id=str(m.user_id),
@@ -429,6 +441,9 @@ async def _build_empty_response(
                 status="pending" if not has_signed_in else "idle",
                 stats=None,
                 recent_commits=[],
+                github_username=gh_username,
+                github_author=None,
+                is_linked=bool(gh_username),
             )
         )
 

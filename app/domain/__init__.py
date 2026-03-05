@@ -19,6 +19,7 @@ from app.domain.progress_summary_operations import progress_summary_ops
 from app.domain.repository_operations import repository_ops
 from app.domain.section_operations import section_ops, subsection_ops
 from app.domain.subscription_operations import subscription_ops
+from app.domain.team_contributor_summary_operations import team_contributor_summary_ops
 from app.domain.user_operations import user_ops
 from app.domain.work_item_operations import work_item_ops
 
@@ -27,6 +28,7 @@ __all__ = [
     "commit_stats_cache_ops",
     "dashboard_shipped_ops",
     "progress_summary_ops",
+    "team_contributor_summary_ops",
     "product_ops",
     "product_access_ops",
     "repository_ops",

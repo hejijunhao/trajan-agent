@@ -32,6 +32,15 @@ class OrganizationDetailResponse(BaseModel):
     member_count: int
 
 
+class MemberProductAccessSummary(BaseModel):
+    """Inline product access item for the members list."""
+
+    product_id: str
+    product_name: str
+    product_color: str | None
+    access_level: str  # "viewer" | "editor" | "admin"
+
+
 class MemberResponse(BaseModel):
     """Organization member response."""
 
@@ -45,6 +54,7 @@ class MemberResponse(BaseModel):
     invited_by: str | None
     invited_at: str | None
     has_signed_in: bool  # True if user has completed onboarding (reliable pending detection)
+    product_access: list[MemberProductAccessSummary] | None = None
 
 
 class SubscriptionResponse(BaseModel):
@@ -184,6 +194,9 @@ class TeamMember(BaseModel):
     status: str  # "active" | "idle" | "pending"
     stats: TeamMemberStats | None  # None for pending invites
     recent_commits: list[TeamMemberRecentCommit]
+    github_username: str | None = None  # Linked GitHub username from User record
+    github_author: str | None = None  # Commit author name (for unlinked contributors)
+    is_linked: bool = False  # True when user_id and github_username are both set
 
 
 class TeamActivityAggregate(BaseModel):

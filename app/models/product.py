@@ -1,7 +1,8 @@
 import uuid as uuid_pkg
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
+from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -30,6 +31,13 @@ class ProductBase(SQLModel):
     color: str | None = Field(default=None, max_length=50)
 
 
+class MemberAccessOverride(BaseModel):
+    """Per-member access level override for project creation."""
+
+    user_id: uuid_pkg.UUID
+    access_level: Literal["viewer", "editor", "admin", "none"]
+
+
 class ProductCreate(SQLModel):
     """Schema for creating a product."""
 
@@ -37,6 +45,7 @@ class ProductCreate(SQLModel):
     description: str | None = None
     icon: str | None = None
     color: str | None = None
+    member_access: list[MemberAccessOverride] | None = None
 
 
 class ProductUpdate(SQLModel):

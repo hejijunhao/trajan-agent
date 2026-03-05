@@ -1,23 +1,46 @@
 """Organization member management endpoints."""
 
+import re
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_with_rls
 from app.api.v1.organizations.helpers import require_org_access
-from app.api.v1.organizations.schemas import MemberResponse
+from app.api.v1.organizations.schemas import MemberProductAccessSummary, MemberResponse
 from app.core.roles import ROLE_HIERARCHY
-from app.domain import org_member_ops, organization_ops
+from app.domain import org_member_ops, organization_ops, product_access_ops, product_ops
 from app.domain.org_member_operations import InvalidEmailError, SupabaseInviteError
 from app.models.organization import (
     MemberRole,
     OrganizationMemberCreate,
     OrganizationMemberUpdate,
 )
+from app.models.team_contributor_summary import TeamContributorSummary
 from app.models.user import User
+
+# GitHub username pattern: 1-39 chars, alphanumeric + hyphens, no leading/trailing hyphen
+_GH_USERNAME_RE = re.compile(r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$")
+
+
+class LinkGitHubRequest(BaseModel):
+    github_username: str = Field(min_length=1, max_length=39)
+
+
+class LinkGitHubResponse(BaseModel):
+    user_id: str
+    github_username: str
+    message: str
+
+
+class UnlinkGitHubResponse(BaseModel):
+    user_id: str
+    message: str
 
 
 async def list_members(
@@ -41,21 +64,43 @@ async def list_members(
 
     members = await org_member_ops.get_by_org(db, org_id)
 
-    return [
-        MemberResponse(
-            id=str(m.id),
-            user_id=str(m.user_id),
-            email=m.user.email if m.user else "",
-            display_name=m.user.display_name if m.user else None,
-            avatar_url=m.user.avatar_url if m.user else None,
-            role=m.role,
-            joined_at=m.joined_at.isoformat(),
-            invited_by=str(m.invited_by) if m.invited_by else None,
-            invited_at=m.invited_at.isoformat() if m.invited_at else None,
-            has_signed_in=m.user.onboarding_completed_at is not None if m.user else False,
+    # Eagerly load product access for all members (1 query for products + 1 for access)
+    org_products = await product_ops.get_by_organization(db, org_id)
+    access_by_user = await product_access_ops.get_all_access_for_org(db, org_id)
+
+    result = []
+    for m in members:
+        # Build product access summary for this member
+        is_auto = m.role in (MemberRole.OWNER.value, MemberRole.ADMIN.value)
+        user_access = access_by_user.get(m.user_id, {})
+
+        member_product_access = [
+            MemberProductAccessSummary(
+                product_id=str(p.id),
+                product_name=p.name or "Unnamed Project",
+                product_color=p.color,
+                access_level="admin" if is_auto else user_access.get(p.id, "none"),
+            )
+            for p in org_products
+        ]
+
+        result.append(
+            MemberResponse(
+                id=str(m.id),
+                user_id=str(m.user_id),
+                email=m.user.email if m.user else "",
+                display_name=m.user.display_name if m.user else None,
+                avatar_url=m.user.avatar_url if m.user else None,
+                role=m.role,
+                joined_at=m.joined_at.isoformat(),
+                invited_by=str(m.invited_by) if m.invited_by else None,
+                invited_at=m.invited_at.isoformat() if m.invited_at else None,
+                has_signed_in=m.user.onboarding_completed_at is not None if m.user else False,
+                product_access=member_product_access,
+            )
         )
-        for m in members
-    ]
+
+    return result
 
 
 async def add_member(
@@ -117,16 +162,43 @@ async def add_member(
             detail="User is already a member of this organization",
         )
 
-    # Add member
-    member = await org_member_ops.add_member(
-        db,
-        organization_id=org_id,
-        user_id=target_user.id,
-        role=data.role,
-        invited_by=user.id,
-    )
+    # Add member (catch race condition on duplicate)
+    try:
+        member = await org_member_ops.add_member(
+            db,
+            organization_id=org_id,
+            user_id=target_user.id,
+            role=data.role,
+            invited_by=user.id,
+        )
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User is already a member of this organization",
+        ) from None
+
+    # Auto-grant viewer access to all existing org products for members/viewers
+    org_products = await product_ops.get_by_organization(db, org_id)
+    is_auto = data.role in (MemberRole.OWNER.value, MemberRole.ADMIN.value)
+
+    if not is_auto:
+        for product in org_products:
+            await product_access_ops.set_access(db, product.id, target_user.id, "viewer")
+
     await db.commit()
     await db.refresh(member)
+
+    # Build product_access summary for the response
+    member_product_access = [
+        MemberProductAccessSummary(
+            product_id=str(p.id),
+            product_name=p.name or "Unnamed Project",
+            product_color=p.color,
+            access_level="admin" if is_auto else "viewer",
+        )
+        for p in org_products
+    ]
 
     return MemberResponse(
         id=str(member.id),
@@ -139,6 +211,7 @@ async def add_member(
         invited_by=str(member.invited_by) if member.invited_by else None,
         invited_at=member.invited_at.isoformat() if member.invited_at else None,
         has_signed_in=target_user.onboarding_completed_at is not None,
+        product_access=member_product_access,
     )
 
 
@@ -209,11 +282,39 @@ async def update_member_role(
                 detail="Cannot remove the only owner. Transfer ownership first.",
             )
 
+    # Determine role transition type
+    old_is_privileged = member.role in (MemberRole.OWNER.value, MemberRole.ADMIN.value)
+    new_is_privileged = data.role in (MemberRole.OWNER.value, MemberRole.ADMIN.value)
+
     # Update role
     member.role = data.role
     db.add(member)
+
+    # Adjust ProductAccess on role transitions
+    org_products = await product_ops.get_by_organization(db, org_id)
+
+    if old_is_privileged and not new_is_privileged:
+        # Demotion: admin/owner → member/viewer — auto-grant viewer access
+        for product in org_products:
+            await product_access_ops.set_access(db, product.id, member.user_id, "viewer")
+    elif not old_is_privileged and new_is_privileged:
+        # Promotion: member/viewer → admin/owner — remove stale explicit records
+        for product in org_products:
+            await product_access_ops.remove_access(db, product.id, member.user_id)
+
     await db.commit()
     await db.refresh(member, ["user"])
+
+    # Build product_access summary for the response
+    member_product_access = [
+        MemberProductAccessSummary(
+            product_id=str(p.id),
+            product_name=p.name or "Unnamed Project",
+            product_color=p.color,
+            access_level="admin" if new_is_privileged else "viewer",
+        )
+        for p in org_products
+    ]
 
     return MemberResponse(
         id=str(member.id),
@@ -226,6 +327,7 @@ async def update_member_role(
         invited_by=str(member.invited_by) if member.invited_by else None,
         invited_at=member.invited_at.isoformat() if member.invited_at else None,
         has_signed_in=(member.user.onboarding_completed_at is not None if member.user else False),
+        product_access=member_product_access,
     )
 
 
@@ -286,6 +388,11 @@ async def remove_member(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot remove the only owner. Transfer ownership or delete the organization.",
             )
+
+    # Clean up ProductAccess records before removing membership
+    org_products = await product_ops.get_by_organization(db, org_id)
+    for product in org_products:
+        await product_access_ops.remove_access(db, product.id, member.user_id)
 
     await org_member_ops.remove_member(db, org_id, member.user_id)
     await db.commit()
@@ -355,3 +462,134 @@ async def resend_invite(
     await db.commit()
 
     return {"message": "Invite email resent successfully"}
+
+
+async def link_member_github(
+    org_id: uuid_pkg.UUID,
+    user_id: uuid_pkg.UUID,
+    data: LinkGitHubRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+) -> LinkGitHubResponse:
+    """
+    Link a GitHub username to an org member's user record.
+
+    Requires admin or owner role. Enables automatic matching of GitHub
+    contributors to org members on the team activity page.
+    """
+    org = await organization_ops.get(db, org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found"
+        )
+
+    await require_org_access(db, org_id, user, min_role=MemberRole.ADMIN)
+
+    # Validate the target user is an org member
+    member = await org_member_ops.get_by_org_and_user(db, org_id, user_id)
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in this organization"
+        )
+
+    # Validate GitHub username format
+    if not _GH_USERNAME_RE.match(data.github_username):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid GitHub username format",
+        )
+
+    # Check for conflicts — another user already has this username
+    result = await db.execute(
+        select(User).where(
+            func.lower(User.github_username) == data.github_username.lower(),
+            User.id != user_id,  # type: ignore[arg-type]
+        )
+    )
+    if result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"GitHub username '{data.github_username}' is already linked to another user",
+        )
+
+    # Update the user record
+    target_user = await db.get(User, user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    target_user.github_username = data.github_username
+    db.add(target_user)
+
+    # Invalidate team contributor summary cache
+    await db.execute(
+        delete(TeamContributorSummary).where(
+            TeamContributorSummary.organization_id == org_id  # type: ignore[arg-type]
+        )
+    )
+
+    await db.commit()
+
+    return LinkGitHubResponse(
+        user_id=str(user_id),
+        github_username=data.github_username,
+        message=f"GitHub username '{data.github_username}' linked successfully",
+    )
+
+
+async def unlink_member_github(
+    org_id: uuid_pkg.UUID,
+    user_id: uuid_pkg.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_with_rls),
+) -> UnlinkGitHubResponse:
+    """
+    Remove the GitHub username link from an org member's user record.
+
+    Requires admin or owner role.
+    """
+    org = await organization_ops.get(db, org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found"
+        )
+
+    await require_org_access(db, org_id, user, min_role=MemberRole.ADMIN)
+
+    # Validate the target user is an org member
+    member = await org_member_ops.get_by_org_and_user(db, org_id, user_id)
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in this organization"
+        )
+
+    # Get and validate user has a github_username set
+    target_user = await db.get(User, user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if not target_user.github_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User has no linked GitHub username",
+        )
+
+    target_user.github_username = None
+    db.add(target_user)
+
+    # Invalidate team contributor summary cache
+    await db.execute(
+        delete(TeamContributorSummary).where(
+            TeamContributorSummary.organization_id == org_id  # type: ignore[arg-type]
+        )
+    )
+
+    await db.commit()
+
+    return UnlinkGitHubResponse(
+        user_id=str(user_id),
+        message="GitHub username unlinked successfully",
+    )

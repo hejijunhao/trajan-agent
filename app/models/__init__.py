@@ -17,10 +17,6 @@ from app.models.document_section import (
     DocumentSubsectionCreate,
     DocumentSubsectionUpdate,
 )
-from app.models.github_app_installation import (
-    GitHubAppInstallation,
-    GitHubAppInstallationRepo,
-)
 from app.models.feedback import (
     Feedback,
     FeedbackCreate,
@@ -28,6 +24,10 @@ from app.models.feedback import (
     FeedbackSeverity,
     FeedbackStatus,
     FeedbackType,
+)
+from app.models.github_app_installation import (
+    GitHubAppInstallation,
+    GitHubAppInstallationRepo,
 )
 from app.models.infra_component import InfraComponent, InfraComponentCreate, InfraComponentUpdate
 from app.models.organization import (
@@ -63,6 +63,7 @@ from app.models.subscription import (
     SubscriptionStatus,
     SubscriptionUpdate,
 )
+from app.models.team_contributor_summary import TeamContributorSummary
 from app.models.user import User
 from app.models.user_preferences import UserPreferences
 from app.models.work_item import WorkItem, WorkItemComplete, WorkItemCreate, WorkItemUpdate
@@ -75,6 +76,7 @@ __all__ = [
     "CommitStatsCache",
     "DashboardShippedSummary",
     "ProgressSummary",
+    "TeamContributorSummary",
     "User",
     "UserPreferences",
     "Organization",
