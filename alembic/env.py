@@ -29,6 +29,7 @@ from app.models import (  # noqa: F401
     InfraComponent,
     Organization,
     OrganizationMember,
+    OrgDigestPreference,
     Product,
     ProductAccess,
     ProductApiKey,
@@ -36,6 +37,7 @@ from app.models import (  # noqa: F401
     ReferralCode,
     Repository,
     Subscription,
+    TeamContributorSummary,
     UsageSnapshot,
     User,
     UserPreferences,
@@ -110,6 +112,7 @@ async def run_async_migrations() -> None:
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={"server_settings": {"statement_timeout": "0"}},
     )
 
     async with connectable.connect() as connection:

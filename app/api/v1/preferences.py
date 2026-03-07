@@ -11,12 +11,12 @@ router = APIRouter(prefix="/users/me/preferences", tags=["preferences"])
 
 
 class PreferencesRead(BaseModel):
-    """User preferences response."""
+    """User preferences response.
 
-    email_digest: str
-    digest_product_ids: list[str] | None = None
-    digest_timezone: str
-    digest_hour: int
+    Digest settings (email_digest, digest_product_ids, etc.) have moved to
+    per-org preferences at GET /organizations/{org_id}/digest-preferences.
+    """
+
     notify_work_items: bool
     notify_documents: bool
     github_token_set: bool  # Don't expose actual token
@@ -34,10 +34,6 @@ class PreferencesRead(BaseModel):
 class PreferencesUpdate(BaseModel):
     """User preferences update request."""
 
-    email_digest: str | None = None
-    digest_product_ids: list[str] | None = None
-    digest_timezone: str | None = None
-    digest_hour: int | None = None
     notify_work_items: bool | None = None
     notify_documents: bool | None = None
     github_token: str | None = None
@@ -70,10 +66,6 @@ class GitHubTokenTestResult(BaseModel):
 def prefs_to_response(prefs: UserPreferences) -> dict:
     """Convert UserPreferences model to response dict."""
     return {
-        "email_digest": prefs.email_digest,
-        "digest_product_ids": prefs.digest_product_ids,
-        "digest_timezone": prefs.digest_timezone,
-        "digest_hour": prefs.digest_hour,
         "notify_work_items": prefs.notify_work_items,
         "notify_documents": prefs.notify_documents,
         "github_token_set": prefs.github_token is not None and len(prefs.github_token) > 0,
@@ -112,13 +104,6 @@ async def update_preferences(
     update_data = data.model_dump(exclude_unset=True)
 
     # Validate enum values
-    if "email_digest" in update_data and update_data["email_digest"] not in (
-        "none",
-        "daily",
-        "weekly",
-    ):
-        update_data["email_digest"] = "none"
-
     if "default_view" in update_data and update_data["default_view"] not in ("grid", "list"):
         update_data["default_view"] = "grid"
 
@@ -127,15 +112,6 @@ async def update_preferences(
         "collapsed",
     ):
         update_data["sidebar_default"] = "expanded"
-
-    if "digest_timezone" in update_data:
-        from zoneinfo import available_timezones
-
-        if update_data["digest_timezone"] not in available_timezones():
-            update_data["digest_timezone"] = "UTC"
-
-    if "digest_hour" in update_data and not (0 <= update_data["digest_hour"] <= 23):
-        update_data["digest_hour"] = 17
 
     # Handle empty token as removal
     if "github_token" in update_data and update_data["github_token"] == "":

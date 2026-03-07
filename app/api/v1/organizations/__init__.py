@@ -13,7 +13,6 @@ Modules:
 
 from fastapi import APIRouter
 
-# Import route handlers from sub-modules
 from app.api.v1.organizations.crud import (
     create_organization,
     delete_organization,
@@ -22,6 +21,12 @@ from app.api.v1.organizations.crud import (
     list_plans,
     transfer_ownership,
     update_organization,
+)
+
+# Import route handlers from sub-modules
+from app.api.v1.organizations.digest_preferences import (
+    get_digest_preferences,
+    update_digest_preferences,
 )
 from app.api.v1.organizations.member_access import (
     bulk_set_member_product_access,
@@ -89,5 +94,13 @@ router.add_api_route("/{org_id}/settings", update_settings, methods=["PATCH"])
 # Team activity routes
 router.add_api_route("/{org_id}/team-activity", get_team_activity, methods=["GET"])
 router.add_api_route("/{org_id}/team-activity/summaries", get_team_summaries, methods=["GET"])
+
+# Digest preference routes
+router.add_api_route(
+    "/{org_id}/digest-preferences", get_digest_preferences, methods=["GET"]
+)
+router.add_api_route(
+    "/{org_id}/digest-preferences", update_digest_preferences, methods=["PATCH"]
+)
 
 __all__ = ["router"]

@@ -28,6 +28,7 @@ from app.services.email.weekly_digest import (
     _build_plain_text,
     _build_product_html,
     _build_progress_review_html,
+    _send_digest_for_org,
     send_digests,
     send_weekly_digests,
 )
@@ -134,6 +135,23 @@ def _mock_scalars_result(values: list) -> MagicMock:
     return result
 
 
+def _make_mock_org_pref(
+    user_id: uuid.UUID | None = None,
+    organization_id: uuid.UUID | None = None,
+    frequency: str = "weekly",
+    digest_product_ids: list[str] | None = None,
+) -> MagicMock:
+    """Create a mock OrgDigestPreference for the new org-scoped architecture."""
+    pref = MagicMock()
+    pref.user_id = user_id or uuid.uuid4()
+    pref.organization_id = organization_id or uuid.uuid4()
+    pref.email_digest = frequency
+    pref.digest_product_ids = digest_product_ids
+    pref.digest_timezone = "UTC"
+    pref.digest_hour = _CURRENT_HOUR
+    return pref
+
+
 # ---------------------------------------------------------------------------
 # send_weekly_digests — top-level entry point
 # ---------------------------------------------------------------------------
@@ -220,66 +238,92 @@ class TestSendWeeklyDigests:
         assert report.skipped_reasons.get("no_email") == 1
 
     @pytest.mark.asyncio
+    @patch("app.services.email.weekly_digest.organization_ops")
+    @patch("app.services.email.weekly_digest.org_digest_preference_ops")
+    @patch("app.services.email.weekly_digest._send_digest_for_org")
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.settings")
-    @patch("app.services.email.weekly_digest._send_digest_for_user")
-    async def test_catches_exception_per_user(
+    async def test_catches_exception_per_org_pref(
         self,
-        mock_send_digest: MagicMock,
         mock_settings: MagicMock,
         mock_postmark: MagicMock,
+        mock_send_org: MagicMock,
+        mock_pref_ops: MagicMock,
+        mock_org_ops: MagicMock,
     ) -> None:
-        """If processing one user throws, the job continues to the next."""
+        """If processing one org pref throws, the job continues to the next."""
         _configure_digest_settings(mock_settings)
         mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
         mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        prefs1 = _make_mock_prefs(user=_make_mock_user("fail@test.com"))
-        prefs2 = _make_mock_prefs(user=_make_mock_user("ok@test.com"))
+        user1 = _make_mock_user("fail@test.com")
+        user1.id = uuid.uuid4()
+        user2 = _make_mock_user("ok@test.com")
+        user2.id = uuid.uuid4()
 
-        mock_send_digest.side_effect = [RuntimeError("boom"), None]
+        org = MagicMock()
+        org.id = uuid.uuid4()
+        org.name = "Test Org"
+
+        pref1 = _make_mock_org_pref(user_id=user1.id, organization_id=org.id)
+        pref2 = _make_mock_org_pref(user_id=user2.id, organization_id=org.id)
+
+        mock_pref_ops.get_all_active_for_frequency = AsyncMock(return_value=[pref1, pref2])
+        mock_org_ops.get_member_role = AsyncMock(return_value="member")
+
+        mock_send_org.side_effect = [RuntimeError("boom"), True]
 
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs1, prefs2]))
+        db.execute = AsyncMock(
+            side_effect=[
+                _mock_scalars_result([user1, user2]),  # batch users
+                _mock_scalars_result([org]),  # batch orgs
+            ]
+        )
 
         report = await send_weekly_digests(db)
 
         assert report.users_checked == 2
         assert report.errors >= 1
-        assert mock_send_digest.call_count == 2
+        assert mock_send_org.call_count == 2
 
 
 # ---------------------------------------------------------------------------
-# _send_digest_for_user — core per-user logic
+# _send_digest_for_org — core per-org logic
 # ---------------------------------------------------------------------------
 
 
-class TestSendDigestForUser:
-    """Tests for the per-user digest logic via the full send_weekly_digests path."""
+class TestSendDigestForOrg:
+    """Tests for the per-org digest logic via _send_digest_for_org.
+
+    Each test calls _send_digest_for_org directly, bypassing the dispatch
+    layer (batch loading, time filtering) tested in TestSendWeeklyDigests.
+    """
 
     @pytest.mark.asyncio
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
-    async def test_consolidated_mode_sends_single_email(
+    async def test_consolidated_sends_single_email(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
-        """Consolidated mode (digest_product_ids=None): one email with all projects."""
+        """All accessible org products → one consolidated email."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
 
         product_a = _make_mock_product("Project Alpha")
         product_b = _make_mock_product("Project Beta")
-        mock_get_products.return_value = [product_a, product_b]
+        mock_get_org_products.return_value = [product_a, product_b]
+        mock_filter_access.return_value = [product_a, product_b]
 
         mock_progress_ops.get_by_product_period = AsyncMock(
             side_effect=[_make_mock_summary("Alpha progress"), _make_mock_summary("Beta progress")]
@@ -288,20 +332,20 @@ class TestSendDigestForUser:
             side_effect=[_make_mock_shipped(), _make_mock_shipped()]
         )
 
-        prefs = _make_mock_prefs(digest_product_ids=None)
-
+        pref = _make_mock_org_pref(digest_product_ids=None)
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_weekly_digests(db)
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report
+        )
 
-        assert report.users_checked == 1
-        assert report.users_emailed == 1
+        assert sent is True
         assert report.emails_sent == 1
         mock_postmark.send.assert_called_once()
 
         call_kwargs = mock_postmark.send.call_args.kwargs
-        assert call_kwargs["subject"] == "Your Weekly Progress"
+        assert call_kwargs["subject"] == "Weekly Progress — Acme Corp"
         assert "Project Alpha" in call_kwargs["html_body"]
         assert "Project Beta" in call_kwargs["html_body"]
 
@@ -309,78 +353,75 @@ class TestSendDigestForUser:
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
-    async def test_per_project_mode_sends_multiple_emails(
+    async def test_access_filtering_excludes_restricted_products(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
-        """Per-project mode: one email per selected product."""
+        """Products the user can't access are excluded from the digest."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
 
-        product_a = _make_mock_product("Project Alpha")
-        product_b = _make_mock_product("Project Beta")
-        mock_get_products.return_value = [product_a, product_b]
+        product_ok = _make_mock_product("Accessible")
+        product_restricted = _make_mock_product("Restricted")
+        mock_get_org_products.return_value = [product_ok, product_restricted]
+        # Access filter removes the restricted product
+        mock_filter_access.return_value = [product_ok]
 
         mock_progress_ops.get_by_product_period = AsyncMock(
-            side_effect=[_make_mock_summary("Alpha"), _make_mock_summary("Beta")]
+            return_value=_make_mock_summary("Accessible progress")
         )
-        mock_shipped_ops.get_by_product_period = AsyncMock(
-            side_effect=[_make_mock_shipped(), _make_mock_shipped()]
-        )
+        mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
 
-        prefs = _make_mock_prefs(digest_product_ids=[str(product_a.id), str(product_b.id)])
-
+        pref = _make_mock_org_pref(digest_product_ids=None)
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_weekly_digests(db)
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report
+        )
 
-        assert report.users_emailed == 1
-        assert report.emails_sent == 2
-        assert mock_postmark.send.call_count == 2
-
-        # Each email should have the project name in the subject
-        subjects = [c.kwargs["subject"] for c in mock_postmark.send.call_args_list]
-        assert "Weekly: Project Alpha" in subjects
-        assert "Weekly: Project Beta" in subjects
+        assert sent is True
+        assert report.emails_sent == 1
+        # Only 1 product queried (the accessible one)
+        assert mock_progress_ops.get_by_product_period.call_count == 1
+        call_kwargs = mock_postmark.send.call_args.kwargs
+        assert "Accessible" in call_kwargs["html_body"]
+        assert "Restricted" not in call_kwargs["html_body"]
 
     @pytest.mark.asyncio
     @patch("app.services.email.weekly_digest.postmark_service")
-    @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
-    @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
-    async def test_skips_user_with_no_products(
+    async def test_skips_org_with_no_products(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
-        mock_progress_ops: MagicMock,
-        mock_shipped_ops: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
-        """User with no products should be skipped."""
+        """Org with no products after access filtering → skip."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_get_org_products.return_value = []
+        mock_filter_access.return_value = []
 
-        mock_get_products.return_value = []
-
-        prefs = _make_mock_prefs(digest_product_ids=None)
-
+        pref = _make_mock_org_pref(digest_product_ids=None)
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_weekly_digests(db)
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report
+        )
 
-        assert report.users_emailed == 0
+        assert sent is False
         assert report.skipped_reasons.get("no_products") == 1
         mock_postmark.send.assert_not_called()
 
@@ -388,36 +429,37 @@ class TestSendDigestForUser:
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
-    async def test_skips_user_with_no_activity(
+    async def test_skips_org_with_no_activity(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
-        """User whose products all have no cached data should be skipped."""
+        """Products exist but all have no cached data → skip."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
 
         product = _make_mock_product("Empty Project")
-        mock_get_products.return_value = [product]
+        mock_get_org_products.return_value = [product]
+        mock_filter_access.return_value = [product]
 
-        # No cached data
         mock_progress_ops.get_by_product_period = AsyncMock(return_value=None)
         mock_shipped_ops.get_by_product_period = AsyncMock(return_value=None)
 
-        prefs = _make_mock_prefs(digest_product_ids=None)
-
+        pref = _make_mock_org_pref(digest_product_ids=None)
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_weekly_digests(db)
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report
+        )
 
-        assert report.users_emailed == 0
+        assert sent is False
         assert report.skipped_reasons.get("no_activity") == 1
         mock_postmark.send.assert_not_called()
 
@@ -425,39 +467,42 @@ class TestSendDigestForUser:
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
     async def test_digest_product_ids_filters_products(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
         """Only selected products should be included when digest_product_ids is set."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
 
         product_a = _make_mock_product("Selected")
         product_b = _make_mock_product("Not Selected")
-        mock_get_products.return_value = [product_a, product_b]
+        mock_get_org_products.return_value = [product_a, product_b]
+        mock_filter_access.return_value = [product_a, product_b]
 
-        # Only product_a's ops should be called
         mock_progress_ops.get_by_product_period = AsyncMock(
             return_value=_make_mock_summary("Selected progress")
         )
         mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
 
-        prefs = _make_mock_prefs(digest_product_ids=[str(product_a.id)])
-
+        # Only product_a selected
+        pref = _make_mock_org_pref(digest_product_ids=[str(product_a.id)])
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_weekly_digests(db)
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report
+        )
 
+        assert sent is True
         assert report.emails_sent == 1
         # Only 1 product queried (the selected one)
         assert mock_progress_ops.get_by_product_period.call_count == 1
@@ -466,38 +511,40 @@ class TestSendDigestForUser:
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
-    async def test_users_emailed_not_incremented_on_all_failures(
+    async def test_send_failure_returns_false_and_increments_errors(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
-        """If all sends fail for a user, users_emailed should NOT increment (Phase 1 fix)."""
+        """If postmark.send fails, returns False and increments report.errors."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_postmark.send = AsyncMock(return_value=False)  # all sends fail
+        mock_postmark.send = AsyncMock(return_value=False)
 
         product = _make_mock_product("Fail Project")
-        mock_get_products.return_value = [product]
+        mock_get_org_products.return_value = [product]
+        mock_filter_access.return_value = [product]
 
         mock_progress_ops.get_by_product_period = AsyncMock(
             return_value=_make_mock_summary("Some progress")
         )
         mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
 
-        prefs = _make_mock_prefs(digest_product_ids=None)
-
+        pref = _make_mock_org_pref(digest_product_ids=None)
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_weekly_digests(db)
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report
+        )
 
-        assert report.users_emailed == 0  # NOT incremented
+        assert sent is False
         assert report.emails_sent == 0
         assert report.errors == 1
 
@@ -505,72 +552,29 @@ class TestSendDigestForUser:
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
-    @patch("app.services.email.weekly_digest.settings")
-    async def test_per_project_partial_failure(
-        self,
-        mock_settings: MagicMock,
-        mock_get_products: MagicMock,
-        mock_progress_ops: MagicMock,
-        mock_shipped_ops: MagicMock,
-        mock_postmark: MagicMock,
-    ) -> None:
-        """Per-project mode: partial send failure still counts user as emailed."""
-        _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
-        # First send succeeds, second fails
-        mock_postmark.send = AsyncMock(side_effect=[True, False])
-
-        product_a = _make_mock_product("Good Project")
-        product_b = _make_mock_product("Bad Project")
-        mock_get_products.return_value = [product_a, product_b]
-
-        mock_progress_ops.get_by_product_period = AsyncMock(
-            side_effect=[_make_mock_summary("Good"), _make_mock_summary("Bad")]
-        )
-        mock_shipped_ops.get_by_product_period = AsyncMock(
-            side_effect=[_make_mock_shipped(), _make_mock_shipped()]
-        )
-
-        prefs = _make_mock_prefs(digest_product_ids=[str(product_a.id), str(product_b.id)])
-
-        db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
-
-        report = await send_weekly_digests(db)
-
-        assert report.users_emailed == 1  # at least one succeeded
-        assert report.emails_sent == 1
-        assert report.errors == 1
-
-    @pytest.mark.asyncio
-    @patch("app.services.email.weekly_digest.postmark_service")
-    @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
-    @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
     async def test_shipped_not_significant_excluded(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
         """Products where shipped.has_significant_changes=False should exclude items."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
 
         product = _make_mock_product("Minor Changes")
-        mock_get_products.return_value = [product]
+        mock_get_org_products.return_value = [product]
+        mock_filter_access.return_value = [product]
 
         mock_progress_ops.get_by_product_period = AsyncMock(
             return_value=_make_mock_summary("Some narrative")
         )
-        # has_significant_changes=False → items should be ignored
         mock_shipped_ops.get_by_product_period = AsyncMock(
             return_value=_make_mock_shipped(
                 items=[{"description": "Minor tweak", "category": "fix"}],
@@ -578,67 +582,63 @@ class TestSendDigestForUser:
             )
         )
 
-        prefs = _make_mock_prefs(digest_product_ids=None)
-
+        pref = _make_mock_org_pref(digest_product_ids=None)
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_weekly_digests(db)
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report
+        )
 
         # Email still sent (narrative exists), but items should not appear
+        assert sent is True
         assert report.emails_sent == 1
         call_kwargs = mock_postmark.send.call_args.kwargs
         assert "Minor tweak" not in call_kwargs["text_body"]
 
 
 # ---------------------------------------------------------------------------
-# _get_user_products — product resolution and deduplication
+# Product access filtering
 # ---------------------------------------------------------------------------
 
 
-class TestGetUserProducts:
-    """Tests for product resolution across org memberships."""
+class TestOrgProductFiltering:
+    """Tests for _filter_accessible_products."""
 
     @pytest.mark.asyncio
-    async def test_deduplicates_products_across_orgs(self) -> None:
-        """A product seen via multiple orgs should appear only once."""
-        from app.services.email.weekly_digest import _get_user_products
+    @patch("app.services.email.weekly_digest.product_access_ops")
+    async def test_filter_excludes_none_access(self, mock_access_ops: MagicMock) -> None:
+        """Products with effective access 'none' are excluded."""
+        from app.services.email.weekly_digest import _filter_accessible_products
 
-        shared_product = _make_mock_product("Shared")
-        org_a = MagicMock(id=uuid.uuid4())
-        org_b = MagicMock(id=uuid.uuid4())
+        product_ok = _make_mock_product("Accessible")
+        product_restricted = _make_mock_product("Restricted")
 
-        membership_a = _make_mock_membership(org_a.id, org=org_a)
-        membership_b = _make_mock_membership(org_b.id, org=org_b)
-
-        db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[
-                _mock_scalars_result([membership_a, membership_b]),  # memberships
-                _mock_scalars_result([shared_product]),  # org_a products
-                _mock_scalars_result([shared_product]),  # org_b products (same product)
-            ]
+        mock_access_ops.get_effective_access_bulk = AsyncMock(
+            return_value={product_ok.id: "viewer", product_restricted.id: "none"}
         )
 
-        products = await _get_user_products(db, uuid.uuid4())
+        db = AsyncMock()
+        result = await _filter_accessible_products(
+            db, [product_ok, product_restricted], uuid.uuid4(), "member"
+        )
 
-        assert len(products) == 1
-        assert products[0].name == "Shared"
+        assert len(result) == 1
+        assert result[0].name == "Accessible"
 
     @pytest.mark.asyncio
-    async def test_skips_membership_with_no_org(self) -> None:
-        """Memberships where organization is None should be skipped."""
-        from app.services.email.weekly_digest import _get_user_products
-
-        membership = MagicMock()
-        membership.organization = None
+    @patch("app.services.email.weekly_digest.product_access_ops")
+    async def test_filter_returns_empty_for_empty_input(
+        self, mock_access_ops: MagicMock
+    ) -> None:
+        """Empty product list returns empty without calling access ops."""
+        from app.services.email.weekly_digest import _filter_accessible_products
 
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([membership]))
+        result = await _filter_accessible_products(db, [], uuid.uuid4(), "member")
 
-        products = await _get_user_products(db, uuid.uuid4())
-
-        assert len(products) == 0
+        assert result == []
+        mock_access_ops.get_effective_access_bulk.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -735,46 +735,47 @@ class TestSendDailyDigests:
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
-    async def test_daily_sends_with_daily_subject(
+    async def test_daily_sends_with_daily_subject_and_period(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
-        """Daily digest uses 'Your Daily Progress' subject and '1d' period."""
+        """Daily digest uses 'Daily Progress — {org}' subject and '1d' period."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
 
         product = _make_mock_product("My Project")
-        mock_get_products.return_value = [product]
+        mock_get_org_products.return_value = [product]
+        mock_filter_access.return_value = [product]
 
         mock_progress_ops.get_by_product_period = AsyncMock(
             return_value=_make_mock_summary("Daily progress")
         )
         mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
 
-        prefs = _make_mock_prefs_daily(digest_product_ids=None)
-
+        pref = _make_mock_org_pref(frequency="daily", digest_product_ids=None)
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_digests(db, frequency="daily")
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report, frequency="daily"
+        )
 
-        assert report.users_emailed == 1
+        assert sent is True
         assert report.emails_sent == 1
 
         call_kwargs = mock_postmark.send.call_args.kwargs
-        assert call_kwargs["subject"] == "Your Daily Progress"
+        assert call_kwargs["subject"] == "Daily Progress — Acme Corp"
         assert "Daily Progress" in call_kwargs["html_body"]
 
         # Verify it queries the "1d" period, not "7d"
-        # Call signature: get_by_product_period(db, product_id, period)
         period_args = [
             c.kwargs.get("period") or c.args[2]
             for c in mock_progress_ops.get_by_product_period.call_args_list
@@ -785,40 +786,45 @@ class TestSendDailyDigests:
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
-    async def test_daily_per_project_uses_daily_subject(
+    async def test_daily_subject_includes_org_name(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
-        """Per-project daily digest uses 'Daily Progress: {name}' subjects."""
+        """Daily digest subject line includes the org name."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
 
         product = _make_mock_product("Acme App")
-        mock_get_products.return_value = [product]
+        mock_get_org_products.return_value = [product]
+        mock_filter_access.return_value = [product]
 
         mock_progress_ops.get_by_product_period = AsyncMock(
             return_value=_make_mock_summary("Daily update")
         )
         mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
 
-        prefs = _make_mock_prefs_daily(digest_product_ids=[str(product.id)])
-
+        pref = _make_mock_org_pref(
+            frequency="daily", digest_product_ids=[str(product.id)]
+        )
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_digests(db, frequency="daily")
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report, frequency="daily"
+        )
 
+        assert sent is True
         assert report.emails_sent == 1
         call_kwargs = mock_postmark.send.call_args.kwargs
-        assert call_kwargs["subject"] == "Daily Progress: Acme App"
+        assert call_kwargs["subject"] == "Daily Progress — Acme Corp"
 
     @pytest.mark.asyncio
     @patch("app.services.email.weekly_digest.postmark_service")
@@ -881,24 +887,25 @@ class TestDigestWithContributorSummaries:
     @patch("app.services.email.weekly_digest.postmark_service")
     @patch("app.services.email.weekly_digest.dashboard_shipped_ops")
     @patch("app.services.email.weekly_digest.progress_summary_ops")
-    @patch("app.services.email.weekly_digest._get_user_products")
+    @patch("app.services.email.weekly_digest._filter_accessible_products")
+    @patch("app.services.email.weekly_digest._get_org_products")
     @patch("app.services.email.weekly_digest.settings")
     async def test_contributor_summaries_appear_in_email(
         self,
         mock_settings: MagicMock,
-        mock_get_products: MagicMock,
+        mock_get_org_products: MagicMock,
+        mock_filter_access: MagicMock,
         mock_progress_ops: MagicMock,
         mock_shipped_ops: MagicMock,
         mock_postmark: MagicMock,
     ) -> None:
         """Contributor summaries from ProgressSummary should appear in both HTML and text."""
         _configure_digest_settings(mock_settings)
-        mock_postmark.batch.return_value.__aenter__ = AsyncMock(return_value=mock_postmark)
-        mock_postmark.batch.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_postmark.send = AsyncMock(return_value=True)
 
         product = _make_mock_product("Project X")
-        mock_get_products.return_value = [product]
+        mock_get_org_products.return_value = [product]
+        mock_filter_access.return_value = [product]
 
         contribs = [
             {
@@ -915,13 +922,15 @@ class TestDigestWithContributorSummaries:
         )
         mock_shipped_ops.get_by_product_period = AsyncMock(return_value=_make_mock_shipped())
 
-        prefs = _make_mock_prefs(digest_product_ids=None)
-
+        pref = _make_mock_org_pref(digest_product_ids=None)
+        report = WeeklyDigestReport()
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_mock_scalars_result([prefs]))
 
-        report = await send_weekly_digests(db)
+        sent = await _send_digest_for_org(
+            db, pref, "user@test.com", "Acme Corp", "member", report
+        )
 
+        assert sent is True
         assert report.emails_sent == 1
         call_kwargs = mock_postmark.send.call_args.kwargs
 

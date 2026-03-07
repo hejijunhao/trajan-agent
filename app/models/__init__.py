@@ -30,6 +30,7 @@ from app.models.github_app_installation import (
     GitHubAppInstallationRepo,
 )
 from app.models.infra_component import InfraComponent, InfraComponentCreate, InfraComponentUpdate
+from app.models.org_digest_preference import OrgDigestPreference
 from app.models.organization import (
     MemberRole,
     Organization,
@@ -85,6 +86,7 @@ __all__ = [
     "OrganizationMember",
     "OrganizationMemberCreate",
     "OrganizationMemberUpdate",
+    "OrgDigestPreference",
     "MemberRole",
     "Subscription",
     "SubscriptionUpdate",

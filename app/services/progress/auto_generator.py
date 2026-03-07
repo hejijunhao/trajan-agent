@@ -450,32 +450,26 @@ async def _has_daily_subscribers_for_product(
     db: AsyncSession,
     product: Product,
 ) -> bool:
-    """Check if any user with access to this product has email_digest == 'daily'.
+    """Check if any user has a daily digest enabled for this product's org.
 
-    Checks org members of the product's organization who have daily digest enabled.
-    If the user has digest_product_ids set, checks that this product is included.
+    Queries OrgDigestPreference rows for the product's organization
+    where email_digest == 'daily', and either no product filter is set
+    or the product is in the user's filter list.
     """
-    from app.models.organization import OrganizationMember
-    from app.models.user_preferences import UserPreferences
+    from app.models.org_digest_preference import OrgDigestPreference
 
     if not product.organization_id:
         return False
 
-    # Find users in the same org with daily digest enabled
     stmt = (
         select(func.count())
-        .select_from(UserPreferences)
-        .join(
-            OrganizationMember,
-            OrganizationMember.user_id == UserPreferences.user_id,  # type: ignore[arg-type]
-        )
+        .select_from(OrgDigestPreference)
         .where(
-            OrganizationMember.organization_id == product.organization_id,  # type: ignore[arg-type]
-            UserPreferences.email_digest == "daily",  # type: ignore[arg-type]
-            # Either no product filter, or this product is in their list
+            OrgDigestPreference.organization_id == product.organization_id,  # type: ignore[arg-type]
+            OrgDigestPreference.email_digest == "daily",  # type: ignore[arg-type]
             or_(
-                UserPreferences.digest_product_ids.is_(None),  # type: ignore[union-attr]
-                UserPreferences.digest_product_ids.cast(JSONB).contains(  # type: ignore[union-attr]
+                OrgDigestPreference.digest_product_ids.is_(None),  # type: ignore[union-attr]
+                OrgDigestPreference.digest_product_ids.cast(JSONB).contains(  # type: ignore[union-attr]
                     [str(product.id)]
                 ),
             ),

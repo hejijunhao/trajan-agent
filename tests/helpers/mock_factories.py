@@ -136,10 +136,23 @@ def make_mock_preferences(**overrides: object) -> MagicMock:
     prefs.id = overrides.get("id", uuid.uuid4())
     prefs.user_id = overrides.get("user_id", uuid.uuid4())
     prefs.github_token = overrides.get("github_token")
-    prefs.email_digest = overrides.get("email_digest", "weekly")
-    prefs.digest_product_ids = overrides.get("digest_product_ids")
-    prefs.timezone = overrides.get("timezone", "UTC")
+    prefs.notify_work_items = overrides.get("notify_work_items", True)
+    prefs.notify_documents = overrides.get("notify_documents", True)
     return prefs
+
+
+def make_mock_org_digest_preference(**overrides: object) -> MagicMock:
+    pref = MagicMock()
+    pref.id = overrides.get("id", uuid.uuid4())
+    pref.user_id = overrides.get("user_id", uuid.uuid4())
+    pref.organization_id = overrides.get("organization_id", uuid.uuid4())
+    pref.email_digest = overrides.get("email_digest", "none")
+    pref.digest_product_ids = overrides.get("digest_product_ids", None)
+    pref.digest_timezone = overrides.get("digest_timezone", "UTC")
+    pref.digest_hour = overrides.get("digest_hour", 17)
+    pref.created_at = overrides.get("created_at", datetime.now(UTC))
+    pref.updated_at = overrides.get("updated_at", datetime.now(UTC))
+    return pref
 
 
 def make_mock_org_member(**overrides: object) -> MagicMock:

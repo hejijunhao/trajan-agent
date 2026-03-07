@@ -5,6 +5,10 @@ filters to users whose local time matches their configured digest_hour.
 Weekly digests run on the configured digest day only; daily digests run
 every day. Reads pre-cached ProgressSummary and DashboardShippedSummary
 data — zero AI cost at send time.
+
+Since v0.16.15 this job iterates OrgDigestPreference rows (one per user
+per org) instead of global UserPreferences, and enforces product-level
+access. Each org produces a separate email.
 """
 
 import logging
@@ -17,14 +21,17 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.domain.dashboard_shipped_operations import dashboard_shipped_ops
+from app.domain.org_digest_preference_operations import org_digest_preference_ops
+from app.domain.organization_operations import organization_ops
+from app.domain.product_access_operations import product_access_ops
 from app.domain.progress_summary_operations import progress_summary_ops
-from app.models.organization import OrganizationMember
+from app.models.org_digest_preference import OrgDigestPreference
+from app.models.organization import Organization
 from app.models.product import Product
-from app.models.user_preferences import UserPreferences
+from app.models.user import User
 from app.services.email.postmark import postmark_service
 
 logger = logging.getLogger(__name__)
@@ -34,7 +41,7 @@ FREQUENCY_CONFIG: dict[str, dict[str, str]] = {
     "weekly": {
         "period": "7d",
         "subject_single": "Weekly: {product}",
-        "subject_all": "Your Weekly Progress",
+        "subject_all": "Weekly Progress — {org}",
         "heading": "Weekly Progress",
         "subheading": "Your projects this week",
         "unsubscribe_reason": "weekly digests",
@@ -42,7 +49,7 @@ FREQUENCY_CONFIG: dict[str, dict[str, str]] = {
     "daily": {
         "period": "1d",
         "subject_single": "Daily Progress: {product}",
-        "subject_all": "Your Daily Progress",
+        "subject_all": "Daily Progress — {org}",
         "heading": "Daily Progress",
         "subheading": "Your projects today",
         "unsubscribe_reason": "daily digests",
@@ -263,62 +270,70 @@ def _build_plain_text(
 # ---------------------------------------------------------------------------
 
 
-async def _get_user_products(db: AsyncSession, user_id: uuid_pkg.UUID) -> list[Product]:
-    """Get all products across the user's organization memberships."""
-    stmt = (
-        select(OrganizationMember)
-        .where(OrganizationMember.user_id == user_id)  # type: ignore[arg-type]
-        .options(selectinload(OrganizationMember.organization))  # type: ignore[arg-type]
+async def _get_org_products(
+    db: AsyncSession,
+    organization_id: uuid_pkg.UUID,
+) -> list[Product]:
+    """Get all products belonging to a single organization."""
+    stmt = select(Product).where(
+        Product.organization_id == organization_id  # type: ignore[arg-type]
     )
     result = await db.execute(stmt)
-    memberships = list(result.scalars().all())
-
-    products: list[Product] = []
-    seen_ids: set[uuid_pkg.UUID] = set()
-
-    for membership in memberships:
-        org = membership.organization
-        if not org:
-            continue
-        stmt2 = select(Product).where(
-            Product.organization_id == org.id  # type: ignore[arg-type]
-        )
-        result2 = await db.execute(stmt2)
-        for product in result2.scalars().all():
-            if product.id not in seen_ids:
-                products.append(product)
-                seen_ids.add(product.id)
-
-    return products
+    return list(result.scalars().all())
 
 
-async def _send_digest_for_user(
+async def _filter_accessible_products(
     db: AsyncSession,
-    prefs: UserPreferences,
+    products: list[Product],
+    user_id: uuid_pkg.UUID,
+    org_role: str,
+) -> list[Product]:
+    """Filter products to only those the user has access != 'none'."""
+    if not products:
+        return []
+    product_ids = [p.id for p in products]
+    access_map = await product_access_ops.get_effective_access_bulk(
+        db, product_ids, user_id, org_role
+    )
+    return [p for p in products if access_map.get(p.id, "viewer") != "none"]
+
+
+async def _send_digest_for_org(
+    db: AsyncSession,
+    pref: OrgDigestPreference,
     user_email: str,
+    org_name: str,
+    org_role: str,
     report: WeeklyDigestReport,
     frequency: str = "weekly",
-) -> None:
-    """Build and send the digest email for a single user."""
+) -> bool:
+    """Build and send the digest email for a single user + org pair.
+
+    Returns True if at least one email was sent.
+    """
     config = FREQUENCY_CONFIG.get(frequency, FREQUENCY_CONFIG["weekly"])
     period = config["period"]
 
-    # Resolve products
-    all_products = await _get_user_products(db, prefs.user_id)
+    # Fetch org products and enforce product-level access
+    all_products = await _get_org_products(db, pref.organization_id)
+    accessible = await _filter_accessible_products(
+        db, all_products, pref.user_id, org_role
+    )
 
-    # Filter by digest_product_ids if set
-    if prefs.digest_product_ids:
-        selected = {str(pid) for pid in prefs.digest_product_ids}
-        products = [p for p in all_products if str(p.id) in selected]
+    # Apply user's product filter on top of access-checked list
+    if pref.digest_product_ids:
+        selected = {str(pid) for pid in pref.digest_product_ids}
+        products = [p for p in accessible if str(p.id) in selected]
     else:
-        products = all_products
+        products = accessible
 
     if not products:
-        report.skipped_reasons["no_products"] = report.skipped_reasons.get("no_products", 0) + 1
-        return
+        report.skipped_reasons["no_products"] = (
+            report.skipped_reasons.get("no_products", 0) + 1
+        )
+        return False
 
     # Gather cached progress data per product
-    # (name, narrative, shipped_items, contributor_summaries)
     product_data: list[tuple[str, str, list[dict], list[dict] | None]] = []
 
     for product in products:
@@ -329,67 +344,44 @@ async def _send_digest_for_user(
         items = shipped.items if shipped and shipped.has_significant_changes else []
         contrib_summaries = summary.contributor_summaries if summary else None
 
-        # Skip products with no cached data (no activity in period)
         if not narrative and not items:
             continue
 
-        product_data.append(
-            (
-                product.name or "Untitled Project",
-                narrative,
-                items,
-                contrib_summaries,
-            )
-        )
+        product_data.append((
+            product.name or "Untitled Project",
+            narrative,
+            items,
+            contrib_summaries,
+        ))
 
     if not product_data:
-        report.skipped_reasons["no_activity"] = report.skipped_reasons.get("no_activity", 0) + 1
-        return
-
-    # Decide: consolidated email or per-project emails
-    if prefs.digest_product_ids:
-        # Per-project mode: one email per product
-        emails_sent_for_user = 0
-        for name, narrative, items, contribs in product_data:
-            section = _build_product_html(name, narrative, items, contribs)
-            html_body = _build_email_html([section], settings.frontend_url, frequency)
-            text_body = _build_plain_text([(name, narrative, items, contribs)], frequency)
-
-            sent = await postmark_service.send(
-                to=user_email,
-                subject=config["subject_single"].format(product=name),
-                html_body=html_body,
-                text_body=text_body,
-            )
-            if sent:
-                report.emails_sent += 1
-                emails_sent_for_user += 1
-            else:
-                report.errors += 1
-    else:
-        # Consolidated mode: all projects in one email
-        sections = [
-            _build_product_html(name, narrative, items, contribs)
-            for name, narrative, items, contribs in product_data
-        ]
-        html_body = _build_email_html(sections, settings.frontend_url, frequency)
-        text_body = _build_plain_text(product_data, frequency)
-        emails_sent_for_user = 0
-
-        sent = await postmark_service.send(
-            to=user_email,
-            subject=config["subject_all"],
-            html_body=html_body,
-            text_body=text_body,
+        report.skipped_reasons["no_activity"] = (
+            report.skipped_reasons.get("no_activity", 0) + 1
         )
-        if sent:
-            report.emails_sent += 1
-            emails_sent_for_user += 1
-        else:
-            report.errors += 1
+        return False
 
-    if emails_sent_for_user > 0:
-        report.users_emailed += 1
+    # Build one consolidated email per org
+    sections = [
+        _build_product_html(name, narrative, items, contribs)
+        for name, narrative, items, contribs in product_data
+    ]
+    html_body = _build_email_html(sections, settings.frontend_url, frequency)
+    text_body = _build_plain_text(product_data, frequency)
+
+    subject = config["subject_all"].format(org=org_name)
+
+    sent = await postmark_service.send(
+        to=user_email,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body,
+    )
+    if sent:
+        report.emails_sent += 1
+        return True
+    else:
+        report.errors += 1
+        return False
 
 
 async def send_digests(
@@ -398,13 +390,11 @@ async def send_digests(
 ) -> WeeklyDigestReport:
     """Send digest emails to eligible users for the given frequency.
 
-    Called hourly by the scheduler. Filters to users whose local time
-    matches their configured digest_hour. For weekly: only on the
-    configured digest day. For daily: every day.
+    Called hourly by the scheduler. Queries OrgDigestPreference rows,
+    filters to users whose local time matches their configured digest_hour,
+    then sends one email per org with product-level access enforcement.
 
-    Args:
-        db: Database session.
-        frequency: "weekly" or "daily".
+    For weekly: only on the configured digest day. For daily: every day.
     """
     label = f"{frequency}-digest"
     report = WeeklyDigestReport()
@@ -415,63 +405,116 @@ async def send_digests(
         report.duration_seconds = time.monotonic() - start
         return report
 
-    # Find all users with this frequency enabled, eagerly load User for email
-    stmt = (
-        select(UserPreferences)
-        .where(UserPreferences.email_digest == frequency)  # type: ignore[arg-type]
-        .options(selectinload(UserPreferences.user))  # type: ignore[arg-type]
+    # Find all org preferences with this frequency enabled
+    all_prefs = await org_digest_preference_ops.get_all_active_for_frequency(
+        db, frequency
     )
-    result = await db.execute(stmt)
-    matched_prefs = list(result.scalars().all())
 
-    report.users_checked = len(matched_prefs)
-    logger.info(f"[{label}] Found {len(matched_prefs)} users with {frequency} digest enabled")
+    report.users_checked = len(all_prefs)
+    logger.info(
+        f"[{label}] Found {len(all_prefs)} org-preferences "
+        f"with {frequency} digest enabled"
+    )
 
-    # Filter to users whose local time matches right now
+    # Filter to prefs whose local time matches right now
     now_utc = datetime.now(UTC)
     target_day = settings.weekly_digest_day  # e.g. "fri"
 
-    eligible: list[UserPreferences] = []
-    for prefs in matched_prefs:
+    eligible: list[OrgDigestPreference] = []
+    for pref in all_prefs:
         try:
-            tz = ZoneInfo(prefs.digest_timezone or "UTC")
+            tz = ZoneInfo(pref.digest_timezone or "UTC")
         except (KeyError, ValueError):
             tz = ZoneInfo("UTC")
         local_now = now_utc.astimezone(tz)
-        hour_match = local_now.hour == (prefs.digest_hour if prefs.digest_hour is not None else 17)
+        hour_match = local_now.hour == (
+            pref.digest_hour if pref.digest_hour is not None else 17
+        )
 
         if frequency == "weekly":
-            # Weekly: must also match the configured day of week
             day_abbrev = local_now.strftime("%a").lower()
             if day_abbrev == target_day and hour_match:
-                eligible.append(prefs)
+                eligible.append(pref)
         elif frequency == "daily" and hour_match:
-            # Daily: runs every day, only check the hour
-            eligible.append(prefs)
+            eligible.append(pref)
 
-    logger.info(f"[{label}] {len(eligible)} users eligible for current hour")
+    logger.info(f"[{label}] {len(eligible)} org-preferences eligible for current hour")
 
     if not eligible:
         report.duration_seconds = round(time.monotonic() - start, 2)
         return report
 
+    # Batch-load users and orgs to avoid N+1 queries
+    user_ids = {pref.user_id for pref in eligible}
+    org_ids = {pref.organization_id for pref in eligible}
+
+    user_stmt = select(User).where(User.id.in_(user_ids))  # type: ignore[attr-defined]
+    user_result = await db.execute(user_stmt)
+    users_by_id: dict[uuid_pkg.UUID, User] = {
+        u.id: u for u in user_result.scalars().all()
+    }
+
+    org_stmt = select(Organization).where(
+        Organization.id.in_(org_ids)  # type: ignore[attr-defined]
+    )
+    org_result = await db.execute(org_stmt)
+    orgs_by_id: dict[uuid_pkg.UUID, Organization] = {
+        o.id: o for o in org_result.scalars().all()
+    }
+
+    # Track which users actually received at least one email
+    users_emailed: set[uuid_pkg.UUID] = set()
+
     async with postmark_service.batch():
-        for prefs in eligible:
-            user = prefs.user
+        for pref in eligible:
+            user = users_by_id.get(pref.user_id)
             if not user or not user.email:
-                report.skipped_reasons["no_email"] = report.skipped_reasons.get("no_email", 0) + 1
+                report.skipped_reasons["no_email"] = (
+                    report.skipped_reasons.get("no_email", 0) + 1
+                )
+                continue
+
+            org = orgs_by_id.get(pref.organization_id)
+            if not org:
+                report.skipped_reasons["no_org"] = (
+                    report.skipped_reasons.get("no_org", 0) + 1
+                )
+                continue
+
+            # Resolve the user's role in this org for access checks
+            role = await organization_ops.get_member_role(
+                db, pref.organization_id, pref.user_id
+            )
+            if role is None:
+                report.skipped_reasons["not_member"] = (
+                    report.skipped_reasons.get("not_member", 0) + 1
+                )
                 continue
 
             try:
-                await _send_digest_for_user(db, prefs, user.email, report, frequency)
+                sent = await _send_digest_for_org(
+                    db,
+                    pref,
+                    user.email,
+                    org.name,
+                    role.value if hasattr(role, "value") else str(role),
+                    report,
+                    frequency,
+                )
+                if sent:
+                    users_emailed.add(pref.user_id)
             except Exception:
-                logger.exception(f"[{label}] Error processing user {prefs.user_id}")
+                logger.exception(
+                    f"[{label}] Error processing user {pref.user_id} "
+                    f"org {pref.organization_id}"
+                )
                 report.errors += 1
 
+    report.users_emailed = len(users_emailed)
     report.duration_seconds = round(time.monotonic() - start, 2)
 
     logger.info(
-        f"[{label}] Done: {report.users_emailed} emailed, "
+        f"[{label}] Done: {report.users_emailed} users emailed, "
         f"{report.emails_sent} emails sent, {report.errors} errors, "
         f"{report.duration_seconds}s"
     )

@@ -3,6 +3,7 @@
 import uuid as uuid_pkg
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -18,8 +19,11 @@ from app.api.deps import (
 from app.domain import org_member_ops, product_ops
 from app.domain.organization_operations import organization_ops
 from app.domain.product_access_operations import product_access_ops
+from app.models.dashboard_shipped_summary import DashboardShippedSummary
 from app.models.organization import MemberRole
 from app.models.product import ProductCreate, ProductUpdate
+from app.models.product_api_key import ProductApiKey
+from app.models.progress_summary import ProgressSummary
 from app.models.user import User
 
 router = APIRouter()
@@ -311,5 +315,19 @@ async def delete_product(
     await check_product_admin_access(db, product_id, current_user.id)
     sub_ctx = await require_product_subscription(db, product_id)
     product = sub_ctx.product
+
+    # Delete dependent records not covered by SA cascade relationships
+    await db.execute(
+        sa_delete(DashboardShippedSummary).where(
+            DashboardShippedSummary.product_id == product_id
+        )
+    )
+    await db.execute(
+        sa_delete(ProgressSummary).where(ProgressSummary.product_id == product_id)
+    )
+    await db.execute(
+        sa_delete(ProductApiKey).where(ProductApiKey.product_id == product_id)
+    )
+
     await db.delete(product)
     await db.flush()
