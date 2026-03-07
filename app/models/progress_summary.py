@@ -4,8 +4,9 @@ import uuid as uuid_pkg
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Column, DateTime, Index, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, SQLModel
 
 
@@ -39,10 +40,12 @@ class ProgressSummary(SQLModel, table=True):
     )
 
     product_id: uuid_pkg.UUID = Field(
-        foreign_key="products.id",
-        nullable=False,
-        index=True,
-        description="Product this summary belongs to",
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("products.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
     )
 
     period: str = Field(

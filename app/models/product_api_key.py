@@ -1,8 +1,9 @@
 import uuid as uuid_pkg
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, String, text
+from sqlalchemy import Column, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, SQLModel
 
 from app.models.base import TimestampMixin, UUIDMixin
@@ -18,9 +19,12 @@ class ProductApiKey(UUIDMixin, TimestampMixin, SQLModel, table=True):
     __tablename__ = "product_api_keys"
 
     product_id: uuid_pkg.UUID = Field(
-        foreign_key="products.id",
-        nullable=False,
-        index=True,
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("products.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
     )
     key_hash: str = Field(
         sa_column=Column(String(64), unique=True, index=True, nullable=False),

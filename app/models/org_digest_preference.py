@@ -7,7 +7,7 @@ so users can configure different digest frequencies per organization.
 import uuid as uuid_pkg
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, DateTime, Index, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -37,17 +37,20 @@ class OrgDigestPreference(SQLModel, table=True):
         sa_column_kwargs={"server_default": text("gen_random_uuid()")},
     )
 
-    # CASCADE added via migration 22beb16d16fa
     user_id: uuid_pkg.UUID = Field(
-        foreign_key="users.id",
-        nullable=False,
-        index=True,
+        sa_column=Column(
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
     )
 
     organization_id: uuid_pkg.UUID = Field(
-        foreign_key="organizations.id",
-        nullable=False,
-        index=True,
+        sa_column=Column(
+            ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
     )
 
     # "none" | "daily" | "weekly"
