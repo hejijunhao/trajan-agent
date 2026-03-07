@@ -14,7 +14,6 @@ from app.domain.product_access_operations import product_access_ops
 from app.models.organization import MemberRole
 from app.models.product_access import ProductAccessLevel
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # set_access (create + update)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -62,18 +61,14 @@ class TestSetAccess:
 class TestEffectiveAccess:
     """Test effective access computation with real DB."""
 
-    async def test_owner_always_admin(
-        self, db_session: AsyncSession, test_product, test_user
-    ):
+    async def test_owner_always_admin(self, db_session: AsyncSession, test_product, test_user):
         """Org owner always gets admin access, regardless of explicit access."""
         access = await product_access_ops.get_effective_access(
             db_session, test_product.id, test_user.id, MemberRole.OWNER.value
         )
         assert access == ProductAccessLevel.ADMIN.value
 
-    async def test_admin_always_admin(
-        self, db_session: AsyncSession, test_product, second_user
-    ):
+    async def test_admin_always_admin(self, db_session: AsyncSession, test_product, second_user):
         """Org admin always gets admin access."""
         access = await product_access_ops.get_effective_access(
             db_session, test_product.id, second_user.id, MemberRole.ADMIN.value
@@ -174,7 +169,13 @@ class TestBulkAccess:
         assert result[product2.id] == ProductAccessLevel.ADMIN.value
 
     async def test_bulk_effective_access_member(
-        self, db_session: AsyncSession, test_user, second_user, test_product, test_org, test_subscription
+        self,
+        db_session: AsyncSession,
+        test_user,
+        second_user,
+        test_product,
+        test_org,
+        test_subscription,
     ):
         """Member gets mixed access based on explicit product access."""
         from app.domain.product_operations import product_ops
@@ -211,8 +212,6 @@ class TestBulkAccess:
             db_session, test_product.id, second_user.id, ProductAccessLevel.VIEWER.value
         )
 
-        collabs = await product_access_ops.get_product_collaborators(
-            db_session, test_product.id
-        )
+        collabs = await product_access_ops.get_product_collaborators(db_session, test_product.id)
         collab_ids = [c.user_id for c in collabs]
         assert second_user.id in collab_ids

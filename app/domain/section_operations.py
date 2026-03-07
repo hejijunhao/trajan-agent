@@ -166,8 +166,9 @@ class SectionOperations:
     ) -> int:
         """Get the next available position for a new section."""
         result = await db.execute(
-            select(func.max(DocumentSection.position))
-            .where(DocumentSection.product_id == product_id)
+            select(func.max(DocumentSection.position)).where(
+                DocumentSection.product_id == product_id
+            )
         )
         max_pos = result.scalar_one_or_none()
         return (max_pos or 0) + 1
@@ -225,9 +226,7 @@ class SubsectionOperations:
 
     async def get(self, db: AsyncSession, id: uuid_pkg.UUID) -> DocumentSubsection | None:
         """Get a subsection by ID."""
-        result = await db.execute(
-            select(DocumentSubsection).where(DocumentSubsection.id == id)
-        )
+        result = await db.execute(select(DocumentSubsection).where(DocumentSubsection.id == id))
         return result.scalar_one_or_none()
 
     async def get_by_section(
@@ -320,8 +319,9 @@ class SubsectionOperations:
     ) -> int:
         """Get the next available position for a new subsection."""
         result = await db.execute(
-            select(func.max(DocumentSubsection.position))
-            .where(DocumentSubsection.section_id == section_id)
+            select(func.max(DocumentSubsection.position)).where(
+                DocumentSubsection.section_id == section_id
+            )
         )
         max_pos = result.scalar_one_or_none()
         return (max_pos or 0) + 1

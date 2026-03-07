@@ -159,9 +159,7 @@ def handle_error_response(response: httpx.Response, repo_name: str) -> None:
             )
         raise GitHubAPIError("GitHub API forbidden", 403)
     elif response.status_code != 200:
-        raise GitHubAPIError(
-            f"GitHub API error: {response.status_code}", response.status_code
-        )
+        raise GitHubAPIError(f"GitHub API error: {response.status_code}", response.status_code)
 
 
 def handle_rate_limit_error(

@@ -6,8 +6,6 @@ redirect handling, and error response processing.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import httpx
 import pytest
 
@@ -23,8 +21,7 @@ from app.services.github.helpers import (
     parse_redirect_location,
     parse_redirect_repo_id,
 )
-from app.services.github.http_client import close_github_client, get_github_client
-
+from app.services.github.http_client import get_github_client
 
 # ---------------------------------------------------------------------------
 # Helpers

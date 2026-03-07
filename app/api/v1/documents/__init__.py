@@ -132,29 +132,19 @@ router.add_api_route(
 )
 
 # Section management routes
-router.add_api_route(
-    "/products/{product_id}/sections", list_sections, methods=["GET"]
-)
+router.add_api_route("/products/{product_id}/sections", list_sections, methods=["GET"])
 router.add_api_route(
     "/products/{product_id}/sections", create_section, methods=["POST"], status_code=201
 )
-router.add_api_route(
-    "/sections/{section_id}", update_section, methods=["PATCH"]
-)
-router.add_api_route(
-    "/sections/{section_id}", delete_section, methods=["DELETE"], status_code=204
-)
-router.add_api_route(
-    "/products/{product_id}/sections/reorder", reorder_sections, methods=["PATCH"]
-)
+router.add_api_route("/sections/{section_id}", update_section, methods=["PATCH"])
+router.add_api_route("/sections/{section_id}", delete_section, methods=["DELETE"], status_code=204)
+router.add_api_route("/products/{product_id}/sections/reorder", reorder_sections, methods=["PATCH"])
 
 # Subsection routes
 router.add_api_route(
     "/sections/{section_id}/subsections", create_subsection, methods=["POST"], status_code=201
 )
-router.add_api_route(
-    "/subsections/{subsection_id}", update_subsection, methods=["PATCH"]
-)
+router.add_api_route("/subsections/{subsection_id}", update_subsection, methods=["PATCH"])
 router.add_api_route(
     "/subsections/{subsection_id}", delete_subsection, methods=["DELETE"], status_code=204
 )
@@ -163,8 +153,6 @@ router.add_api_route(
 )
 
 # Document section movement
-router.add_api_route(
-    "/{document_id}/move-to-section", move_document_to_section, methods=["PATCH"]
-)
+router.add_api_route("/{document_id}/move-to-section", move_document_to_section, methods=["PATCH"])
 
 __all__ = ["router", "serialize_document"]

@@ -292,9 +292,7 @@ class CustomDocGenerator:
             await self.db.refresh(doc)
 
             generation_time = time.time() - start_time
-            logger.info(
-                f"{assessment_type} assessment generated in {generation_time:.2f}s"
-            )
+            logger.info(f"{assessment_type} assessment generated in {generation_time:.2f}s")
 
             return CustomDocResult(
                 success=True,

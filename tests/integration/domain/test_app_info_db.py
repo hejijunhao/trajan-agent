@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.app_info_operations import app_info_ops, normalize_tags
 from app.models.app_info import AppInfoBulkEntry
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Create with tag normalization
 # ─────────────────────────────────────────────────────────────────────────────
@@ -22,9 +21,7 @@ from app.models.app_info import AppInfoBulkEntry
 class TestAppInfoCreate:
     """Test app info creation with tags and encryption."""
 
-    async def test_create_with_tags(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_create_with_tags(self, db_session: AsyncSession, test_user, test_product):
         """Tags are normalized (lowercased, sorted, deduped) on create."""
         entry = await app_info_ops.create(
             db_session,
@@ -81,9 +78,7 @@ class TestAppInfoCreate:
 class TestAppInfoTagFilter:
     """Test PostgreSQL array containment operator for tag filtering."""
 
-    async def test_filter_by_tags(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_filter_by_tags(self, db_session: AsyncSession, test_user, test_product):
         """Filtering by tags uses AND logic — entries must have ALL specified tags."""
         # Entry with both tags
         await app_info_ops.create(
@@ -116,9 +111,7 @@ class TestAppInfoTagFilter:
         assert "TAGGED_BOTH" in keys
         assert "TAGGED_ONE" not in keys
 
-    async def test_get_all_tags(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_get_all_tags(self, db_session: AsyncSession, test_user, test_product):
         """get_all_tags returns sorted unique tags via unnest + distinct."""
         await app_info_ops.create(
             db_session,
@@ -141,9 +134,7 @@ class TestAppInfoTagFilter:
             user_id=test_user.id,
         )
 
-        tags = await app_info_ops.get_all_tags(
-            db_session, test_user.id, test_product.id
-        )
+        tags = await app_info_ops.get_all_tags(db_session, test_user.id, test_product.id)
         assert tags == ["api", "backend", "frontend"]
 
 
@@ -155,9 +146,7 @@ class TestAppInfoTagFilter:
 class TestAppInfoKeyOps:
     """Test key-based lookups and bulk operations."""
 
-    async def test_get_by_key(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_get_by_key(self, db_session: AsyncSession, test_user, test_product):
         """Can retrieve an entry by its key (user-scoped)."""
         await app_info_ops.create(
             db_session,

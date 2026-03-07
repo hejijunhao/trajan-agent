@@ -6,12 +6,9 @@ Covers: create, product/org scoping, GitHub ID lookup, full_name rename, bulk de
 
 from __future__ import annotations
 
-import uuid
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.repository_operations import repository_ops
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CRUD and lookups
@@ -21,9 +18,7 @@ from app.domain.repository_operations import repository_ops
 class TestRepositoryCRUD:
     """Test repository create, read, update, delete."""
 
-    async def test_create_repository(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_create_repository(self, db_session: AsyncSession, test_user, test_product):
         """Can create a repository linked to a product."""
         repo = await repository_ops.create(
             db_session,
@@ -43,32 +38,29 @@ class TestRepositoryCRUD:
         assert repo.imported_by_user_id == test_user.id
         assert repo.github_id == 999999
 
-    async def test_get_by_product(
-        self, db_session: AsyncSession, test_product, test_repository
-    ):
+    async def test_get_by_product(self, db_session: AsyncSession, test_product, test_repository):
         """get_by_product returns repos for the given product."""
         repos = await repository_ops.get_by_product(db_session, test_product.id)
         repo_ids = [r.id for r in repos]
         assert test_repository.id in repo_ids
 
-    async def test_get_by_org(
-        self, db_session: AsyncSession, test_org, test_repository
-    ):
+    async def test_get_by_org(self, db_session: AsyncSession, test_org, test_repository):
         """get_by_org returns repos across all products in the org."""
         repos = await repository_ops.get_by_org(db_session, test_org.id)
         repo_ids = [r.id for r in repos]
         assert test_repository.id in repo_ids
 
     async def test_count_by_org(
-        self, db_session: AsyncSession, test_org, test_repository  # noqa: ARG002
+        self,
+        db_session: AsyncSession,
+        test_org,
+        test_repository,  # noqa: ARG002
     ):
         """count_by_org returns correct count of repos in org."""
         count = await repository_ops.count_by_org(db_session, test_org.id)
         assert count >= 1
 
-    async def test_delete_repository(
-        self, db_session: AsyncSession, test_repository
-    ):
+    async def test_delete_repository(self, db_session: AsyncSession, test_repository):
         """Can delete a repository by ID."""
         deleted = await repository_ops.delete(db_session, test_repository.id)
         assert deleted is True
@@ -85,9 +77,7 @@ class TestRepositoryCRUD:
 class TestRepositoryGitHub:
     """Test GitHub-specific lookups."""
 
-    async def test_get_by_github_id(
-        self, db_session: AsyncSession, test_product, test_repository
-    ):
+    async def test_get_by_github_id(self, db_session: AsyncSession, test_product, test_repository):
         """Can find a repo by GitHub ID within a product."""
         found = await repository_ops.get_by_github_id(
             db_session, test_product.id, test_repository.github_id
@@ -95,19 +85,13 @@ class TestRepositoryGitHub:
         assert found is not None
         assert found.id == test_repository.id
 
-    async def test_get_by_full_name(
-        self, db_session: AsyncSession, test_repository
-    ):
+    async def test_get_by_full_name(self, db_session: AsyncSession, test_repository):
         """Can find a repo by owner/repo full name."""
-        found = await repository_ops.get_by_full_name(
-            db_session, test_repository.full_name
-        )
+        found = await repository_ops.get_by_full_name(db_session, test_repository.full_name)
         assert found is not None
         assert found.id == test_repository.id
 
-    async def test_update_full_name(
-        self, db_session: AsyncSession, test_repository
-    ):
+    async def test_update_full_name(self, db_session: AsyncSession, test_repository):
         """update_full_name updates both full_name and name."""
         updated = await repository_ops.update_full_name(
             db_session, test_repository.id, "new-owner/renamed-repo"

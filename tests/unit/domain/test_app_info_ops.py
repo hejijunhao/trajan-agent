@@ -1,10 +1,5 @@
 """Unit tests for AppInfoOperations — tag normalization, validation, encryption."""
 
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
 from app.domain.app_info_operations import normalize_tags, validate_tags
 
 

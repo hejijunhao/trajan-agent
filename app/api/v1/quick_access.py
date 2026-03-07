@@ -356,9 +356,7 @@ async def reveal_entry_by_token(
             detail="Product is not associated with an organization",
         )
 
-    org_role = await organization_ops.get_member_role(
-        db, product.organization_id, current_user.id
-    )
+    org_role = await organization_ops.get_member_role(db, product.organization_id, current_user.id)
     if not org_role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

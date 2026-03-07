@@ -54,9 +54,7 @@ class TestWorkItemsNonMemberBlocked:
         test_work_item,
         test_subscription,
     ):
-        resp = await second_user_client.get(
-            f"/api/v1/work-items?product_id={test_product.id}"
-        )
+        resp = await second_user_client.get(f"/api/v1/work-items?product_id={test_product.id}")
         assert resp.status_code in (403, 404)
 
     @pytest.mark.anyio

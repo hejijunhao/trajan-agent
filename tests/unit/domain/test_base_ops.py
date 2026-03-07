@@ -11,7 +11,6 @@ import pytest
 
 from app.domain.base_operations import BaseOperations
 from app.models.feedback import Feedback
-
 from tests.helpers.mock_factories import mock_scalar_result, mock_scalars_result
 
 

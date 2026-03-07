@@ -9,14 +9,12 @@ Tests cover:
 - Folder-based document organization and queries
 """
 
-import uuid
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.document_operations import document_ops
-from app.models.product import Product
 
 
 class TestDocumentGenerationLifecycle:
@@ -107,20 +105,14 @@ class TestDocumentGenerationLifecycle:
             created_by_user_id=test_user.id,
         )
 
-        generated = await document_ops.get_generated_by_product(
-            db_session, test_product.id
-        )
+        generated = await document_ops.get_generated_by_product(db_session, test_product.id)
         assert len(generated) == 2
         assert all(d.is_generated for d in generated)
 
     @pytest.mark.anyio
-    async def test_get_generated_by_product_empty(
-        self, db_session: AsyncSession, test_product
-    ):
+    async def test_get_generated_by_product_empty(self, db_session: AsyncSession, test_product):
         """get_generated_by_product returns empty list when no generated docs exist."""
-        generated = await document_ops.get_generated_by_product(
-            db_session, test_product.id
-        )
+        generated = await document_ops.get_generated_by_product(db_session, test_product.id)
         assert generated == []
 
     @pytest.mark.anyio
@@ -152,9 +144,7 @@ class TestDocumentGenerationLifecycle:
             created_by_user_id=test_user.id,
         )
 
-        deleted_count = await document_ops.delete_by_product_generated(
-            db_session, test_product.id
-        )
+        deleted_count = await document_ops.delete_by_product_generated(db_session, test_product.id)
 
         assert deleted_count == 1
         # Manual doc should still exist
@@ -221,9 +211,7 @@ class TestDocumentGenerationStatus:
         assert test_product.docs_generation_status == "generating"
 
     @pytest.mark.anyio
-    async def test_docs_codebase_fingerprint_storage(
-        self, db_session: AsyncSession, test_product
-    ):
+    async def test_docs_codebase_fingerprint_storage(self, db_session: AsyncSession, test_product):
         """Codebase fingerprint is stored and retrievable."""
         fingerprint = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
         test_product.docs_codebase_fingerprint = fingerprint
@@ -234,9 +222,7 @@ class TestDocumentGenerationStatus:
         assert test_product.docs_codebase_fingerprint == fingerprint
 
     @pytest.mark.anyio
-    async def test_generation_status_transitions(
-        self, db_session: AsyncSession, test_product
-    ):
+    async def test_generation_status_transitions(self, db_session: AsyncSession, test_product):
         """Generation status can transition through idle → generating → completed."""
         for status in ["idle", "generating", "completed"]:
             test_product.docs_generation_status = status
@@ -250,9 +236,7 @@ class TestDocumentFolderOperations:
     """Document folder/section operations relevant to generation."""
 
     @pytest.mark.anyio
-    async def test_get_by_product_grouped(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_get_by_product_grouped(self, db_session: AsyncSession, test_user, test_product):
         """get_by_product_grouped organizes docs by folder path."""
         # Create docs in different folders
         await document_ops.create(
@@ -291,9 +275,7 @@ class TestDocumentFolderOperations:
             created_by_user_id=test_user.id,
         )
 
-        grouped = await document_ops.get_by_product_grouped(
-            db_session, test_product.id
-        )
+        grouped = await document_ops.get_by_product_grouped(db_session, test_product.id)
 
         assert len(grouped["blueprints"]) == 1
         assert len(grouped["plans"]) == 1
@@ -301,9 +283,7 @@ class TestDocumentFolderOperations:
         assert grouped["blueprints"][0].title == "Blueprint Doc"
 
     @pytest.mark.anyio
-    async def test_get_by_folder(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_get_by_folder(self, db_session: AsyncSession, test_user, test_product):
         """get_by_folder returns only documents in specified folder."""
         await document_ops.create(
             db_session,
@@ -330,16 +310,12 @@ class TestDocumentFolderOperations:
             created_by_user_id=test_user.id,
         )
 
-        blueprints = await document_ops.get_by_folder(
-            db_session, test_product.id, "blueprints"
-        )
+        blueprints = await document_ops.get_by_folder(db_session, test_product.id, "blueprints")
         assert len(blueprints) == 1
         assert blueprints[0].title == "In Blueprints"
 
     @pytest.mark.anyio
-    async def test_get_changelog_found(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_get_changelog_found(self, db_session: AsyncSession, test_user, test_product):
         """get_changelog returns the changelog document when it exists."""
         await document_ops.create(
             db_session,
@@ -358,9 +334,7 @@ class TestDocumentFolderOperations:
         assert changelog.type == "changelog"
 
     @pytest.mark.anyio
-    async def test_get_changelog_not_found(
-        self, db_session: AsyncSession, test_product
-    ):
+    async def test_get_changelog_not_found(self, db_session: AsyncSession, test_product):
         """get_changelog returns None when no changelog exists."""
         changelog = await document_ops.get_changelog(db_session, test_product.id)
         assert changelog is None
@@ -383,8 +357,6 @@ class TestDocumentFolderOperations:
             created_by_user_id=test_user.id,
         )
 
-        grouped = await document_ops.get_by_product_grouped(
-            db_session, test_product.id
-        )
+        grouped = await document_ops.get_by_product_grouped(db_session, test_product.id)
         assert len(grouped["blueprints"]) == 1
         assert grouped["blueprints"][0].title == "Nested Blueprint"

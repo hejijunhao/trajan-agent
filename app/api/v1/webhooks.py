@@ -30,11 +30,14 @@ def _verify_signature(body: bytes, signature: str | None) -> bool:
     """Verify GitHub webhook HMAC-SHA256 signature."""
     if not signature or not settings.github_app_webhook_secret:
         return False
-    expected = "sha256=" + hmac.new(
-        settings.github_app_webhook_secret.encode(),
-        body,
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "sha256="
+        + hmac.new(
+            settings.github_app_webhook_secret.encode(),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+    )
     return hmac.compare_digest(expected, signature)
 
 
@@ -80,15 +83,12 @@ async def _handle_installation(db: AsyncSession, payload: dict) -> None:
             # where we have the org_id context from the OAuth state param.
             account = installation_data.get("account", {})
             logger.info(
-                f"GitHub App installed: {installation_id} "
-                f"on {account.get('login', 'unknown')}"
+                f"GitHub App installed: {installation_id} on {account.get('login', 'unknown')}"
             )
 
         case "deleted":
             log_installation_event("deleted", installation_id)
-            await github_app_installation_ops.delete_by_installation_id(
-                db, installation_id
-            )
+            await github_app_installation_ops.delete_by_installation_id(db, installation_id)
 
         case "suspend":
             log_installation_event("suspend", installation_id)
@@ -110,13 +110,9 @@ async def _handle_repo_change(db: AsyncSession, payload: dict) -> None:
         logger.warning("Malformed repo change webhook — missing installation id")
         return
 
-    installation = await github_app_installation_ops.get_by_installation_id(
-        db, installation_id
-    )
+    installation = await github_app_installation_ops.get_by_installation_id(db, installation_id)
     if not installation:
-        logger.warning(
-            f"Webhook for unknown installation {installation_id} — ignoring"
-        )
+        logger.warning(f"Webhook for unknown installation {installation_id} — ignoring")
         return
 
     for repo in payload.get("repositories_added", []):

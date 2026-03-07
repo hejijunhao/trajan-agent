@@ -198,17 +198,14 @@ class DocsSyncService:
                     doc.title or "untitled", folder_path, doc.type or "blueprint"
                 )
                 try:
-                    new_sha = await self.github_service.get_file_sha(
-                        owner, repo_name, path, branch
-                    )
+                    new_sha = await self.github_service.get_file_sha(owner, repo_name, path, branch)
                     doc.github_sha = new_sha
                     doc.github_path = path
                     doc.last_synced_at = datetime.now(UTC)
                     doc.sync_status = "synced"
                 except Exception as e:
                     logger.warning(
-                        f"Failed to fetch SHA for {path} after commit — "
-                        f"will re-sync next time: {e}"
+                        f"Failed to fetch SHA for {path} after commit — will re-sync next time: {e}"
                     )
                     doc.github_path = path
                     doc.sync_status = "pending"

@@ -22,9 +22,7 @@ class GitHubAppAuth:
     def __init__(self) -> None:
         # Cache: installation_id → (token, expires_at)
         # TTL 55 min — tokens last 60 min, we refresh 5 min early
-        self._token_cache: TTLCache[int, tuple[str, datetime]] = TTLCache(
-            maxsize=100, ttl=3300
-        )
+        self._token_cache: TTLCache[int, tuple[str, datetime]] = TTLCache(maxsize=100, ttl=3300)
 
     def create_app_jwt(self) -> str:
         """Create a short-lived JWT signed with the App's private key."""
@@ -64,9 +62,7 @@ class GitHubAppAuth:
         data = response.json()
 
         token = data["token"]
-        expires_at = datetime.fromisoformat(
-            data["expires_at"].replace("Z", "+00:00")
-        )
+        expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
         self._token_cache[installation_id] = (token, expires_at)
         logger.info(f"Generated new installation token for {installation_id}")
         return token

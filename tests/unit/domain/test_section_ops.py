@@ -1,7 +1,7 @@
 """Unit tests for SectionOperations and SubsectionOperations — all DB calls mocked."""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,13 +10,11 @@ from app.domain.section_operations import (
     SectionOperations,
     SubsectionOperations,
 )
-
 from tests.helpers.mock_factories import (
     make_mock_document_section,
     mock_scalar_result,
     mock_scalars_result,
 )
-
 
 # ---------------------------------------------------------------------------
 # SectionOperations

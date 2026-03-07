@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domain.product_operations import ProductOperations
-
 from tests.helpers.mock_factories import make_mock_product
 
 

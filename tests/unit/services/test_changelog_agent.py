@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.docs.types import ChangeEntry, ChangelogResult
+from app.services.docs.types import ChangeEntry
 
 
 def _make_agent():
@@ -70,7 +70,7 @@ class TestChangelogAgentRun:
         mock_doc_ops.get_changelog = AsyncMock(return_value=None)
 
         agent = _make_agent()
-        result = await agent.run()
+        await agent.run()
 
         doc = agent.db.add.call_args[0][0]
         assert "Keep a Changelog" in doc.content
@@ -87,7 +87,7 @@ class TestChangelogAgentRun:
 
         agent = _make_agent()
         agent.product.name = "My App"
-        result = await agent.run()
+        await agent.run()
 
         doc = agent.db.add.call_args[0][0]
         assert "My App" in doc.content

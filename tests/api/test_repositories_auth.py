@@ -59,9 +59,7 @@ class TestRepositoriesNonMemberBlocked:
         test_repository,
         test_subscription,
     ):
-        resp = await second_user_client.get(
-            f"/api/v1/repositories?product_id={test_product.id}"
-        )
+        resp = await second_user_client.get(f"/api/v1/repositories?product_id={test_product.id}")
         # Non-member gets 403 from product access check
         assert resp.status_code in (403, 404)
 
@@ -127,9 +125,7 @@ class TestRepositoriesNonMemberBlocked:
 
 class TestRepositoriesViewerCannotWrite:
     @pytest.mark.anyio
-    async def test_create_repo(
-        self, viewer_client: AsyncClient, test_product, test_subscription
-    ):
+    async def test_create_repo(self, viewer_client: AsyncClient, test_product, test_subscription):
         await assert_viewer_cannot_write(
             viewer_client,
             "post",

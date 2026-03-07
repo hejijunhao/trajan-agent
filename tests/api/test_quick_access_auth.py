@@ -64,9 +64,7 @@ class TestQuickAccessNonMemberBlocked:
 
 class TestQuickAccessViewerCannotManage:
     @pytest.mark.anyio
-    async def test_enable(
-        self, viewer_client: AsyncClient, test_product, test_subscription
-    ):
+    async def test_enable(self, viewer_client: AsyncClient, test_product, test_subscription):
         await assert_viewer_cannot_write(
             viewer_client,
             "post",
@@ -74,9 +72,7 @@ class TestQuickAccessViewerCannotManage:
         )
 
     @pytest.mark.anyio
-    async def test_disable(
-        self, viewer_client: AsyncClient, test_product, test_subscription
-    ):
+    async def test_disable(self, viewer_client: AsyncClient, test_product, test_subscription):
         await assert_viewer_cannot_write(
             viewer_client,
             "post",
@@ -84,9 +80,7 @@ class TestQuickAccessViewerCannotManage:
         )
 
     @pytest.mark.anyio
-    async def test_regenerate(
-        self, viewer_client: AsyncClient, test_product, test_subscription
-    ):
+    async def test_regenerate(self, viewer_client: AsyncClient, test_product, test_subscription):
         await assert_viewer_cannot_write(
             viewer_client,
             "post",

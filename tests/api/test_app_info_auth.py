@@ -67,9 +67,7 @@ class TestAppInfoNonMemberBlocked:
         test_app_info_entry,
         test_subscription,
     ):
-        resp = await second_user_client.get(
-            f"/api/v1/app-info?product_id={test_product.id}"
-        )
+        resp = await second_user_client.get(f"/api/v1/app-info?product_id={test_product.id}")
         assert resp.status_code in (403, 404)
 
     @pytest.mark.anyio
@@ -117,9 +115,7 @@ class TestAppInfoViewerCannotWrite:
         test_subscription,
     ):
         """Viewers are blocked from the Variables tab entirely."""
-        resp = await viewer_client.get(
-            f"/api/v1/app-info?product_id={test_product.id}"
-        )
+        resp = await viewer_client.get(f"/api/v1/app-info?product_id={test_product.id}")
         assert resp.status_code == 403
 
     @pytest.mark.anyio

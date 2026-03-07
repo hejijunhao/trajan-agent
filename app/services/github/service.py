@@ -197,9 +197,7 @@ class GitHubService(GitHubReadOperations, GitHubWriteOperations):
         description: str | None = None,
     ) -> RepoContext:
         """Fetch complete context for a repository for AI analysis."""
-        return await GitHubReadOperations.get_repo_context(
-            self, owner, repo, branch, description
-        )
+        return await GitHubReadOperations.get_repo_context(self, owner, repo, branch, description)
 
     async def create_commit(
         self,
@@ -210,9 +208,7 @@ class GitHubService(GitHubReadOperations, GitHubWriteOperations):
         branch: str = "main",
     ) -> str:
         """Create a commit with multiple file changes."""
-        return await GitHubWriteOperations.create_commit(
-            self, owner, repo, files, message, branch
-        )
+        return await GitHubWriteOperations.create_commit(self, owner, repo, files, message, branch)
 
     async def get_file_sha(
         self,

@@ -106,9 +106,7 @@ class AppInfo(AppInfoBase, UUIDMixin, TimestampMixin, UserOwnedMixin, table=True
     """Key-value store for project context (env vars, URLs, notes)."""
 
     __tablename__ = "app_info"
-    __table_args__ = (
-        Index("ix_app_info_tags", "tags", postgresql_using="gin"),
-    )
+    __table_args__ = (Index("ix_app_info_tags", "tags", postgresql_using="gin"),)
 
     product_id: uuid_pkg.UUID | None = Field(
         default=None,

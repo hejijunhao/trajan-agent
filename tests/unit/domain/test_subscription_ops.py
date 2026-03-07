@@ -5,9 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.domain.subscription_operations import RepoLimitStatus, SubscriptionOperations
-
-from tests.helpers.mock_factories import make_mock_subscription, mock_scalar_result
+from app.domain.subscription_operations import SubscriptionOperations
+from tests.helpers.mock_factories import make_mock_subscription
 
 
 class TestCheckRepoLimit:
@@ -87,7 +86,7 @@ class TestAdminAssignPlan:
         sub = make_mock_subscription(tier="none", status="pending")
         self.db.refresh = AsyncMock()
 
-        result = await self.ops.admin_assign_plan(self.db, sub, "pro", self.admin_id, "test note")
+        await self.ops.admin_assign_plan(self.db, sub, "pro", self.admin_id, "test note")
 
         assert sub.plan_tier == "pro"
         assert sub.base_repo_limit == 10  # pro limit

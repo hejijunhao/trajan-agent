@@ -7,14 +7,13 @@ and coordination between the API handler and the GitHub service + domain ops.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
 
 from app.services.github.exceptions import GitHubAPIError, GitHubRepoRenamed
 from app.services.github.types import GitHubRepo, GitHubReposResponse
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,9 +58,7 @@ class TestListGitHubRepos:
         )
 
         with (
-            patch(
-                "app.api.v1.github.get_github_token", new_callable=AsyncMock
-            ) as mock_token,
+            patch("app.api.v1.github.get_github_token", new_callable=AsyncMock) as mock_token,
             patch("app.api.v1.github.GitHubService") as MockService,
         ):
             mock_token.return_value = "ghp_fake"
@@ -82,46 +79,36 @@ class TestListGitHubRepos:
         self, api_client: AsyncClient, test_subscription
     ):
         """GET /api/v1/github/repos returns 400 when no token configured."""
-        with patch(
-            "app.api.v1.github.get_github_token", new_callable=AsyncMock
-        ) as mock_token:
+        with patch("app.api.v1.github.get_github_token", new_callable=AsyncMock) as mock_token:
             from fastapi import HTTPException
 
-            mock_token.side_effect = HTTPException(status_code=400, detail="GitHub token not configured")
+            mock_token.side_effect = HTTPException(
+                status_code=400, detail="GitHub token not configured"
+            )
             resp = await api_client.get("/api/v1/github/repos")
 
         assert resp.status_code == 400
 
     @pytest.mark.anyio
-    async def test_returns_502_on_github_error(
-        self, api_client: AsyncClient, test_subscription
-    ):
+    async def test_returns_502_on_github_error(self, api_client: AsyncClient, test_subscription):
         """GET /api/v1/github/repos returns 502 on GitHub API failure."""
         with (
-            patch(
-                "app.api.v1.github.get_github_token", new_callable=AsyncMock
-            ) as mock_token,
+            patch("app.api.v1.github.get_github_token", new_callable=AsyncMock) as mock_token,
             patch("app.api.v1.github.GitHubService") as MockService,
         ):
             mock_token.return_value = "ghp_fake"
             instance = MockService.return_value
-            instance.get_user_repos = AsyncMock(
-                side_effect=GitHubAPIError("Server error", 502)
-            )
+            instance.get_user_repos = AsyncMock(side_effect=GitHubAPIError("Server error", 502))
 
             resp = await api_client.get("/api/v1/github/repos")
 
         assert resp.status_code == 502
 
     @pytest.mark.anyio
-    async def test_rate_limit_includes_reset_time(
-        self, api_client: AsyncClient, test_subscription
-    ):
+    async def test_rate_limit_includes_reset_time(self, api_client: AsyncClient, test_subscription):
         """Rate limit errors include reset time in the detail message."""
         with (
-            patch(
-                "app.api.v1.github.get_github_token", new_callable=AsyncMock
-            ) as mock_token,
+            patch("app.api.v1.github.get_github_token", new_callable=AsyncMock) as mock_token,
             patch("app.api.v1.github.GitHubService") as MockService,
         ):
             mock_token.return_value = "ghp_fake"
@@ -145,20 +132,23 @@ class TestImportGitHubRepos:
     """Tests for the import repos endpoint."""
 
     @pytest.mark.anyio
-    async def test_import_success(
-        self, api_client: AsyncClient, test_product, test_subscription
-    ):
+    async def test_import_success(self, api_client: AsyncClient, test_product, test_subscription):
         """POST /api/v1/github/import creates repository records."""
         repo = _github_repo(github_id=2001, name="new-repo")
         mock_repos_response = GitHubReposResponse(
-            repos=[repo], total_count=1, has_more=False, rate_limit_remaining=50,
+            repos=[repo],
+            total_count=1,
+            has_more=False,
+            rate_limit_remaining=50,
         )
 
         with (
             patch("app.api.v1.github.get_github_token", new_callable=AsyncMock) as mock_token,
             patch("app.api.v1.github.GitHubService") as MockService,
             patch("app.api.v1.github.maybe_auto_trigger_docs", new_callable=AsyncMock) as mock_docs,
-            patch("app.api.v1.github.maybe_auto_trigger_analysis", new_callable=AsyncMock) as mock_analysis,
+            patch(
+                "app.api.v1.github.maybe_auto_trigger_analysis", new_callable=AsyncMock
+            ) as mock_analysis,
         ):
             mock_token.return_value = "ghp_fake"
             instance = MockService.return_value
@@ -208,7 +198,10 @@ class TestImportGitHubRepos:
 
         repo = _github_repo(github_id=github_id, name="existing-repo")
         mock_repos_response = GitHubReposResponse(
-            repos=[repo], total_count=1, has_more=False, rate_limit_remaining=50,
+            repos=[repo],
+            total_count=1,
+            has_more=False,
+            rate_limit_remaining=50,
         )
 
         with (
@@ -233,9 +226,7 @@ class TestImportGitHubRepos:
         assert "Already imported" in data["skipped"][0]["reason"]
 
     @pytest.mark.anyio
-    async def test_import_product_not_found(
-        self, api_client: AsyncClient, test_subscription
-    ):
+    async def test_import_product_not_found(self, api_client: AsyncClient, test_subscription):
         """POST /api/v1/github/import returns 404 for non-existent product."""
         resp = await api_client.post(
             "/api/v1/github/import",
@@ -287,9 +278,7 @@ class TestRefreshRepository:
         assert data["stars_count"] == 10
 
     @pytest.mark.anyio
-    async def test_refresh_repo_not_found(
-        self, api_client: AsyncClient, test_subscription
-    ):
+    async def test_refresh_repo_not_found(self, api_client: AsyncClient, test_subscription):
         """POST /api/v1/github/refresh/{fake_id} returns 404."""
         resp = await api_client.post(f"/api/v1/github/refresh/{uuid.uuid4()}")
         assert resp.status_code == 404
@@ -370,7 +359,7 @@ class TestBulkRefreshRepos:
         from app.domain.repository_operations import repository_ops
 
         # Create a GitHub-linked repo
-        repo = await repository_ops.create(
+        await repository_ops.create(
             db_session,
             obj_in={
                 "product_id": test_product.id,
@@ -423,9 +412,7 @@ class TestBulkRefreshRepos:
         assert data["failed"] == []
 
     @pytest.mark.anyio
-    async def test_bulk_refresh_product_not_found(
-        self, api_client: AsyncClient, test_subscription
-    ):
+    async def test_bulk_refresh_product_not_found(self, api_client: AsyncClient, test_subscription):
         """POST /api/v1/github/refresh-all returns 404 for unknown product."""
         resp = await api_client.post(
             "/api/v1/github/refresh-all",
@@ -445,7 +432,7 @@ class TestBulkRefreshRepos:
         """Bulk refresh continues processing even when one repo fails."""
         from app.domain.repository_operations import repository_ops
 
-        repo_ok = await repository_ops.create(
+        await repository_ops.create(
             db_session,
             obj_in={
                 "product_id": test_product.id,
@@ -455,7 +442,7 @@ class TestBulkRefreshRepos:
             },
             imported_by_user_id=test_user.id,
         )
-        repo_fail = await repository_ops.create(
+        await repository_ops.create(
             db_session,
             obj_in={
                 "product_id": test_product.id,
@@ -476,7 +463,6 @@ class TestBulkRefreshRepos:
             instance = MockService.return_value
 
             # First call succeeds, second fails
-            call_count = 0
             original_repos = {"octocat/ok-repo": fresh_ok}
 
             async def side_effect(owner, repo_name):

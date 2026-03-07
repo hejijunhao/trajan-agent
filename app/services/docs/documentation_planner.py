@@ -138,29 +138,33 @@ class DocumentationPlanner:
 
         # Mode-specific instructions
         if mode == "expand":
-            sections.extend([
-                "## Mode: Expand (Gap Analysis Only)",
-                "",
-                "You are in EXPAND mode. This means:",
-                "- Focus ONLY on identifying gaps in existing documentation",
-                "- Do NOT suggest documents that would duplicate existing content",
-                "- Existing docs are to be left untouched",
-                "- Only recommend new documents that fill genuine gaps",
-                "- It's valid to recommend zero documents if coverage is comprehensive",
-                "",
-                "---",
-                "",
-            ])
+            sections.extend(
+                [
+                    "## Mode: Expand (Gap Analysis Only)",
+                    "",
+                    "You are in EXPAND mode. This means:",
+                    "- Focus ONLY on identifying gaps in existing documentation",
+                    "- Do NOT suggest documents that would duplicate existing content",
+                    "- Existing docs are to be left untouched",
+                    "- Only recommend new documents that fill genuine gaps",
+                    "- It's valid to recommend zero documents if coverage is comprehensive",
+                    "",
+                    "---",
+                    "",
+                ]
+            )
 
         # Codebase context section
-        sections.extend([
-            "## Codebase Analysis",
-            "",
-            f"**Repositories:** {len(context.repositories)}",
-            f"**Total Files:** {context.total_files}",
-            f"**Total Tokens Analyzed:** {context.total_tokens:,}",
-            "",
-        ])
+        sections.extend(
+            [
+                "## Codebase Analysis",
+                "",
+                f"**Repositories:** {len(context.repositories)}",
+                f"**Total Files:** {context.total_files}",
+                f"**Total Tokens Analyzed:** {context.total_tokens:,}",
+                "",
+            ]
+        )
 
         # Tech stack
         tech = context.combined_tech_stack
@@ -191,27 +195,29 @@ class DocumentationPlanner:
         # API endpoints
         if context.all_endpoints:
             sections.append(f"**API Endpoints:** {len(context.all_endpoints)} detected")
-            endpoint_summary = ", ".join(
-                f"{e.method} {e.path}" for e in context.all_endpoints[:8]
-            )
+            endpoint_summary = ", ".join(f"{e.method} {e.path}" for e in context.all_endpoints[:8])
             if len(context.all_endpoints) > 8:
                 endpoint_summary += f" (+{len(context.all_endpoints) - 8} more)"
             sections.append(f"  Examples: {endpoint_summary}")
             sections.append("")
 
         # Per-repository details
-        sections.extend([
-            "---",
-            "",
-            "## Repository Details",
-            "",
-        ])
+        sections.extend(
+            [
+                "---",
+                "",
+                "## Repository Details",
+                "",
+            ]
+        )
 
         for repo in context.repositories:
-            sections.extend([
-                f"### {repo.full_name}",
-                f"**Branch:** {repo.default_branch}",
-            ])
+            sections.extend(
+                [
+                    f"### {repo.full_name}",
+                    f"**Branch:** {repo.default_branch}",
+                ]
+            )
             if repo.description:
                 sections.append(f"**Description:** {repo.description}")
 
@@ -225,34 +231,40 @@ class DocumentationPlanner:
             sections.append("")
 
         # Key file contents (most important context)
-        sections.extend([
-            "---",
-            "",
-            "## Key Source Files",
-            "",
-            "Below are the contents of key files from the codebase. "
-            "Use these to understand the project structure, patterns, and implementation details.",
-            "",
-        ])
+        sections.extend(
+            [
+                "---",
+                "",
+                "## Key Source Files",
+                "",
+                "Below are the contents of key files from the codebase. "
+                "Use these to understand the project structure, patterns, and implementation details.",
+                "",
+            ]
+        )
 
         for file in context.all_key_files:
             # Include file header and content
-            sections.extend([
-                f"### `{file.path}` (Tier {file.tier}, ~{file.token_estimate} tokens)",
-                "",
-                "```",
-                file.content,
-                "```",
-                "",
-            ])
+            sections.extend(
+                [
+                    f"### `{file.path}` (Tier {file.tier}, ~{file.token_estimate} tokens)",
+                    "",
+                    "```",
+                    file.content,
+                    "```",
+                    "",
+                ]
+            )
 
         # Existing documentation
-        sections.extend([
-            "---",
-            "",
-            "## Existing Documentation",
-            "",
-        ])
+        sections.extend(
+            [
+                "---",
+                "",
+                "## Existing Documentation",
+                "",
+            ]
+        )
 
         if existing_docs:
             sections.append(
@@ -272,45 +284,49 @@ class DocumentationPlanner:
             sections.append("")
 
         # Section taxonomy
-        sections.extend([
-            "---",
-            "",
-            get_subsection_prompt(),
-            "",
-        ])
+        sections.extend(
+            [
+                "---",
+                "",
+                get_subsection_prompt(),
+                "",
+            ]
+        )
 
         # Planning instructions
-        sections.extend([
-            "---",
-            "",
-            "## Your Task",
-            "",
-            "Analyze this codebase thoroughly and create a documentation plan.",
-            "",
-            "Consider what documentation would be most valuable for:",
-            "- **Business stakeholders** — understanding what the software does",
-            "- **New developers** — getting started and understanding the codebase",
-            "- **Existing developers** — reference material and architectural guidance",
-            "",
-            "**Important:** Include a mix of technical AND conceptual documents.",
-            "Conceptual docs help non-technical stakeholders understand the product.",
-            "",
-            "For each planned document, specify:",
-            "- **title**: Clear, descriptive title",
-            "- **doc_type**: Category (overview, architecture, guide, reference, concept)",
-            "- **section**: Top-level section ('technical' or 'conceptual')",
-            "- **subsection**: Specific subsection (see section taxonomy above)",
-            "- **purpose**: Why this doc is valuable and who it serves",
-            "- **key_topics**: What should be covered (list of topics)",
-            "- **source_files**: Which source files to reference when generating",
-            "- **priority**: 1-5 (1 = most important, generate first)",
-            "- **folder**: Target folder (usually 'blueprints')",
-            "",
-            "Quality over quantity. Only recommend documentation that would be genuinely useful.",
-            "It's better to have 3 excellent docs than 10 mediocre ones.",
-            "",
-            "Use the save_documentation_plan tool to output your plan.",
-        ])
+        sections.extend(
+            [
+                "---",
+                "",
+                "## Your Task",
+                "",
+                "Analyze this codebase thoroughly and create a documentation plan.",
+                "",
+                "Consider what documentation would be most valuable for:",
+                "- **Business stakeholders** — understanding what the software does",
+                "- **New developers** — getting started and understanding the codebase",
+                "- **Existing developers** — reference material and architectural guidance",
+                "",
+                "**Important:** Include a mix of technical AND conceptual documents.",
+                "Conceptual docs help non-technical stakeholders understand the product.",
+                "",
+                "For each planned document, specify:",
+                "- **title**: Clear, descriptive title",
+                "- **doc_type**: Category (overview, architecture, guide, reference, concept)",
+                "- **section**: Top-level section ('technical' or 'conceptual')",
+                "- **subsection**: Specific subsection (see section taxonomy above)",
+                "- **purpose**: Why this doc is valuable and who it serves",
+                "- **key_topics**: What should be covered (list of topics)",
+                "- **source_files**: Which source files to reference when generating",
+                "- **priority**: 1-5 (1 = most important, generate first)",
+                "- **folder**: Target folder (usually 'blueprints')",
+                "",
+                "Quality over quantity. Only recommend documentation that would be genuinely useful.",
+                "It's better to have 3 excellent docs than 10 mediocre ones.",
+                "",
+                "Use the save_documentation_plan tool to output your plan.",
+            ]
+        )
 
         return "\n".join(sections)
 

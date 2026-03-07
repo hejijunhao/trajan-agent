@@ -1,13 +1,11 @@
 """Unit tests for organization access control dependencies."""
 
-import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
 
 from app.api.deps.organization import require_org_admin, require_org_owner, require_system_admin
-
 from tests.helpers.mock_factories import make_mock_organization, make_mock_user
 
 

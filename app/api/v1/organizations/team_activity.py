@@ -260,9 +260,7 @@ async def get_team_activity(
         streak = _compute_streak(merged_daily)
 
         # Top focus areas
-        focus_sorted = sorted(
-            data["focus_area_counts"].items(), key=lambda x: x[1], reverse=True
-        )
+        focus_sorted = sorted(data["focus_area_counts"].items(), key=lambda x: x[1], reverse=True)
         focus_areas = [area for area, _ in focus_sorted[:5]]
 
         # Sort recent commits by timestamp, take top 10
@@ -296,9 +294,7 @@ async def get_team_activity(
             "role": m.role,
             "joined_at": m.joined_at.isoformat() if m.joined_at else None,
             "github_username": m.user.github_username if m.user else None,
-            "has_signed_in": (
-                m.user.onboarding_completed_at is not None if m.user else False
-            ),
+            "has_signed_in": (m.user.onboarding_completed_at is not None if m.user else False),
         }
 
     # 6. Match contributors to org members

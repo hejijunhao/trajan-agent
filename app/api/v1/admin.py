@@ -8,8 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_system_admin
-from app.core.database import get_db
 from app.config.plans import PLANS
+from app.core.database import get_db
 from app.domain import organization_ops, subscription_ops
 from app.models.user import User
 

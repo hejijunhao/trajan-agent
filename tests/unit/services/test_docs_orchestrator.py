@@ -112,12 +112,8 @@ class TestOrchestratorV2Flow:
         """V2 flow: analyze → plan → generate → complete."""
         orch = _make_orchestrator()
         orch.codebase_analyzer.analyze = AsyncMock(return_value=_make_codebase_context())
-        orch.documentation_planner.create_plan = AsyncMock(
-            return_value=_make_planner_result(2)
-        )
-        orch.document_generator.generate_batch = AsyncMock(
-            return_value=_make_batch_result(2)
-        )
+        orch.documentation_planner.create_plan = AsyncMock(return_value=_make_planner_result(2))
+        orch.document_generator.generate_batch = AsyncMock(return_value=_make_batch_result(2))
         orch.changelog_agent.run = AsyncMock(
             return_value=ChangelogResult(action="created", document=MagicMock())
         )
@@ -144,7 +140,7 @@ class TestOrchestratorV2Flow:
         )
         orch.plans_agent.run = AsyncMock(return_value=PlansResult(organized_count=0))
 
-        result = await orch.run(use_v2=True)
+        await orch.run(use_v2=True)
 
         # V1 was invoked as fallback
         orch.blueprint_agent.run.assert_called_once()
@@ -159,9 +155,7 @@ class TestOrchestratorV2Flow:
         orch = _make_orchestrator()
         orch.codebase_analyzer.analyze = AsyncMock(return_value=_make_codebase_context())
         orch.documentation_planner.create_plan = AsyncMock(
-            return_value=PlannerResult(
-                plan=MagicMock(), success=False, error="Planning failed"
-            )
+            return_value=PlannerResult(plan=MagicMock(), success=False, error="Planning failed")
         )
         orch.blueprint_agent.run = AsyncMock(
             return_value=BlueprintResult(documents=[], created_count=0)
@@ -171,7 +165,7 @@ class TestOrchestratorV2Flow:
         )
         orch.plans_agent.run = AsyncMock(return_value=PlansResult(organized_count=0))
 
-        result = await orch.run(use_v2=True)
+        await orch.run(use_v2=True)
 
         # V1 fallback triggered
         orch.blueprint_agent.run.assert_called_once()
@@ -183,9 +177,7 @@ class TestOrchestratorV2Flow:
         """If some docs fail to generate, others still complete."""
         orch = _make_orchestrator()
         orch.codebase_analyzer.analyze = AsyncMock(return_value=_make_codebase_context())
-        orch.documentation_planner.create_plan = AsyncMock(
-            return_value=_make_planner_result(3)
-        )
+        orch.documentation_planner.create_plan = AsyncMock(return_value=_make_planner_result(3))
         orch.document_generator.generate_batch = AsyncMock(
             return_value=_make_batch_result(2, failed=["Architecture Doc"])
         )
@@ -220,12 +212,8 @@ class TestOrchestratorV2Flow:
         """On successful generation, codebase fingerprint is saved."""
         orch = _make_orchestrator()
         orch.codebase_analyzer.analyze = AsyncMock(return_value=_make_codebase_context())
-        orch.documentation_planner.create_plan = AsyncMock(
-            return_value=_make_planner_result(1)
-        )
-        orch.document_generator.generate_batch = AsyncMock(
-            return_value=_make_batch_result(1)
-        )
+        orch.documentation_planner.create_plan = AsyncMock(return_value=_make_planner_result(1))
+        orch.document_generator.generate_batch = AsyncMock(return_value=_make_batch_result(1))
         orch.changelog_agent.run = AsyncMock(
             return_value=ChangelogResult(action="created", document=MagicMock())
         )
@@ -284,7 +272,7 @@ class TestOrchestratorV1Flow:
         )
         orch.plans_agent.run = AsyncMock(return_value=PlansResult(organized_count=0))
 
-        result = await orch.run(use_v2=False)
+        await orch.run(use_v2=False)
 
         orch.blueprint_agent.run.assert_called_once()
 
@@ -318,9 +306,7 @@ class TestOrchestratorMode:
         """Full mode passes planner_mode='full' to documentation planner."""
         orch = _make_orchestrator()
         orch.codebase_analyzer.analyze = AsyncMock(return_value=_make_codebase_context())
-        orch.documentation_planner.create_plan = AsyncMock(
-            return_value=_make_planner_result(0)
-        )
+        orch.documentation_planner.create_plan = AsyncMock(return_value=_make_planner_result(0))
         orch.changelog_agent.run = AsyncMock(
             return_value=ChangelogResult(action="created", document=MagicMock())
         )
@@ -338,9 +324,7 @@ class TestOrchestratorMode:
         """Additive mode maps to planner_mode='expand'."""
         orch = _make_orchestrator()
         orch.codebase_analyzer.analyze = AsyncMock(return_value=_make_codebase_context())
-        orch.documentation_planner.create_plan = AsyncMock(
-            return_value=_make_planner_result(0)
-        )
+        orch.documentation_planner.create_plan = AsyncMock(return_value=_make_planner_result(0))
         orch.changelog_agent.run = AsyncMock(
             return_value=ChangelogResult(action="created", document=MagicMock())
         )
@@ -395,6 +379,6 @@ class TestOrchestratorTimeout:
         orch.plans_agent.run = AsyncMock(return_value=PlansResult(organized_count=0))
 
         with patch("app.services.docs.orchestrator.AGENT_TIMEOUT_HEAVY", 0.01):
-            result = await orch.run(use_v2=True)
+            await orch.run(use_v2=True)
 
         orch.blueprint_agent.run.assert_called_once()

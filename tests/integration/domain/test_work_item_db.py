@@ -14,9 +14,7 @@ from app.domain.work_item_operations import work_item_ops
 class TestWorkItemCRUD:
     """Test work item create, read, update, delete."""
 
-    async def test_create_work_item(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_create_work_item(self, db_session: AsyncSession, test_user, test_product):
         """Can create a work item linked to a product."""
         item = await work_item_ops.create(
             db_session,
@@ -38,9 +36,7 @@ class TestWorkItemCRUD:
         assert item.priority == 1
         assert item.created_by_user_id == test_user.id
 
-    async def test_get_by_product(
-        self, db_session: AsyncSession, test_product, test_work_item
-    ):
+    async def test_get_by_product(self, db_session: AsyncSession, test_product, test_work_item):
         """get_by_product returns work items for the product."""
         items = await work_item_ops.get_by_product(db_session, test_product.id)
         item_ids = [i.id for i in items]
@@ -50,9 +46,7 @@ class TestWorkItemCRUD:
 class TestWorkItemFilters:
     """Test status and type filtering."""
 
-    async def test_status_filter(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_status_filter(self, db_session: AsyncSession, test_user, test_product):
         """Can filter work items by status."""
         # Create items with different statuses
         await work_item_ops.create(
@@ -82,9 +76,7 @@ class TestWorkItemFilters:
         assert all(i.status == "completed" for i in completed_items)
         assert len(completed_items) >= 1
 
-    async def test_type_filter(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_type_filter(self, db_session: AsyncSession, test_user, test_product):
         """Can filter work items by type."""
         await work_item_ops.create(
             db_session,
@@ -97,9 +89,7 @@ class TestWorkItemFilters:
             created_by_user_id=test_user.id,
         )
 
-        refactors = await work_item_ops.get_by_product(
-            db_session, test_product.id, type="refactor"
-        )
+        refactors = await work_item_ops.get_by_product(db_session, test_product.id, type="refactor")
         assert all(i.type == "refactor" for i in refactors)
         assert len(refactors) >= 1
 
@@ -107,9 +97,7 @@ class TestWorkItemFilters:
 class TestWorkItemMutations:
     """Test work item update and delete."""
 
-    async def test_update_work_item(
-        self, db_session: AsyncSession, test_work_item
-    ):
+    async def test_update_work_item(self, db_session: AsyncSession, test_work_item):
         """Can update work item fields."""
         updated = await work_item_ops.update(
             db_session, test_work_item, {"status": "in_progress", "priority": 2}
@@ -117,9 +105,7 @@ class TestWorkItemMutations:
         assert updated.status == "in_progress"
         assert updated.priority == 2
 
-    async def test_delete_work_item(
-        self, db_session: AsyncSession, test_work_item
-    ):
+    async def test_delete_work_item(self, db_session: AsyncSession, test_work_item):
         """Can soft-delete a work item."""
         deleted = await work_item_ops.delete(db_session, test_work_item)
         assert deleted is True

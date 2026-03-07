@@ -6,13 +6,9 @@ Covers: CRUD, eager loading, quick access, org scoping, and user scoping.
 
 from __future__ import annotations
 
-import uuid
-
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.product_operations import product_ops
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CRUD basics
@@ -84,9 +80,7 @@ class TestProductCRUD:
 class TestProductOrgScoping:
     """Test org-level product queries."""
 
-    async def test_get_by_organization(
-        self, db_session: AsyncSession, test_org, test_product
-    ):
+    async def test_get_by_organization(self, db_session: AsyncSession, test_org, test_product):
         """get_by_organization returns products for the org."""
         products = await product_ops.get_by_organization(db_session, test_org.id)
         product_ids = [p.id for p in products]
@@ -112,13 +106,9 @@ class TestProductOrgScoping:
 class TestProductRelations:
     """Test eager-loaded relation queries."""
 
-    async def test_get_with_relations(
-        self, db_session: AsyncSession, test_user, test_product
-    ):
+    async def test_get_with_relations(self, db_session: AsyncSession, test_user, test_product):
         """get_with_relations returns product with loaded collections."""
-        loaded = await product_ops.get_with_relations(
-            db_session, test_user.id, test_product.id
-        )
+        loaded = await product_ops.get_with_relations(db_session, test_user.id, test_product.id)
         assert loaded is not None
         assert loaded.id == test_product.id
         # Collections should be loaded (empty lists, not lazy-load errors)
@@ -147,9 +137,7 @@ class TestQuickAccess:
     ):
         """Enable generates a token; disable keeps it but marks disabled."""
         # Enable
-        product = await product_ops.enable_quick_access(
-            db_session, test_product, test_user.id
-        )
+        product = await product_ops.enable_quick_access(db_session, test_product, test_user.id)
         assert product.quick_access_enabled is True
         assert product.quick_access_token is not None
         token = product.quick_access_token
@@ -172,13 +160,9 @@ class TestQuickAccess:
         self, db_session: AsyncSession, test_user, test_product
     ):
         """Regenerating creates a new token, invalidating the old one."""
-        product = await product_ops.enable_quick_access(
-            db_session, test_product, test_user.id
-        )
+        product = await product_ops.enable_quick_access(db_session, test_product, test_user.id)
         old_token = product.quick_access_token
 
-        product = await product_ops.regenerate_quick_access_token(
-            db_session, product, test_user.id
-        )
+        product = await product_ops.regenerate_quick_access_token(db_session, product, test_user.id)
         assert product.quick_access_token != old_token
         assert product.quick_access_token is not None

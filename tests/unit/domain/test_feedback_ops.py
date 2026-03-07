@@ -1,13 +1,11 @@
 """Unit tests for FeedbackOperations — all DB calls mocked."""
 
 import uuid
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.domain.feedback_operations import FeedbackOperations
-
 from tests.helpers.mock_factories import (
     make_mock_feedback,
     mock_scalar_result,
@@ -111,9 +109,7 @@ class TestFeedbackUpdateAiSummary:
         self.db.commit = AsyncMock()
         self.db.refresh = AsyncMock()
 
-        result = await self.ops.update_ai_summary(
-            self.db, feedback.id, "AI says: bug in auth"
-        )
+        result = await self.ops.update_ai_summary(self.db, feedback.id, "AI says: bug in auth")
         assert result.ai_summary == "AI says: bug in auth"
         assert result.ai_processed_at is not None
 

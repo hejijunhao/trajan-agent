@@ -47,9 +47,7 @@ class TestUsersReturnOwnData:
         assert data["id"] == str(test_user.id)
 
     @pytest.mark.anyio
-    async def test_second_user_gets_own_profile(
-        self, second_user_client: AsyncClient, second_user
-    ):
+    async def test_second_user_gets_own_profile(self, second_user_client: AsyncClient, second_user):
         resp = await second_user_client.get("/api/v1/users/me")
         assert resp.status_code == 200
         data = resp.json()

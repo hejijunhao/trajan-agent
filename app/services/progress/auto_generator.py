@@ -426,9 +426,7 @@ class AutoProgressGenerator:
                 commits=commit_infos,
             )
 
-            summary = await shipped_summarizer.interpret(
-                input_data, model_override=haiku_model
-            )
+            summary = await shipped_summarizer.interpret(input_data, model_override=haiku_model)
 
             items_as_dicts = [
                 {"description": item.description, "category": item.category}

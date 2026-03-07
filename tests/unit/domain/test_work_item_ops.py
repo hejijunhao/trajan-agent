@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.domain.work_item_operations import WorkItemOperations
-
 from tests.helpers.mock_factories import (
     make_mock_work_item,
     mock_scalar_result,
@@ -80,9 +79,7 @@ class TestWorkItemGetByProduct:
         items = [make_mock_work_item(status="open", type="feature")]
         self.db.execute = AsyncMock(return_value=mock_scalars_result(items))
 
-        result = await self.ops.get_by_product(
-            self.db, uuid.uuid4(), status="open", type="feature"
-        )
+        result = await self.ops.get_by_product(self.db, uuid.uuid4(), status="open", type="feature")
         assert len(result) == 1
 
 

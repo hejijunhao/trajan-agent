@@ -11,7 +11,7 @@ Tests cover:
 """
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
 import pytest
@@ -149,9 +149,7 @@ class TestGenerate:
         generator.client = AsyncMock()
         generator.client.messages.create = AsyncMock(return_value=mock_response)
 
-        result = await generator.generate(
-            planned_doc, self.context, self.product, self.user_id
-        )
+        result = await generator.generate(planned_doc, self.context, self.product, self.user_id)
 
         assert result.success is True
         assert result.document is not None
@@ -176,9 +174,7 @@ class TestGenerate:
             )
         )
 
-        result = await generator.generate(
-            planned_doc, self.context, self.product, self.user_id
-        )
+        result = await generator.generate(planned_doc, self.context, self.product, self.user_id)
 
         assert result.success is False
         assert result.document is None
@@ -197,9 +193,7 @@ class TestGenerate:
         generator.client = AsyncMock()
         generator.client.messages.create = AsyncMock(return_value=mock_response)
 
-        result = await generator.generate(
-            planned_doc, self.context, self.product, self.user_id
-        )
+        result = await generator.generate(planned_doc, self.context, self.product, self.user_id)
 
         assert result.document.product_id == self.product.id
         assert result.document.folder == {"path": "blueprints/backend"}

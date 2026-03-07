@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.domain.dashboard_shipped_operations import DashboardShippedOperations
-
 from tests.helpers.mock_factories import (
     make_mock_dashboard_shipped,
     mock_scalar_result,
@@ -64,9 +63,7 @@ class TestGetByProductsPeriod:
     async def test_returns_empty_when_no_summaries_exist(self):
         self.db.execute = AsyncMock(return_value=mock_scalars_result([]))
 
-        result = await self.ops.get_by_products_period(
-            self.db, [uuid.uuid4()], "30d"
-        )
+        result = await self.ops.get_by_products_period(self.db, [uuid.uuid4()], "30d")
         assert result == []
 
 
@@ -142,9 +139,7 @@ class TestUpdateLastActivity:
         self.db.execute = AsyncMock(return_value=mock_scalar_result(None))
         self.db.add = MagicMock()
 
-        await self.ops.update_last_activity(
-            self.db, uuid.uuid4(), "7d", datetime.now(UTC)
-        )
+        await self.ops.update_last_activity(self.db, uuid.uuid4(), "7d", datetime.now(UTC))
         self.db.add.assert_not_called()
 
 

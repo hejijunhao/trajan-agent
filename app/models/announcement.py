@@ -81,9 +81,7 @@ class Announcement(AnnouncementBase, UUIDMixin, TimestampMixin, table=True):
     """
 
     __tablename__ = "announcement"
-    __table_args__ = (
-        Index("idx_announcement_active", "is_active", "starts_at", "ends_at"),
-    )
+    __table_args__ = (Index("idx_announcement_active", "is_active", "starts_at", "ends_at"),)
 
 
 class AnnouncementRead(SQLModel):

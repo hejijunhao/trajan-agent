@@ -13,9 +13,7 @@ async def test_list_documents_by_product(
     api_client: AsyncClient, test_product, test_document, test_subscription
 ):
     """GET /api/v1/documents/?product_id={id} returns product documents."""
-    resp = await api_client.get(
-        "/api/v1/documents/", params={"product_id": str(test_product.id)}
-    )
+    resp = await api_client.get("/api/v1/documents/", params={"product_id": str(test_product.id)})
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -24,9 +22,7 @@ async def test_list_documents_by_product(
 
 
 @pytest.mark.anyio
-async def test_get_document(
-    api_client: AsyncClient, test_document, test_subscription
-):
+async def test_get_document(api_client: AsyncClient, test_document, test_subscription):
     """GET /api/v1/documents/{id} returns the document."""
     resp = await api_client.get(f"/api/v1/documents/{test_document.id}")
     assert resp.status_code == 200
@@ -44,9 +40,7 @@ async def test_get_document_not_found(api_client: AsyncClient, test_subscription
 
 
 @pytest.mark.anyio
-async def test_create_document(
-    api_client: AsyncClient, test_product, test_subscription
-):
+async def test_create_document(api_client: AsyncClient, test_product, test_subscription):
     """POST /api/v1/documents/ creates a document with is_generated=True."""
     resp = await api_client.post(
         "/api/v1/documents/",
@@ -63,9 +57,7 @@ async def test_create_document(
 
 
 @pytest.mark.anyio
-async def test_update_document(
-    api_client: AsyncClient, test_document, test_subscription
-):
+async def test_update_document(api_client: AsyncClient, test_document, test_subscription):
     """PATCH /api/v1/documents/{id} updates the document."""
     new_title = f"Updated {uuid.uuid4().hex[:8]}"
     resp = await api_client.patch(

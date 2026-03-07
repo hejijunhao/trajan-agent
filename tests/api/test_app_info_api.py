@@ -13,9 +13,7 @@ async def test_list_app_info(
     api_client: AsyncClient, test_product, test_app_info_entry, test_subscription
 ):
     """GET /api/v1/app-info/?product_id={id} returns entries."""
-    resp = await api_client.get(
-        "/api/v1/app-info/", params={"product_id": str(test_product.id)}
-    )
+    resp = await api_client.get("/api/v1/app-info/", params={"product_id": str(test_product.id)})
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -24,9 +22,7 @@ async def test_list_app_info(
 
 
 @pytest.mark.anyio
-async def test_get_app_info(
-    api_client: AsyncClient, test_app_info_entry, test_subscription
-):
+async def test_get_app_info(api_client: AsyncClient, test_app_info_entry, test_subscription):
     """GET /api/v1/app-info/{id} returns the entry."""
     resp = await api_client.get(f"/api/v1/app-info/{test_app_info_entry.id}")
     assert resp.status_code == 200
@@ -36,9 +32,7 @@ async def test_get_app_info(
 
 
 @pytest.mark.anyio
-async def test_create_app_info(
-    api_client: AsyncClient, test_product, test_subscription
-):
+async def test_create_app_info(api_client: AsyncClient, test_product, test_subscription):
     """POST /api/v1/app-info/ creates a new entry."""
     resp = await api_client.post(
         "/api/v1/app-info/",
@@ -56,9 +50,7 @@ async def test_create_app_info(
 
 
 @pytest.mark.anyio
-async def test_create_secret_app_info(
-    api_client: AsyncClient, test_product, test_subscription
-):
+async def test_create_secret_app_info(api_client: AsyncClient, test_product, test_subscription):
     """POST /api/v1/app-info/ with is_secret returns masked value."""
     resp = await api_client.post(
         "/api/v1/app-info/",
@@ -77,9 +69,7 @@ async def test_create_secret_app_info(
 
 
 @pytest.mark.anyio
-async def test_update_app_info(
-    api_client: AsyncClient, test_app_info_entry, test_subscription
-):
+async def test_update_app_info(api_client: AsyncClient, test_app_info_entry, test_subscription):
     """PATCH /api/v1/app-info/{id} updates the entry."""
     resp = await api_client.patch(
         f"/api/v1/app-info/{test_app_info_entry.id}",

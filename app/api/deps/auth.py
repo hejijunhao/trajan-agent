@@ -109,9 +109,7 @@ async def get_current_user(
             logger.info("JWT validation failed with cached JWKS, forcing refresh")
             jwks = await get_jwks(force_refresh=True)
             signing_key = get_signing_key(jwks, token)
-            payload = jwt.decode(
-                token, signing_key, algorithms=["ES256"], audience="authenticated"
-            )
+            payload = jwt.decode(token, signing_key, algorithms=["ES256"], audience="authenticated")
             user_id_str = payload.get("sub")
             if user_id_str is None:
                 raise HTTPException(

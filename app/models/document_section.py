@@ -20,10 +20,16 @@ class DocumentSectionBase(SQLModel):
     """Base fields for DocumentSection."""
 
     name: str = Field(max_length=100, description="Display name (e.g., 'Technical Documentation')")
-    slug: str = Field(max_length=50, index=True, description="URL-friendly identifier (e.g., 'technical')")
+    slug: str = Field(
+        max_length=50, index=True, description="URL-friendly identifier (e.g., 'technical')"
+    )
     position: int = Field(default=0, description="Order position for display")
-    color: str | None = Field(default=None, max_length=7, description="Accent color as hex (e.g., '#c2410c')")
-    icon: str | None = Field(default=None, max_length=50, description="Lucide icon name (e.g., 'Server')")
+    color: str | None = Field(
+        default=None, max_length=7, description="Accent color as hex (e.g., '#c2410c')"
+    )
+    icon: str | None = Field(
+        default=None, max_length=50, description="Lucide icon name (e.g., 'Server')"
+    )
     is_default: bool = Field(default=False, description="System sections cannot be deleted")
 
 
@@ -67,7 +73,10 @@ class DocumentSection(DocumentSectionBase, UUIDMixin, TimestampMixin, table=True
     product: Optional["Product"] = Relationship(back_populates="document_sections")
     subsections: list["DocumentSubsection"] = Relationship(
         back_populates="section",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "DocumentSubsection.position"},
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "order_by": "DocumentSubsection.position",
+        },
     )
     documents: list["Document"] = Relationship(back_populates="document_section")
 
@@ -76,7 +85,9 @@ class DocumentSubsectionBase(SQLModel):
     """Base fields for DocumentSubsection."""
 
     name: str = Field(max_length=100, description="Display name (e.g., 'Backend')")
-    slug: str = Field(max_length=50, index=True, description="URL-friendly identifier (e.g., 'backend')")
+    slug: str = Field(
+        max_length=50, index=True, description="URL-friendly identifier (e.g., 'backend')"
+    )
     position: int = Field(default=0, description="Order position within section")
     is_default: bool = Field(default=False, description="System subsections cannot be deleted")
 

@@ -6,12 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domain.user_operations import (
-    BasicOrgInfo,
     DeletionPreviewResult,
     OrgDeletionPreview,
     UserOperations,
 )
-
 from tests.helpers.mock_factories import make_mock_organization, make_mock_user
 
 
@@ -81,18 +79,14 @@ class TestDeleteWithCascade:
         mock_supabase.return_value = True
 
         sole_org_id = preview.owned_orgs[0].org_id
-        success, errors = await self.ops.delete_with_cascade(
-            self.db, self.user_id, [sole_org_id]
-        )
+        success, errors = await self.ops.delete_with_cascade(self.db, self.user_id, [sole_org_id])
         assert success is True
         assert errors == []
 
     @pytest.mark.asyncio
     @patch.object(UserOperations, "get_deletion_preview")
     @patch("app.domain.organization_operations.organization_ops")
-    async def test_raises_if_multi_member_org_not_transferred(
-        self, mock_org_ops, mock_preview
-    ):
+    async def test_raises_if_multi_member_org_not_transferred(self, mock_org_ops, mock_preview):
         preview = _make_preview(multi_member_orgs=1)
         mock_preview.return_value = preview
         # Simulate org still owned by user
@@ -118,9 +112,7 @@ class TestDeleteWithCascade:
         mock_preview.return_value = preview
 
         with pytest.raises(ValueError, match="Cannot delete organizations"):
-            await self.ops.delete_with_cascade(
-                self.db, self.user_id, [uuid.uuid4()]
-            )
+            await self.ops.delete_with_cascade(self.db, self.user_id, [uuid.uuid4()])
 
 
 class TestDeleteSupabaseAuthUser:

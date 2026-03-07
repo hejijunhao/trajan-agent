@@ -1041,9 +1041,7 @@ class TestEmailTemplatesDaily:
         assert "daily digests" in html
 
     def test_weekly_email_html_heading(self) -> None:
-        html = _build_email_html(
-            ["<div>Section</div>"], "https://app.test.com", frequency="weekly"
-        )
+        html = _build_email_html(["<div>Section</div>"], "https://app.test.com", frequency="weekly")
         assert "Weekly Progress" in html
         assert "Your projects this week" in html
         assert "weekly digests" in html
@@ -1059,7 +1057,9 @@ class TestEmailTemplatesDaily:
             {"name": "Alice", "summary_text": "Shipped auth flow.", "commit_count": 4},
             {"name": "Bob", "summary_text": "Fixed tests.", "commit_count": 2},
         ]
-        data = [("App", "Good week.", [{"description": "Feature", "category": "feature"}], contribs)]
+        data = [
+            ("App", "Good week.", [{"description": "Feature", "category": "feature"}], contribs)
+        ]
         text = _build_plain_text(data)
         assert "Progress Review:" in text
         assert "Alice (4 commits)" in text

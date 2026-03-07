@@ -7,12 +7,10 @@ and billing event audit trail.
 
 from __future__ import annotations
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.subscription_operations import subscription_ops
 from app.models.billing import BillingEventType
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Lookups
@@ -75,9 +73,7 @@ class TestPlanUpdates:
         )
         assert updated.status == "past_due"
 
-    async def test_admin_assign_plan(
-        self, db_session: AsyncSession, test_user, test_subscription
-    ):
+    async def test_admin_assign_plan(self, db_session: AsyncSession, test_user, test_subscription):
         """Admin can manually assign a plan, bypassing Stripe."""
         updated = await subscription_ops.admin_assign_plan(
             db_session,
@@ -122,7 +118,9 @@ class TestRepoLimits:
         assert status.can_add is False
         assert status.base_limit == 5
 
-    async def test_over_limit_paid_plan(self, db_session: AsyncSession, test_org, test_subscription):
+    async def test_over_limit_paid_plan(
+        self, db_session: AsyncSession, test_org, test_subscription
+    ):
         """Pro plan allows overages — can always add with overage charges."""
         # Upgrade to pro
         await subscription_ops.update(

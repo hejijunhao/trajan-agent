@@ -483,4 +483,8 @@ async def move_document_to_section(
     await document_ops.update(db, doc, update_data)
     await db.commit()
 
-    return {"success": True, "section_id": str(section_id) if section_id else None, "subsection_id": str(subsection_id) if subsection_id else None}
+    return {
+        "success": True,
+        "section_id": str(section_id) if section_id else None,
+        "subsection_id": str(subsection_id) if subsection_id else None,
+    }

@@ -44,8 +44,6 @@ class TestFeedbackScopedToUser:
         test_feedback,
     ):
         """second_user should not see test_user's feedback."""
-        resp = await second_user_client.get(
-            f"/api/v1/feedback/{test_feedback.id}"
-        )
+        resp = await second_user_client.get(f"/api/v1/feedback/{test_feedback.id}")
         # Expect 404 (feedback scoped to user) or 403
         assert resp.status_code in (403, 404)

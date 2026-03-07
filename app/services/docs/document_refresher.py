@@ -163,9 +163,7 @@ class DocumentRefresher:
         result = BulkRefreshResult()
 
         # Get all documents for this product (RLS enforces access)
-        documents = await document_ops.get_by_product(
-            self.db, uuid_pkg.UUID(product_id)
-        )
+        documents = await document_ops.get_by_product(self.db, uuid_pkg.UUID(product_id))
 
         if not documents:
             return result
@@ -263,10 +261,9 @@ class DocumentRefresher:
             for file in context.all_key_files:
                 if file in relevant:
                     continue
-                if file.tier == 1:
-                    if total_tokens + file.token_estimate <= MAX_CONTEXT_TOKENS:
-                        relevant.append(file)
-                        total_tokens += file.token_estimate
+                if file.tier == 1 and total_tokens + file.token_estimate <= MAX_CONTEXT_TOKENS:
+                    relevant.append(file)
+                    total_tokens += file.token_estimate
 
         return relevant
 
@@ -369,23 +366,27 @@ class DocumentRefresher:
         ]
 
         for file in relevant_files:
-            sections.extend([
-                f"### `{file.path}`",
-                "",
-                "```",
-                file.content,
-                "```",
-                "",
-            ])
+            sections.extend(
+                [
+                    f"### `{file.path}`",
+                    "",
+                    "```",
+                    file.content,
+                    "```",
+                    "",
+                ]
+            )
 
         # Tech stack context
         tech = context.combined_tech_stack
-        sections.extend([
-            "---",
-            "",
-            "## Project Context",
-            "",
-        ])
+        sections.extend(
+            [
+                "---",
+                "",
+                "## Project Context",
+                "",
+            ]
+        )
         if tech.languages:
             sections.append(f"**Languages:** {', '.join(tech.languages)}")
         if tech.frameworks:
@@ -393,24 +394,26 @@ class DocumentRefresher:
         sections.append("")
 
         # Instructions
-        sections.extend([
-            "---",
-            "",
-            "## Review Instructions",
-            "",
-            "Analyze whether this documentation is still accurate. Consider:",
-            "- Are code examples still valid?",
-            "- Are described APIs/functions still present and unchanged?",
-            "- Are architectural descriptions still accurate?",
-            "- Is any information outdated or misleading?",
-            "",
-            "Use the save_refresh_result tool to indicate your decision:",
-            "- If updates are needed: set needs_update=true and provide updated content",
-            "- If no updates are needed: set needs_update=false",
-            "",
-            "When updating, preserve the document's structure and style.",
-            "Only change what's actually incorrect or outdated.",
-        ])
+        sections.extend(
+            [
+                "---",
+                "",
+                "## Review Instructions",
+                "",
+                "Analyze whether this documentation is still accurate. Consider:",
+                "- Are code examples still valid?",
+                "- Are described APIs/functions still present and unchanged?",
+                "- Are architectural descriptions still accurate?",
+                "- Is any information outdated or misleading?",
+                "",
+                "Use the save_refresh_result tool to indicate your decision:",
+                "- If updates are needed: set needs_update=true and provide updated content",
+                "- If no updates are needed: set needs_update=false",
+                "",
+                "When updating, preserve the document's structure and style.",
+                "Only change what's actually incorrect or outdated.",
+            ]
+        )
 
         return "\n".join(sections)
 

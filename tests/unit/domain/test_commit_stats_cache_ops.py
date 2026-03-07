@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.domain.commit_stats_cache_operations import CommitStatsCacheOperations
-
 from tests.helpers.mock_factories import make_mock_commit_stats_cache, mock_scalars_result
 
 
@@ -24,12 +23,8 @@ class TestGetBulkByRepoShas:
 
     @pytest.mark.asyncio
     async def test_returns_cache_hits_keyed_by_tuple(self):
-        cache1 = make_mock_commit_stats_cache(
-            repository_full_name="org/repo1", commit_sha="aaa111"
-        )
-        cache2 = make_mock_commit_stats_cache(
-            repository_full_name="org/repo2", commit_sha="bbb222"
-        )
+        cache1 = make_mock_commit_stats_cache(repository_full_name="org/repo1", commit_sha="aaa111")
+        cache2 = make_mock_commit_stats_cache(repository_full_name="org/repo2", commit_sha="bbb222")
         self.db.execute = AsyncMock(return_value=mock_scalars_result([cache1, cache2]))
 
         lookups = [("org/repo1", "aaa111"), ("org/repo2", "bbb222")]
@@ -42,9 +37,7 @@ class TestGetBulkByRepoShas:
 
     @pytest.mark.asyncio
     async def test_missing_entries_not_in_result(self):
-        cache1 = make_mock_commit_stats_cache(
-            repository_full_name="org/repo1", commit_sha="aaa111"
-        )
+        cache1 = make_mock_commit_stats_cache(repository_full_name="org/repo1", commit_sha="aaa111")
         self.db.execute = AsyncMock(return_value=mock_scalars_result([cache1]))
 
         lookups = [("org/repo1", "aaa111"), ("org/repo2", "missing")]

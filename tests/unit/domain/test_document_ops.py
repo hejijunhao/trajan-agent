@@ -1,13 +1,11 @@
 """Unit tests for DocumentOperations — folder grouping, move, archive."""
 
 import uuid
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.domain.document_operations import DocumentOperations
-
 from tests.helpers.mock_factories import make_mock_document
 
 

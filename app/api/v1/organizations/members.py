@@ -479,9 +479,7 @@ async def link_member_github(
     """
     org = await organization_ops.get(db, org_id)
     if not org:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
 
     await require_org_access(db, org_id, user, min_role=MemberRole.ADMIN)
 
@@ -515,9 +513,7 @@ async def link_member_github(
     # Update the user record
     target_user = await db.get(User, user_id)
     if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     target_user.github_username = data.github_username
     db.add(target_user)
@@ -551,9 +547,7 @@ async def unlink_member_github(
     """
     org = await organization_ops.get(db, org_id)
     if not org:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
 
     await require_org_access(db, org_id, user, min_role=MemberRole.ADMIN)
 
@@ -567,9 +561,7 @@ async def unlink_member_github(
     # Get and validate user has a github_username set
     target_user = await db.get(User, user_id)
     if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     if not target_user.github_username:
         raise HTTPException(

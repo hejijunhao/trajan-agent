@@ -50,13 +50,9 @@ from app.models.work_item import WorkItem
 class TestOrganizationCascade:
     """Deleting an organization cascades to subscription, members, and products."""
 
-    async def test_org_delete_cascades_subscription(
-        self, db_session: AsyncSession, test_user
-    ):
+    async def test_org_delete_cascades_subscription(self, db_session: AsyncSession, test_user):
         """Deleting an org removes its subscription."""
-        org = await organization_ops.create(
-            db_session, name="Cascade Org", owner_id=test_user.id
-        )
+        org = await organization_ops.create(db_session, name="Cascade Org", owner_id=test_user.id)
         org_id = org.id
         sub = await subscription_ops.get_by_org(db_session, org_id)
         assert sub is not None
@@ -68,14 +64,10 @@ class TestOrganizationCascade:
         await db_session.flush()
 
         # Subscription should be gone via DB cascade
-        result = await db_session.execute(
-            select(Subscription).where(Subscription.id == sub_id)
-        )
+        result = await db_session.execute(select(Subscription).where(Subscription.id == sub_id))
         assert result.scalar_one_or_none() is None
 
-    async def test_org_delete_cascades_members(
-        self, db_session: AsyncSession, test_user
-    ):
+    async def test_org_delete_cascades_members(self, db_session: AsyncSession, test_user):
         """Deleting an org removes all its member records."""
         org = await organization_ops.create(
             db_session, name="Member Cascade Org", owner_id=test_user.id
@@ -92,15 +84,11 @@ class TestOrganizationCascade:
 
         # Membership should be gone
         result = await db_session.execute(
-            select(OrganizationMember).where(
-                OrganizationMember.organization_id == org_id
-            )
+            select(OrganizationMember).where(OrganizationMember.organization_id == org_id)
         )
         assert result.scalar_one_or_none() is None
 
-    async def test_org_delete_cascades_products(
-        self, db_session: AsyncSession, test_user
-    ):
+    async def test_org_delete_cascades_products(self, db_session: AsyncSession, test_user):
         """Deleting an org removes all its products via DB-level CASCADE."""
         org = await organization_ops.create(
             db_session, name="Product Cascade Org", owner_id=test_user.id
@@ -109,9 +97,7 @@ class TestOrganizationCascade:
 
         # Activate subscription so product creation succeeds
         sub = await subscription_ops.get_by_org(db_session, org_id)
-        await subscription_ops.update(
-            db_session, sub, {"plan_tier": "indie", "status": "active"}
-        )
+        await subscription_ops.update(db_session, sub, {"plan_tier": "indie", "status": "active"})
 
         product = await product_ops.create(
             db_session,
@@ -127,9 +113,7 @@ class TestOrganizationCascade:
         await db_session.flush()
 
         # Product should be gone
-        result = await db_session.execute(
-            select(Product).where(Product.id == product_id)
-        )
+        result = await db_session.execute(select(Product).where(Product.id == product_id))
         assert result.scalar_one_or_none() is None
 
 
@@ -203,9 +187,7 @@ class TestProductCascade:
         db_session.add(app_info)
         await db_session.flush()
 
-        access = await product_access_ops.set_access(
-            db_session, pid, test_user.id, "editor"
-        )
+        access = await product_access_ops.set_access(db_session, pid, test_user.id, "editor")
 
         section = DocumentSection(
             product_id=pid,
@@ -325,9 +307,7 @@ class TestMultiLevelCascade:
         )
         org_id = org.id
         sub = await subscription_ops.get_by_org(db_session, org_id)
-        await subscription_ops.update(
-            db_session, sub, {"plan_tier": "indie", "status": "active"}
-        )
+        await subscription_ops.update(db_session, sub, {"plan_tier": "indie", "status": "active"})
 
         # Create a second user to be a product collaborator
         second = User(
@@ -346,9 +326,7 @@ class TestMultiLevelCascade:
         )
 
         # Grant access (ProductAccess has DB-level ondelete="CASCADE" on product_id)
-        access = await product_access_ops.set_access(
-            db_session, product.id, second.id, "editor"
-        )
+        access = await product_access_ops.set_access(db_session, product.id, second.id, "editor")
         access_id = access.id
         product_id = product.id
 
@@ -359,9 +337,7 @@ class TestMultiLevelCascade:
         await db_session.flush()
 
         # Product should be gone (level 2)
-        result = await db_session.execute(
-            select(Product).where(Product.id == product_id)
-        )
+        result = await db_session.execute(select(Product).where(Product.id == product_id))
         assert result.scalar_one_or_none() is None
 
         # ProductAccess should be gone (level 3)
@@ -416,9 +392,7 @@ class TestSetNullBehavior:
         await db_session.flush()
 
         # Product should still exist but lead_user_id should be NULL
-        result = await db_session.execute(
-            select(Product).where(Product.id == product_id)
-        )
+        result = await db_session.execute(select(Product).where(Product.id == product_id))
         refreshed = result.scalar_one_or_none()
         assert refreshed is not None
         assert refreshed.lead_user_id is None
@@ -457,7 +431,5 @@ class TestSetNullBehavior:
         assert result.scalar_one_or_none() is None
 
         # Product should still exist
-        result = await db_session.execute(
-            select(Product).where(Product.id == product_id)
-        )
+        result = await db_session.execute(select(Product).where(Product.id == product_id))
         assert result.scalar_one_or_none() is not None

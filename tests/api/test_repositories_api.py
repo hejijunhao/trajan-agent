@@ -32,9 +32,7 @@ async def test_list_repositories_no_product(api_client: AsyncClient, test_subscr
 
 
 @pytest.mark.anyio
-async def test_get_repository(
-    api_client: AsyncClient, test_repository, test_subscription
-):
+async def test_get_repository(api_client: AsyncClient, test_repository, test_subscription):
     """GET /api/v1/repositories/{id} returns the repository."""
     resp = await api_client.get(f"/api/v1/repositories/{test_repository.id}")
     assert resp.status_code == 200
@@ -51,9 +49,7 @@ async def test_get_repository_not_found(api_client: AsyncClient, test_subscripti
 
 
 @pytest.mark.anyio
-async def test_create_repository(
-    api_client: AsyncClient, test_product, test_subscription
-):
+async def test_create_repository(api_client: AsyncClient, test_product, test_subscription):
     """POST /api/v1/repositories/ creates a new repository."""
     resp = await api_client.post(
         "/api/v1/repositories/",
@@ -69,9 +65,7 @@ async def test_create_repository(
 
 
 @pytest.mark.anyio
-async def test_update_repository(
-    api_client: AsyncClient, test_repository, test_subscription
-):
+async def test_update_repository(api_client: AsyncClient, test_repository, test_subscription):
     """PATCH /api/v1/repositories/{id} updates the repository."""
     resp = await api_client.patch(
         f"/api/v1/repositories/{test_repository.id}",

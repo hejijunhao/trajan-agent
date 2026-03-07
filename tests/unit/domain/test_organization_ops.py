@@ -6,11 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domain.organization_operations import OrganizationOperations, generate_slug
-
 from tests.helpers.mock_factories import (
     make_mock_organization,
-    make_mock_org_member,
-    make_mock_user,
     mock_scalar_result,
 )
 
@@ -94,7 +91,7 @@ class TestCreatePersonalOrg:
     @patch.object(OrganizationOperations, "create")
     async def test_uses_display_name(self, mock_create):
         mock_create.return_value = make_mock_organization(name="Sarah's Workspace")
-        result = await self.ops.create_personal_org(
+        await self.ops.create_personal_org(
             self.db, self.user_id, user_name="Sarah", user_email="sarah@test.com"
         )
         _, kwargs = mock_create.call_args
@@ -105,7 +102,7 @@ class TestCreatePersonalOrg:
     @patch.object(OrganizationOperations, "create")
     async def test_falls_back_to_email_prefix(self, mock_create):
         mock_create.return_value = make_mock_organization(name="jane's Workspace")
-        result = await self.ops.create_personal_org(
+        await self.ops.create_personal_org(
             self.db, self.user_id, user_name=None, user_email="jane@example.com"
         )
         _, kwargs = mock_create.call_args
@@ -115,9 +112,7 @@ class TestCreatePersonalOrg:
     @patch.object(OrganizationOperations, "create")
     async def test_falls_back_to_my_workspace(self, mock_create):
         mock_create.return_value = make_mock_organization(name="My Workspace")
-        result = await self.ops.create_personal_org(
-            self.db, self.user_id, user_name=None, user_email=None
-        )
+        await self.ops.create_personal_org(self.db, self.user_id, user_name=None, user_email=None)
         _, kwargs = mock_create.call_args
         assert kwargs["name"] == "My Workspace"
 
@@ -144,18 +139,14 @@ class TestTransferOwnership:
         org = make_mock_organization(owner_id=uuid.uuid4())  # Different owner
         self.db.execute.return_value = mock_scalar_result(org)
         with pytest.raises(ValueError, match="Only the owner"):
-            await self.ops.transfer_ownership(
-                self.db, org.id, self.owner_id, self.new_owner_id
-            )
+            await self.ops.transfer_ownership(self.db, org.id, self.owner_id, self.new_owner_id)
 
     @pytest.mark.asyncio
     async def test_raises_if_transfer_to_self(self):
         org = make_mock_organization(owner_id=self.owner_id)
         self.db.execute.return_value = mock_scalar_result(org)
         with pytest.raises(ValueError, match="Cannot transfer ownership to yourself"):
-            await self.ops.transfer_ownership(
-                self.db, org.id, self.owner_id, self.owner_id
-            )
+            await self.ops.transfer_ownership(self.db, org.id, self.owner_id, self.owner_id)
 
     @pytest.mark.asyncio
     @patch.object(OrganizationOperations, "get_member")
@@ -165,9 +156,7 @@ class TestTransferOwnership:
         mock_get.return_value = org
         mock_get_member.return_value = None
         with pytest.raises(ValueError, match="existing member"):
-            await self.ops.transfer_ownership(
-                self.db, org.id, self.owner_id, self.new_owner_id
-            )
+            await self.ops.transfer_ownership(self.db, org.id, self.owner_id, self.new_owner_id)
 
 
 class TestGetSetting:

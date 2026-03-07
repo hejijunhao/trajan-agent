@@ -1,7 +1,6 @@
 """Unit tests for feature gate dependencies."""
 
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -13,7 +12,6 @@ from app.api.deps.feature_gates import (
     require_agent_enabled,
 )
 from app.config.plans import get_plan
-
 from tests.helpers.mock_factories import make_mock_organization, make_mock_subscription
 
 

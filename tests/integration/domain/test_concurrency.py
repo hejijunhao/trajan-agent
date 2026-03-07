@@ -36,7 +36,11 @@ class TestUniqueConstraints:
     """
 
     async def test_duplicate_org_member_raises(
-        self, db_session: AsyncSession, test_org, second_user, test_org_member  # noqa: ARG002
+        self,
+        db_session: AsyncSession,
+        test_org,
+        second_user,
+        test_org_member,  # noqa: ARG002
     ):
         """Adding the same user to an org twice violates uq_org_member."""
         duplicate = OrganizationMember(
@@ -95,9 +99,7 @@ class TestUniqueConstraints:
         assert a2.id == a1.id  # Same row, not a new one
         assert a2.access_level == "editor"
 
-    async def test_duplicate_org_slug_regenerates(
-        self, db_session: AsyncSession, test_user
-    ):
+    async def test_duplicate_org_slug_regenerates(self, db_session: AsyncSession, test_user):
         """Creating an org with a colliding slug auto-regenerates a new one."""
         org1 = await organization_ops.create(
             db_session,
@@ -147,9 +149,7 @@ class TestAtomicOperations:
         assert sub is not None
         assert sub.organization_id == org.id
 
-    async def test_org_create_with_invalid_owner_fails_cleanly(
-        self, db_session: AsyncSession
-    ):
+    async def test_org_create_with_invalid_owner_fails_cleanly(self, db_session: AsyncSession):
         """If owner_id references a non-existent user, the entire create fails."""
         fake_user_id = uuid.uuid4()
 
@@ -183,14 +183,10 @@ class TestAtomicOperations:
         assert refreshed_org is not None
         assert refreshed_org.owner_id == second_user.id
 
-        new_role = await organization_ops.get_member_role(
-            db_session, test_org.id, second_user.id
-        )
+        new_role = await organization_ops.get_member_role(db_session, test_org.id, second_user.id)
         assert new_role == MemberRole.OWNER.value
 
-        prev_role = await organization_ops.get_member_role(
-            db_session, test_org.id, test_user.id
-        )
+        prev_role = await organization_ops.get_member_role(db_session, test_org.id, test_user.id)
         assert prev_role == MemberRole.ADMIN.value
 
 
@@ -202,9 +198,7 @@ class TestAtomicOperations:
 class TestJsonbAtomicUpdates:
     """Verify that JSONB setting updates use FOR UPDATE locking."""
 
-    async def test_sequential_settings_both_persist(
-        self, db_session: AsyncSession, test_org
-    ):
+    async def test_sequential_settings_both_persist(self, db_session: AsyncSession, test_org):
         """Two sequential set_setting() calls preserve both keys."""
         await organization_ops.set_setting(db_session, test_org.id, "key1", "value1")
         await organization_ops.set_setting(db_session, test_org.id, "key2", "value2")
@@ -214,9 +208,7 @@ class TestJsonbAtomicUpdates:
         assert val1 == "value1"
         assert val2 == "value2"
 
-    async def test_setting_overwrite_replaces_value(
-        self, db_session: AsyncSession, test_org
-    ):
+    async def test_setting_overwrite_replaces_value(self, db_session: AsyncSession, test_org):
         """Overwriting a key replaces the value without affecting other keys."""
         await organization_ops.set_setting(db_session, test_org.id, "theme", "light")
         await organization_ops.set_setting(db_session, test_org.id, "locale", "en")
@@ -227,9 +219,7 @@ class TestJsonbAtomicUpdates:
         assert theme == "dark"
         assert locale == "en"
 
-    async def test_setting_on_null_initializes_dict(
-        self, db_session: AsyncSession, test_user
-    ):
+    async def test_setting_on_null_initializes_dict(self, db_session: AsyncSession, test_user):
         """set_setting() on an org with NULL settings initializes the JSONB column."""
         # Create a fresh org (settings will be NULL)
         org = await organization_ops.create(

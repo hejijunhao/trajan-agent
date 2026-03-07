@@ -92,7 +92,9 @@ async def test_update_product_not_found(api_client: AsyncClient, test_subscripti
 
 
 @pytest.mark.anyio
-async def test_delete_product(api_client: AsyncClient, test_subscription, db_session, test_user, test_org):
+async def test_delete_product(
+    api_client: AsyncClient, test_subscription, db_session, test_user, test_org
+):
     """DELETE /api/v1/products/{id} deletes a product."""
     from app.domain.product_operations import product_ops
 

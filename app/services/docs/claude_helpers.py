@@ -76,8 +76,6 @@ async def call_with_retry(
                 )
                 await asyncio.sleep(delay)
             else:
-                logger.error(
-                    f"{operation_name} failed after {MAX_RETRIES} attempts: {e}"
-                )
+                logger.error(f"{operation_name} failed after {MAX_RETRIES} attempts: {e}")
 
     raise last_error or RuntimeError(f"{operation_name} failed after retries")

@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domain.preferences_operations import PreferencesOperations
-
-from tests.helpers.mock_factories import make_mock_preferences, mock_scalar_result
+from tests.helpers.mock_factories import make_mock_preferences
 
 
 class TestGetOrCreate:

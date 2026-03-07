@@ -87,9 +87,7 @@ class OrganizationMember(SQLModel, table=True):
     """
 
     __tablename__ = "organization_members"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "user_id", name="uq_org_member"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_org_member"),)
 
     id: uuid_pkg.UUID = Field(
         default_factory=uuid_pkg.uuid4,
@@ -119,9 +117,7 @@ class OrganizationMember(SQLModel, table=True):
     )
 
     # Invitation tracking
-    invited_by: uuid_pkg.UUID | None = Field(
-        foreign_key="users.id", default=None, nullable=True
-    )
+    invited_by: uuid_pkg.UUID | None = Field(foreign_key="users.id", default=None, nullable=True)
     invited_at: datetime | None = Field(  # type: ignore[call-overload]
         default=None, nullable=True, sa_type=DateTime(timezone=True)
     )

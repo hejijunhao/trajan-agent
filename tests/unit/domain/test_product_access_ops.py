@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domain.product_access_operations import ProductAccessOperations
-
-from tests.helpers.mock_factories import mock_scalar_result, mock_scalars_result
+from tests.helpers.mock_factories import mock_scalars_result
 
 
 class TestComputeEffectiveAccess:

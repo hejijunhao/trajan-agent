@@ -4,9 +4,9 @@ from app.schemas.analysis_progress import AnalysisProgress
 from app.schemas.docs import (
     AddChangelogEntryRequest,
     ChangeEntryRequest,
+    DocsStatusResponse,
     DocumentGrouped,
     DocumentsGroupedResponse,
-    DocsStatusResponse,
     GenerateDocsResponse,
 )
 from app.schemas.product_overview import (

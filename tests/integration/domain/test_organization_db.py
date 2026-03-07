@@ -16,7 +16,6 @@ from app.domain.organization_operations import generate_slug, organization_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.organization import MemberRole
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Creation cascade
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,9 +36,7 @@ class TestOrganizationCreation:
         assert org.slug is not None
         assert len(org.slug) > 0
 
-    async def test_create_org_creates_owner_membership(
-        self, db_session: AsyncSession, test_user
-    ):
+    async def test_create_org_creates_owner_membership(self, db_session: AsyncSession, test_user):
         """Creating an org auto-creates an OWNER membership for the creator."""
         org = await organization_ops.create(
             db_session, name="Membership Test Org", owner_id=test_user.id
@@ -53,9 +50,7 @@ class TestOrganizationCreation:
 
     async def test_create_org_creates_subscription(self, db_session: AsyncSession, test_user):
         """Creating an org auto-creates a subscription (defaults to 'none'/pending)."""
-        org = await organization_ops.create(
-            db_session, name="Sub Test Org", owner_id=test_user.id
-        )
+        org = await organization_ops.create(db_session, name="Sub Test Org", owner_id=test_user.id)
 
         sub = await subscription_ops.get_by_org(db_session, org.id)
         assert sub is not None
@@ -97,8 +92,9 @@ class TestSlugGeneration:
     async def test_create_personal_org_email_fallback(self, db_session: AsyncSession, test_user):
         """Without display name, personal org falls back to email prefix."""
         # Create a second user to avoid conflicts
-        from app.models.user import User
         from datetime import UTC, datetime
+
+        from app.models.user import User
 
         user2 = User(
             id=uuid.uuid4(),
@@ -170,15 +166,11 @@ class TestOwnershipTransfer:
         assert updated.owner_id == second_user.id
 
         # New owner should have OWNER role
-        new_role = await organization_ops.get_member_role(
-            db_session, test_org.id, second_user.id
-        )
+        new_role = await organization_ops.get_member_role(db_session, test_org.id, second_user.id)
         assert new_role == MemberRole.OWNER.value
 
         # Previous owner should be downgraded to ADMIN
-        prev_role = await organization_ops.get_member_role(
-            db_session, test_org.id, test_user.id
-        )
+        prev_role = await organization_ops.get_member_role(db_session, test_org.id, test_user.id)
         assert prev_role == MemberRole.ADMIN.value
 
     async def test_transfer_to_non_member_raises(

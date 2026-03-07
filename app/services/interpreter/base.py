@@ -54,9 +54,7 @@ class BaseInterpreter(ABC, Generic[TInput, TOutput]):
         """Parse LLM response into typed output."""
         ...
 
-    async def interpret(
-        self, input_data: TInput, *, model_override: str | None = None
-    ) -> TOutput:
+    async def interpret(self, input_data: TInput, *, model_override: str | None = None) -> TOutput:
         """Main entry point: interpret input and return structured output.
 
         Args:

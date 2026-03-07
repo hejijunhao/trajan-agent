@@ -112,17 +112,21 @@ async def update_preferences(
     update_data = data.model_dump(exclude_unset=True)
 
     # Validate enum values
-    if "email_digest" in update_data:
-        if update_data["email_digest"] not in ("none", "daily", "weekly"):
-            update_data["email_digest"] = "none"
+    if "email_digest" in update_data and update_data["email_digest"] not in (
+        "none",
+        "daily",
+        "weekly",
+    ):
+        update_data["email_digest"] = "none"
 
-    if "default_view" in update_data:
-        if update_data["default_view"] not in ("grid", "list"):
-            update_data["default_view"] = "grid"
+    if "default_view" in update_data and update_data["default_view"] not in ("grid", "list"):
+        update_data["default_view"] = "grid"
 
-    if "sidebar_default" in update_data:
-        if update_data["sidebar_default"] not in ("expanded", "collapsed"):
-            update_data["sidebar_default"] = "expanded"
+    if "sidebar_default" in update_data and update_data["sidebar_default"] not in (
+        "expanded",
+        "collapsed",
+    ):
+        update_data["sidebar_default"] = "expanded"
 
     if "digest_timezone" in update_data:
         from zoneinfo import available_timezones
@@ -146,7 +150,7 @@ async def update_preferences(
 @router.post("/test-github-token", response_model=GitHubTokenTestResult)
 async def test_github_token(
     data: GitHubTokenTest,
-    current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ):
     """
     Test a GitHub Personal Access Token.

@@ -207,10 +207,7 @@ async def check_subscription_active(
             },
         )
 
-    is_pending = (
-        sub.plan_tier == "none"
-        or sub.status == SubscriptionStatus.PENDING.value
-    )
+    is_pending = sub.plan_tier == "none" or sub.status == SubscriptionStatus.PENDING.value
     if is_pending:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,

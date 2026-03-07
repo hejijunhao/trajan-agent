@@ -13,9 +13,7 @@ async def test_list_work_items(
     api_client: AsyncClient, test_product, test_work_item, test_subscription
 ):
     """GET /api/v1/work-items/?product_id={id} returns work items."""
-    resp = await api_client.get(
-        "/api/v1/work-items/", params={"product_id": str(test_product.id)}
-    )
+    resp = await api_client.get("/api/v1/work-items/", params={"product_id": str(test_product.id)})
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -24,9 +22,7 @@ async def test_list_work_items(
 
 
 @pytest.mark.anyio
-async def test_get_work_item(
-    api_client: AsyncClient, test_work_item, test_subscription
-):
+async def test_get_work_item(api_client: AsyncClient, test_work_item, test_subscription):
     """GET /api/v1/work-items/{id} returns the work item."""
     resp = await api_client.get(f"/api/v1/work-items/{test_work_item.id}")
     assert resp.status_code == 200
@@ -44,9 +40,7 @@ async def test_get_work_item_not_found(api_client: AsyncClient, test_subscriptio
 
 
 @pytest.mark.anyio
-async def test_create_work_item(
-    api_client: AsyncClient, test_product, test_subscription
-):
+async def test_create_work_item(api_client: AsyncClient, test_product, test_subscription):
     """POST /api/v1/work-items/ creates a new work item."""
     resp = await api_client.post(
         "/api/v1/work-items/",
@@ -64,9 +58,7 @@ async def test_create_work_item(
 
 
 @pytest.mark.anyio
-async def test_update_work_item(
-    api_client: AsyncClient, test_work_item, test_subscription
-):
+async def test_update_work_item(api_client: AsyncClient, test_work_item, test_subscription):
     """PATCH /api/v1/work-items/{id} updates the work item."""
     resp = await api_client.patch(
         f"/api/v1/work-items/{test_work_item.id}",

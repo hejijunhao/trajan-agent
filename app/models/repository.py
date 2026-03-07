@@ -63,9 +63,7 @@ class Repository(RepositoryBase, UUIDMixin, TimestampMixin, table=True):
     """
 
     __tablename__ = "repositories"
-    __table_args__ = (
-        Index("ix_repositories_product_github", "product_id", "github_id"),
-    )
+    __table_args__ = (Index("ix_repositories_product_github", "product_id", "github_id"),)
 
     product_id: uuid_pkg.UUID | None = Field(
         default=None,

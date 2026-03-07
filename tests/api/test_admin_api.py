@@ -27,9 +27,7 @@ async def test_get_organization(admin_client: AsyncClient, test_org):
 
 
 @pytest.mark.anyio
-async def test_set_subscription(
-    admin_client: AsyncClient, test_org, test_subscription
-):
+async def test_set_subscription(admin_client: AsyncClient, test_org, test_subscription):
     """PATCH /api/v1/admin/organizations/{id}/subscription updates plan tier."""
     resp = await admin_client.patch(
         f"/api/v1/admin/organizations/{test_org.id}/subscription",

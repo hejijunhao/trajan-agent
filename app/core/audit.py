@@ -13,9 +13,7 @@ from uuid import UUID
 logger = logging.getLogger("audit")
 
 
-def log_token_resolved(
-    user_id: UUID, repository: str, method: str
-) -> None:
+def log_token_resolved(user_id: UUID, repository: str, method: str) -> None:
     """Log which token method was used to access a repo."""
     logger.info(
         "token_resolved",
@@ -27,9 +25,7 @@ def log_token_resolved(
     )
 
 
-def log_installation_event(
-    action: str, installation_id: int, org_id: str | None = None
-) -> None:
+def log_installation_event(action: str, installation_id: int, org_id: str | None = None) -> None:
     """Log GitHub App installation lifecycle events."""
     logger.info(
         "github_app_event",

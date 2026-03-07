@@ -11,9 +11,7 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 
-async def assert_requires_auth(
-    client: AsyncClient, method: str, url: str, **kwargs
-) -> None:
+async def assert_requires_auth(client: AsyncClient, method: str, url: str, **kwargs) -> None:
     """Verify endpoint returns 401 without auth."""
     resp = await getattr(client, method)(url, **kwargs)
     assert resp.status_code == 401, (
@@ -21,9 +19,7 @@ async def assert_requires_auth(
     )
 
 
-async def assert_non_member_blocked(
-    client: AsyncClient, method: str, url: str, **kwargs
-) -> None:
+async def assert_non_member_blocked(client: AsyncClient, method: str, url: str, **kwargs) -> None:
     """Verify endpoint returns 403 or 404 for non-members."""
     resp = await getattr(client, method)(url, **kwargs)
     assert resp.status_code in (403, 404), (
@@ -31,9 +27,7 @@ async def assert_non_member_blocked(
     )
 
 
-async def assert_viewer_cannot_write(
-    client: AsyncClient, method: str, url: str, **kwargs
-) -> None:
+async def assert_viewer_cannot_write(client: AsyncClient, method: str, url: str, **kwargs) -> None:
     """Verify write endpoints return 403 for viewers."""
     resp = await getattr(client, method)(url, **kwargs)
     assert resp.status_code == 403, (

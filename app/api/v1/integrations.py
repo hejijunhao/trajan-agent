@@ -58,9 +58,7 @@ async def link_github_installation(
     # Check if org already has an installation
     existing = await github_app_installation_ops.get_for_org(db, data.organization_id)
     if existing:
-        raise HTTPException(
-            409, "Organization already has a GitHub App installation linked"
-        )
+        raise HTTPException(409, "Organization already has a GitHub App installation linked")
 
     # Verify the installation exists on GitHub
     try:

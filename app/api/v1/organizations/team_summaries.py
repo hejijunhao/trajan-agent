@@ -103,9 +103,7 @@ async def get_team_summaries(
 # ---------------------------------------------------------------------------
 
 
-def _trigger_background_regeneration(
-    org_id: uuid_pkg.UUID, period: str, user: User
-) -> None:
+def _trigger_background_regeneration(org_id: uuid_pkg.UUID, period: str, user: User) -> None:
     """Fire-and-forget background regeneration."""
     lock_key = f"{org_id}:{period}"
     if _regeneration_locks.get(lock_key):
@@ -133,9 +131,7 @@ async def _background_regenerate(
 
                 from app.models.user import User as UserModel
 
-                result = await session.execute(
-                    select(UserModel).where(UserModel.id == user_id)
-                )
+                result = await session.execute(select(UserModel).where(UserModel.id == user_id))
                 user = result.scalars().first()
                 if not user:
                     logger.error(f"Background regen: user {user_id} not found")
@@ -144,9 +140,7 @@ async def _background_regenerate(
                 await session.commit()
             except Exception:
                 await session.rollback()
-                logger.exception(
-                    f"Background summary regeneration failed for org {org_id}"
-                )
+                logger.exception(f"Background summary regeneration failed for org {org_id}")
     finally:
         _regeneration_locks.pop(lock_key, None)
 
@@ -169,16 +163,22 @@ async def _generate_team_summaries(
     products = await product_ops.get_by_organization(db, org_id)
     if not products:
         return TeamSummariesResponse(
-            summaries={}, team_summary="", generated_at=now.isoformat(),
-            is_stale=False, is_generating=False,
+            summaries={},
+            team_summary="",
+            generated_at=now.isoformat(),
+            is_stale=False,
+            is_generating=False,
         )
 
     # 2. Fetch commits across all products in parallel
     async def fetch_for_product(product: Any) -> list[dict[str, Any]]:
         try:
             result = await fetch_product_commits(
-                db=db, product_id=product.id, current_user=user,
-                period=period, fetch_limit=200,
+                db=db,
+                product_id=product.id,
+                current_user=user,
+                period=period,
+                fetch_limit=200,
             )
             if not result:
                 return []
@@ -220,13 +220,21 @@ async def _generate_team_summaries(
     if total_commits == 0:
         empty_summary = _build_team_summary_sentence(0, 0, 0, [])
         await team_contributor_summary_ops.upsert(
-            db, org_id, period,
-            summaries={}, team_summary=empty_summary,
-            total_commits=0, total_contributors=0, last_activity_at=now,
+            db,
+            org_id,
+            period,
+            summaries={},
+            team_summary=empty_summary,
+            total_commits=0,
+            total_contributors=0,
+            last_activity_at=now,
         )
         return TeamSummariesResponse(
-            summaries={}, team_summary=empty_summary,
-            generated_at=now.isoformat(), is_stale=False, is_generating=False,
+            summaries={},
+            team_summary=empty_summary,
+            generated_at=now.isoformat(),
+            is_stale=False,
+            is_generating=False,
         )
 
     # 4. Smart-skip: check if commit count unchanged
@@ -237,9 +245,7 @@ async def _generate_team_summaries(
 
     # 5. Build ContributorInput for the summarizer
     # Sort by commit count descending, take top 5
-    sorted_authors = sorted(
-        commits_by_author.items(), key=lambda x: len(x[1]), reverse=True
-    )
+    sorted_authors = sorted(commits_by_author.items(), key=lambda x: len(x[1]), reverse=True)
 
     contributors: list[ContributorCommitData] = []
     for author, author_commits in sorted_authors[:5]:
@@ -247,8 +253,12 @@ async def _generate_team_summaries(
             ContributorCommitData(
                 name=author,
                 commits=[
-                    {"message": c["message"], "sha": c["sha"],
-                     "branch": c["branch"], "timestamp": c["timestamp"]}
+                    {
+                        "message": c["message"],
+                        "sha": c["sha"],
+                        "branch": c["branch"],
+                        "timestamp": c["timestamp"],
+                    }
                     for c in author_commits
                 ],
                 commit_count=len(author_commits),
@@ -273,8 +283,11 @@ async def _generate_team_summaries(
             total_contributors, total_commits, len(products), sorted_authors
         )
         return TeamSummariesResponse(
-            summaries={}, team_summary=team_summary,
-            generated_at=now.isoformat(), is_stale=False, is_generating=False,
+            summaries={},
+            team_summary=team_summary,
+            generated_at=now.isoformat(),
+            is_stale=False,
+            is_generating=False,
         )
 
     # 7. Build summaries dict
@@ -295,9 +308,13 @@ async def _generate_team_summaries(
 
     # 9. Upsert to DB
     await team_contributor_summary_ops.upsert(
-        db, org_id, period,
-        summaries=summaries_dict, team_summary=team_summary,
-        total_commits=total_commits, total_contributors=total_contributors,
+        db,
+        org_id,
+        period,
+        summaries=summaries_dict,
+        team_summary=team_summary,
+        total_commits=total_commits,
+        total_contributors=total_contributors,
         last_activity_at=now,
     )
 
@@ -326,9 +343,7 @@ async def _generate_team_summaries(
 # ---------------------------------------------------------------------------
 
 
-def _build_response(
-    cached: Any, *, is_stale: bool, is_generating: bool
-) -> TeamSummariesResponse:
+def _build_response(cached: Any, *, is_stale: bool, is_generating: bool) -> TeamSummariesResponse:
     """Build a response from a cached TeamContributorSummary row."""
     summaries: dict[str, ContributorSummaryItemResponse] = {}
     for name, data in (cached.summaries or {}).items():

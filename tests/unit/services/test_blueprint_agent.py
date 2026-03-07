@@ -100,9 +100,7 @@ class TestBlueprintAgentRun:
     @pytest.mark.asyncio
     @patch("app.services.docs.blueprint_agent.document_ops")
     @patch("app.services.docs.blueprint_agent.repository_ops")
-    async def test_run_creates_architecture_for_complex_project(
-        self, mock_repo_ops, mock_doc_ops
-    ):
+    async def test_run_creates_architecture_for_complex_project(self, mock_repo_ops, mock_doc_ops):
         """Creates Architecture doc when project has >50 files."""
         mock_doc_ops.get_by_folder = AsyncMock(return_value=[])
         # Need at least a repo so _fetch_repo_contexts returns something
@@ -127,9 +125,7 @@ class TestBlueprintAgentRun:
     @pytest.mark.asyncio
     @patch("app.services.docs.blueprint_agent.document_ops")
     @patch("app.services.docs.blueprint_agent.repository_ops")
-    async def test_run_handles_generation_failure_gracefully(
-        self, mock_repo_ops, mock_doc_ops
-    ):
+    async def test_run_handles_generation_failure_gracefully(self, mock_repo_ops, mock_doc_ops):
         """If Claude generation fails, other docs still complete."""
         mock_doc_ops.get_by_folder = AsyncMock(return_value=[])
         mock_repo_ops.get_github_repos_by_product = AsyncMock(return_value=[])

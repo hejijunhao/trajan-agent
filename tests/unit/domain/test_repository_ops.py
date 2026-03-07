@@ -1,12 +1,11 @@
 """Unit tests for RepositoryOperations — all DB calls mocked."""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.domain.repository_operations import RepositoryOperations
-
 from tests.helpers.mock_factories import (
     make_mock_repository,
     mock_scalar_result,
@@ -245,9 +244,7 @@ class TestRepositoryBulkDeleteExcept:
         self.db.delete = AsyncMock()
         self.db.flush = AsyncMock()
 
-        result = await self.ops.bulk_delete_except(
-            self.db, uuid.uuid4(), keep_ids=[keep_id]
-        )
+        result = await self.ops.bulk_delete_except(self.db, uuid.uuid4(), keep_ids=[keep_id])
         assert result == 2
 
     @pytest.mark.asyncio
@@ -257,9 +254,7 @@ class TestRepositoryBulkDeleteExcept:
         self.db.execute = AsyncMock(return_value=mock_scalars_result(repos))
         self.db.flush = AsyncMock()
 
-        result = await self.ops.bulk_delete_except(
-            self.db, uuid.uuid4(), keep_ids=[repo_id]
-        )
+        result = await self.ops.bulk_delete_except(self.db, uuid.uuid4(), keep_ids=[repo_id])
         assert result == 0
 
 

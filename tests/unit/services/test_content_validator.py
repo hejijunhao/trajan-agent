@@ -127,27 +127,33 @@ class TestValidation:
         context = _make_context(
             endpoints=[
                 EndpointInfo(
-                    path="/api/v1/users", method="GET",
-                    file_path="users.py", handler_name="list_users",
+                    path="/api/v1/users",
+                    method="GET",
+                    file_path="users.py",
+                    handler_name="list_users",
                 ),
                 EndpointInfo(
-                    path="/api/v1/products", method="POST",
-                    file_path="products.py", handler_name="create_product",
+                    path="/api/v1/products",
+                    method="POST",
+                    file_path="products.py",
+                    handler_name="create_product",
                 ),
             ],
             models=[
                 ModelInfo(
-                    name="User", file_path="models/user.py",
-                    model_type="sqlmodel", fields=["id", "email"],
+                    name="User",
+                    file_path="models/user.py",
+                    model_type="sqlmodel",
+                    fields=["id", "email"],
                 ),
                 ModelInfo(
-                    name="Product", file_path="models/product.py",
-                    model_type="sqlmodel", fields=["id", "name"],
+                    name="Product",
+                    file_path="models/product.py",
+                    model_type="sqlmodel",
+                    fields=["id", "name"],
                 ),
             ],
-            tech_stack=_make_tech_stack(
-                frameworks=["fastapi"], databases=["postgresql"]
-            ),
+            tech_stack=_make_tech_stack(frameworks=["fastapi"], databases=["postgresql"]),
         )
         validator = ContentValidator(context)
 
@@ -167,8 +173,10 @@ class TestValidation:
         context = _make_context(
             endpoints=[
                 EndpointInfo(
-                    path="/api/v1/users", method="GET",
-                    file_path="users.py", handler_name="list_users",
+                    path="/api/v1/users",
+                    method="GET",
+                    file_path="users.py",
+                    handler_name="list_users",
                 ),
             ],
         )
@@ -187,8 +195,10 @@ class TestValidation:
         context = _make_context(
             models=[
                 ModelInfo(
-                    name="User", file_path="user.py",
-                    model_type="sqlmodel", fields=["id"],
+                    name="User",
+                    file_path="user.py",
+                    model_type="sqlmodel",
+                    fields=["id"],
                 ),
             ],
         )
@@ -232,8 +242,10 @@ class TestValidation:
         context = _make_context(
             models=[
                 ModelInfo(
-                    name="User", file_path="user.py",
-                    model_type="sqlmodel", fields=["id"],
+                    name="User",
+                    file_path="user.py",
+                    model_type="sqlmodel",
+                    fields=["id"],
                 ),
             ],
         )

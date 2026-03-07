@@ -4,7 +4,7 @@ Follows the BaseOperations pattern. Provides lookup by GitHub's installation_id
 and org-scoped queries for the token resolver.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -43,9 +43,7 @@ class GitHubAppInstallationOperations(BaseOperations[GitHubAppInstallation]):
         )
         return result.scalar_one_or_none()
 
-    async def create_installation(
-        self, db: AsyncSession, obj_in: dict
-    ) -> GitHubAppInstallation:
+    async def create_installation(self, db: AsyncSession, obj_in: dict) -> GitHubAppInstallation:
         """Create a new installation record (no user_id scope)."""
         db_obj = GitHubAppInstallation(**obj_in)
         db.add(db_obj)
@@ -53,9 +51,7 @@ class GitHubAppInstallationOperations(BaseOperations[GitHubAppInstallation]):
         await db.refresh(db_obj)
         return db_obj
 
-    async def delete_by_installation_id(
-        self, db: AsyncSession, installation_id: int
-    ) -> None:
+    async def delete_by_installation_id(self, db: AsyncSession, installation_id: int) -> None:
         """Delete installation by GitHub's installation ID."""
         installation = await self.get_by_installation_id(db, installation_id)
         if installation:
@@ -66,7 +62,7 @@ class GitHubAppInstallationOperations(BaseOperations[GitHubAppInstallation]):
         """Mark installation as suspended."""
         installation = await self.get_by_installation_id(db, installation_id)
         if installation:
-            installation.suspended_at = datetime.now(timezone.utc)
+            installation.suspended_at = datetime.now(UTC)
             db.add(installation)
             await db.flush()
 
@@ -137,9 +133,7 @@ class GitHubAppInstallationRepoOperations(BaseOperations[GitHubAppInstallationRe
             await db.delete(repo)
             await db.flush()
 
-    async def exists(
-        self, db: AsyncSession, installation_id: UUID, github_repo_id: int
-    ) -> bool:
+    async def exists(self, db: AsyncSession, installation_id: UUID, github_repo_id: int) -> bool:
         """Check if a specific repo is in an installation's selected repos."""
         result = await db.execute(
             select(GitHubAppInstallationRepo).where(

@@ -10,13 +10,13 @@ Tests GitHubService with mocked HTTP responses to verify:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
 from app.services.github.cache import clear_all_caches
-from app.services.github.exceptions import GitHubAPIError, GitHubRepoRenamed
+from app.services.github.exceptions import GitHubAPIError
 from app.services.github.service import GitHubService, calculate_lines_of_code
 from app.services.github.types import (
     CommitStats,
@@ -357,9 +357,7 @@ class TestGetFileContent:
     async def test_returns_none_for_directory(self, mock_get_client):
         client = AsyncMock()
         mock_get_client.return_value = client
-        client.get.return_value = _make_response(
-            json_data={"type": "dir", "size": 0}
-        )
+        client.get.return_value = _make_response(json_data={"type": "dir", "size": 0})
 
         svc = GitHubService(TOKEN)
         result = await svc.get_file_content("owner", "repo", "src/")
@@ -380,9 +378,7 @@ class TestGetRepoLanguages:
     async def test_calculates_percentages(self, mock_get_client):
         client = AsyncMock()
         mock_get_client.return_value = client
-        client.get.return_value = _make_response(
-            json_data={"Python": 7000, "JavaScript": 3000}
-        )
+        client.get.return_value = _make_response(json_data={"Python": 7000, "JavaScript": 3000})
 
         svc = GitHubService(TOKEN)
         langs = await svc.get_repo_languages("owner", "repo")
@@ -573,9 +569,16 @@ class TestGetRepoContext:
             patch.object(svc, "get_commit_stats", new_callable=AsyncMock) as mock_stats,
         ):
             mock_details.return_value = GitHubRepo(
-                github_id=1, name="r", full_name="o/r", description=None,
-                url="https://github.com/o/r", default_branch="main",
-                is_private=False, language=None, stars_count=0, forks_count=0,
+                github_id=1,
+                name="r",
+                full_name="o/r",
+                description=None,
+                url="https://github.com/o/r",
+                default_branch="main",
+                is_private=False,
+                language=None,
+                stars_count=0,
+                forks_count=0,
                 updated_at="",
             )
             mock_tree.side_effect = GitHubAPIError("tree fail", 500)
@@ -605,13 +608,24 @@ class TestGetRepoContext:
             patch.object(svc, "get_commit_stats", new_callable=AsyncMock) as mock_stats,
         ):
             mock_details.return_value = GitHubRepo(
-                github_id=1, name="r", full_name="o/r", description=None,
-                url="https://github.com/o/r", default_branch="develop",
-                is_private=False, language=None, stars_count=0, forks_count=0,
+                github_id=1,
+                name="r",
+                full_name="o/r",
+                description=None,
+                url="https://github.com/o/r",
+                default_branch="develop",
+                is_private=False,
+                language=None,
+                stars_count=0,
+                forks_count=0,
                 updated_at="",
             )
             mock_tree.return_value = RepoTree(
-                sha="x", files=[], directories=[], all_items=[], truncated=False,
+                sha="x",
+                files=[],
+                directories=[],
+                all_items=[],
+                truncated=False,
             )
             mock_files.return_value = {}
             mock_langs.return_value = []

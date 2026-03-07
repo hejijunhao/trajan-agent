@@ -1,12 +1,10 @@
 """Unit tests for AnnouncementOperations — all DB calls mocked."""
 
-import uuid
 from unittest.mock import AsyncMock
 
 import pytest
 
 from app.domain.announcement_operations import AnnouncementOperations
-
 from tests.helpers.mock_factories import (
     make_mock_announcement,
     mock_scalars_result,

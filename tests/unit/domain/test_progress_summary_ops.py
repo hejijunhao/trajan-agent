@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.domain.progress_summary_operations import ProgressSummaryOperations
-
 from tests.helpers.mock_factories import (
     make_mock_progress_summary,
     mock_scalar_result,
@@ -26,9 +25,7 @@ class TestGetByProductPeriod:
         summary = make_mock_progress_summary()
         self.db.execute = AsyncMock(return_value=mock_scalar_result(summary))
 
-        result = await self.ops.get_by_product_period(
-            self.db, summary.product_id, "7d"
-        )
+        result = await self.ops.get_by_product_period(self.db, summary.product_id, "7d")
         assert result == summary
 
     @pytest.mark.asyncio
@@ -100,9 +97,7 @@ class TestUpdateLastActivity:
         self.db.flush = AsyncMock()
 
         now = datetime.now(UTC)
-        await self.ops.update_last_activity(
-            self.db, summary.product_id, "7d", now
-        )
+        await self.ops.update_last_activity(self.db, summary.product_id, "7d", now)
         assert summary.last_activity_at == now
 
     @pytest.mark.asyncio
@@ -112,9 +107,7 @@ class TestUpdateLastActivity:
         self.db.flush = AsyncMock()
 
         # Should complete without error when summary doesn't exist
-        await self.ops.update_last_activity(
-            self.db, uuid.uuid4(), "7d", datetime.now(UTC)
-        )
+        await self.ops.update_last_activity(self.db, uuid.uuid4(), "7d", datetime.now(UTC))
 
     @pytest.mark.asyncio
     async def test_sets_updated_at(self):
@@ -124,7 +117,5 @@ class TestUpdateLastActivity:
         self.db.flush = AsyncMock()
 
         now = datetime.now(UTC)
-        await self.ops.update_last_activity(
-            self.db, summary.product_id, "7d", now
-        )
+        await self.ops.update_last_activity(self.db, summary.product_id, "7d", now)
         assert summary.updated_at is not None

@@ -128,4 +128,3 @@ def is_documentation_file(path: str) -> bool:
 
     # .md files at root level
     return len(parts) == 1 and ext in DOC_FILE_EXTENSIONS
-

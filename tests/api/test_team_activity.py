@@ -100,9 +100,7 @@ async def test_team_activity_requires_auth(unauth_client: AsyncClient, test_org)
 @pytest.mark.anyio
 async def test_team_activity_non_member_403(second_user_client: AsyncClient, test_org):
     """Non-org members get 403."""
-    resp = await second_user_client.get(
-        f"/api/v1/organizations/{test_org.id}/team-activity"
-    )
+    resp = await second_user_client.get(f"/api/v1/organizations/{test_org.id}/team-activity")
     assert resp.status_code == 403
 
 
@@ -121,7 +119,9 @@ async def test_team_activity_empty_org(api_client: AsyncClient, test_org):
 
 @pytest.mark.anyio
 async def test_team_activity_with_product_no_repos(
-    api_client: AsyncClient, test_org, test_product  # noqa: ARG001
+    api_client: AsyncClient,
+    test_org,
+    test_product,  # noqa: ARG001
 ):
     """Org with product but no repos returns empty activity."""
     resp = await api_client.get(f"/api/v1/organizations/{test_org.id}/team-activity")
@@ -134,9 +134,7 @@ async def test_team_activity_with_product_no_repos(
 @pytest.mark.anyio
 async def test_team_activity_custom_days(api_client: AsyncClient, test_org):
     """Custom days parameter is respected."""
-    resp = await api_client.get(
-        f"/api/v1/organizations/{test_org.id}/team-activity?days=7"
-    )
+    resp = await api_client.get(f"/api/v1/organizations/{test_org.id}/team-activity?days=7")
     assert resp.status_code == 200
     assert resp.json()["period_days"] == 7
 
@@ -144,9 +142,7 @@ async def test_team_activity_custom_days(api_client: AsyncClient, test_org):
 @pytest.mark.anyio
 async def test_team_activity_invalid_days_defaults(api_client: AsyncClient, test_org):
     """Invalid days parameter defaults to 14."""
-    resp = await api_client.get(
-        f"/api/v1/organizations/{test_org.id}/team-activity?days=999"
-    )
+    resp = await api_client.get(f"/api/v1/organizations/{test_org.id}/team-activity?days=999")
     assert resp.status_code == 200
     assert resp.json()["period_days"] == 14
 
@@ -196,9 +192,7 @@ async def test_team_activity_member_fields(api_client: AsyncClient, test_org):
 
 
 @pytest.mark.anyio
-async def test_team_activity_pending_member(
-    api_client: AsyncClient, db_session, test_org
-):
+async def test_team_activity_pending_member(api_client: AsyncClient, db_session, test_org):
     """Members who haven't signed in show as pending."""
     from app.domain.org_member_operations import org_member_ops
     from app.models.user import User

@@ -353,9 +353,7 @@ async def import_github_repos(
                 f"You can import {available} more. Upgrade your plan to add more.",
             )
 
-    token = await get_github_token(
-        db, current_user.id, organization_id=product.organization_id
-    )
+    token = await get_github_token(db, current_user.id, organization_id=product.organization_id)
     github = GitHubService(token)
 
     imported: list[ImportedRepo] = []
@@ -603,9 +601,7 @@ async def bulk_refresh_github_repos(
 
     await require_product_subscription(db, data.product_id)
 
-    token = await get_github_token(
-        db, current_user.id, organization_id=product.organization_id
-    )
+    token = await get_github_token(db, current_user.id, organization_id=product.organization_id)
     github = GitHubService(token)
 
     # Get all GitHub-linked repos for this product (RLS enforces access)
@@ -792,9 +788,7 @@ async def link_github_repo(
         )
 
     # Check for duplicate: same repo already linked to this product
-    existing = await repository_ops.get_by_github_id(
-        db, data.product_id, fresh_data.github_id
-    )
+    existing = await repository_ops.get_by_github_id(db, data.product_id, fresh_data.github_id)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

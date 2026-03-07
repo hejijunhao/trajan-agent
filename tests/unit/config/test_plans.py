@@ -1,6 +1,6 @@
 """Unit tests for plan configuration and tier resolution."""
 
-from app.config.plans import PlanConfig, get_plan, get_price_id_for_tier
+from app.config.plans import get_plan, get_price_id_for_tier
 
 
 class TestGetPlan:

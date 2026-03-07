@@ -11,9 +11,7 @@ from app.api.deps.auth import (
     get_current_user_optional,
     get_signing_key,
 )
-
 from tests.helpers.mock_factories import make_mock_user, mock_scalar_result
-
 
 # ---------------------------------------------------------------------------
 # get_signing_key
@@ -85,8 +83,6 @@ class TestGetCurrentUser:
 
     @pytest.mark.asyncio
     async def test_raises_401_on_jwt_error(self):
-        from jose import JWTError
-
         credentials = MagicMock()
         credentials.credentials = "invalid.jwt.token"
 
