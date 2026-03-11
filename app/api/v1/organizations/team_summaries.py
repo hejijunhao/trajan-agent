@@ -200,7 +200,7 @@ async def _generate_team_summaries(
             logger.exception(f"Failed to fetch commits for product {product.id}")
             return []
 
-    all_results = await asyncio.gather(*[fetch_for_product(p) for p in products])
+    all_results = [await fetch_for_product(p) for p in products]
 
     # 3. Group commits by author
     commits_by_author: dict[str, list[dict[str, Any]]] = defaultdict(list)
