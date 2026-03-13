@@ -19,10 +19,24 @@ class GitHubAppInstallation(UUIDMixin, TimestampMixin, SQLModel, table=True):
     __tablename__ = "github_app_installations"
 
     installation_id: int = Field(unique=True, index=True)
-    organization_id: uuid_pkg.UUID = Field(foreign_key="organizations.id", index=True)
+    organization_id: uuid_pkg.UUID = Field(
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("organizations.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+    )
     github_account_login: str = Field(max_length=255)
     github_account_type: str = Field(max_length=20)  # "Organization" | "User"
-    installed_by_user_id: uuid_pkg.UUID = Field(foreign_key="users.id")
+    installed_by_user_id: uuid_pkg.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     permissions: dict = Field(default={}, sa_column=Column(JSONB, nullable=False, default={}))
     repository_selection: str = Field(max_length=20, default="all")
     suspended_at: datetime | None = Field(
