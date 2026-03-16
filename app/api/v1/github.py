@@ -359,9 +359,15 @@ async def import_github_repos(
     imported: list[ImportedRepo] = []
     skipped: list[SkippedRepo] = []
 
-    # Fetch user repos once upfront to avoid N+1 API calls
-    user_repos = await github.get_user_repos(per_page=100, visibility="all")
-    repos_by_id = {r.github_id: r for r in user_repos.repos}
+    # Fetch user repos once upfront to avoid N+1 API calls.
+    # This may fail when using a GitHub App installation token (which can't
+    # access /user/repos). In that case, fall through to per-repo fetches.
+    repos_by_id: dict[int, object] = {}
+    try:
+        user_repos = await github.get_user_repos(per_page=100, visibility="all")
+        repos_by_id = {r.github_id: r for r in user_repos.repos}
+    except GitHubAPIError:
+        logger.debug("Pre-fetch of user repos failed (likely App token); will fetch individually")
 
     for github_id in data.github_ids:
         # Check if already imported to this specific product
