@@ -147,22 +147,42 @@ async def resolve_github_token(
     """Resolve a GitHub token for API access.
 
     Priority:
-    1. Current user's own token (preferred — respects their repo access scope)
-    2. Org owner/admin token (fallback for collaborative read access)
+    1. Current user's own PAT (preferred — respects their repo access scope)
+    2. GitHub App installation token (org-level, short-lived)
+    3. Org owner/admin PAT (fallback for collaborative read access)
     """
-    from app.domain import org_member_ops, product_ops
+    from app.domain import github_app_installation_ops, org_member_ops, product_ops
+    from app.services.github.app_auth import github_app_auth
 
-    # 1. Try current user's token first
+    # 1. Try current user's PAT first
     preferences = await preferences_ops.get_by_user_id(db, current_user.id)
     token = preferences_ops.get_decrypted_token(preferences) if preferences else None
     if token:
         return token
 
-    # 2. Fallback: find a token from an org admin/owner
+    # 2. Try GitHub App installation token for the product's org
     product = await product_ops.get(db, product_id)
     if not product or not product.organization_id:
         return None
 
+    if github_app_auth.is_configured:
+        installation = await github_app_installation_ops.get_for_org(
+            db, product.organization_id
+        )
+        if installation and not installation.suspended_at:
+            try:
+                app_token = await github_app_auth.get_installation_token(
+                    installation.installation_id
+                )
+                if app_token:
+                    return app_token
+            except Exception:
+                logger.warning(
+                    f"Failed to get GitHub App token for org {product.organization_id}, "
+                    "falling back to org member PAT"
+                )
+
+    # 3. Fallback: find a PAT from an org admin/owner
     members = await org_member_ops.get_members_with_tokens(db, product.organization_id)
     for member in members:
         member_prefs = await preferences_ops.get_by_user_id(db, member.user_id)
