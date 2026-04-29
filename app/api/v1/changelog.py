@@ -15,6 +15,7 @@ from app.api.deps import (
 )
 from app.api.v1.progress.utils import resolve_github_token
 from app.domain import changelog_ops, product_ops, repository_ops
+from app.models.changelog import ChangelogEntry
 from app.models.user import User
 from app.schemas.changelog import (
     ChangelogCommitRead,
@@ -37,10 +38,10 @@ VALID_CATEGORIES = {"added", "changed", "fixed", "removed", "security", "infrast
 # ---------------------------------------------------------------------------
 
 
-def _serialize_entry(entry: object) -> ChangelogEntryRead:
+def _serialize_entry(entry: ChangelogEntry) -> ChangelogEntryRead:
     """Convert a ChangelogEntry ORM object to a response schema."""
     commits = []
-    for c in getattr(entry, "commits", []):
+    for c in entry.commits or []:
         commits.append(
             ChangelogCommitRead(
                 id=str(c.id),
@@ -387,6 +388,7 @@ async def _run_changelog_generation(
     Uses a fresh DB session to avoid statement timeout on long-running AI operations.
     """
     from app.core.database import async_session_maker
+    from app.core.rls import set_rls_user_context
     from app.services.changelog import ChangelogGenerator
     from app.services.github import GitHubReadOperations
 
@@ -394,6 +396,9 @@ async def _run_changelog_generation(
         try:
             product_uuid = uuid_pkg.UUID(product_id)
             user_uuid = uuid_pkg.UUID(user_id)
+
+            # Fresh session → must set RLS context before any RLS-protected query.
+            await set_rls_user_context(db, user_uuid)
 
             product = await product_ops.get(db, product_uuid)
             if not product:
@@ -431,6 +436,9 @@ async def _run_changelog_generation(
             logger.error(f"Changelog generation failed for product {product_id}: {e}")
             # Clear progress on failure
             try:
+                # SET LOCAL is reset on every commit inside generator.generate(),
+                # so re-establish RLS context before the cleanup query.
+                await set_rls_user_context(db, uuid_pkg.UUID(user_id))
                 product = await product_ops.get(db, uuid_pkg.UUID(product_id))
                 if product:
                     progress = product.docs_generation_progress

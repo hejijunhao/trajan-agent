@@ -67,7 +67,7 @@ async def analyze_product(
     # Also checks subscription is active — raises 402 if pending/none
     # product is included in sub_ctx (avoids redundant DB lookup)
     sub_ctx = await require_product_subscription(db, product_id)
-    product = sub_ctx.product
+    product = sub_ctx.require_product()
 
     # Check if agent features are enabled for this organization
     repo_count = await repository_ops.count_by_org(db, sub_ctx.organization.id)

@@ -188,7 +188,8 @@ class SectionOperations:
             return existing
 
         created_sections = []
-        for section_config in DEFAULT_SECTIONS:
+        for default_section in DEFAULT_SECTIONS:
+            section_config = dict(default_section)
             subsections = section_config.pop("subsections", [])
 
             section = await self.create(
