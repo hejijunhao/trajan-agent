@@ -246,7 +246,7 @@ class DocumentOperations:
         # Mark as having local changes if it was synced
         if doc.sync_status == "synced":
             doc.sync_status = "local_changes"
-        await db.commit()
+        await db.flush()
         await db.refresh(doc)
         return doc
 
@@ -262,7 +262,7 @@ class DocumentOperations:
 
         if doc.github_path:  # Only track if it's a synced document
             doc.sync_status = "local_changes"
-            await db.commit()
+            await db.flush()
             await db.refresh(doc)
         return doc
 

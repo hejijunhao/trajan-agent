@@ -115,7 +115,7 @@ async def add_or_update_collaborator(
     """
     await check_product_admin_access(db, product_id, current_user.id)
     sub_ctx = await require_product_subscription(db, product_id)
-    product = sub_ctx.product
+    product = sub_ctx.require_product()
 
     # Validate access level
     valid_levels = {level.value for level in ProductAccessLevel}
