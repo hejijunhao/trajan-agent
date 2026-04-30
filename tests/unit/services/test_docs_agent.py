@@ -29,7 +29,7 @@ class TestPlansAgentFolderClassification:
             name="Test Product",
         )
         self.github_service = MagicMock()
-        self.agent = PlansAgent(self.db, self.product, self.github_service)
+        self.agent = PlansAgent(self.db, self.product, self.github_service, user_id=MagicMock())
 
     def _create_plan(self, title: str, content: str, folder: str | None = None) -> Document:
         """Helper to create a plan document."""
@@ -178,7 +178,10 @@ class TestDocumentOperationsMove:
             result = await self.ops.move_to_folder(mock_db, mock_doc.id, "executing")
 
         assert result.folder == {"path": "executing"}
-        mock_db.commit.assert_called_once()
+        # Domain ops use flush(); the request-end commit picks them up. See C2 in
+        # docs/completions/critical-fixes-2026-04-29.md.
+        mock_db.flush.assert_called_once()
+        mock_db.commit.assert_not_called()
         mock_db.refresh.assert_called_once_with(mock_doc)
 
     @pytest.mark.asyncio
@@ -207,6 +210,7 @@ class TestDocumentOperationsMove:
             result = await self.ops.move_to_folder(mock_db, MagicMock(), "executing")
 
         assert result is None
+        mock_db.flush.assert_not_called()
         mock_db.commit.assert_not_called()
 
     @pytest.mark.asyncio
