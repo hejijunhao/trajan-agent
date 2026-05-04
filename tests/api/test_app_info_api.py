@@ -118,7 +118,7 @@ async def test_get_tags(
 async def test_bulk_create(
     api_client: AsyncClient, test_product, test_app_info_entry, test_subscription
 ):
-    """POST /api/v1/app-info/bulk creates entries, skipping duplicates."""
+    """POST /api/v1/app-info/bulk creates entries, skipping duplicates by default."""
     resp = await api_client.post(
         "/api/v1/app-info/bulk",
         json={
@@ -131,7 +131,41 @@ async def test_bulk_create(
     )
     assert resp.status_code == 201
     data = resp.json()
-    assert "created" in data
-    assert "skipped" in data
+    # Phase 2 widened the response shape — `updated` is now always present.
+    assert set(data.keys()) >= {"created", "updated", "skipped"}
+    assert isinstance(data["updated"], list)
     assert len(data["created"]) >= 1
     assert len(data["skipped"]) >= 1
+    # Default conflict_strategy is SKIP, so nothing should appear in `updated`.
+    assert data["updated"] == []
+
+
+@pytest.mark.anyio
+async def test_bulk_create_update_strategy_returns_updated_list(
+    api_client: AsyncClient, test_product, test_app_info_entry, test_subscription
+):
+    """POST /api/v1/app-info/bulk with conflict_strategy='update' rewrites existing keys.
+
+    The pre-seeded `test_app_info_entry` row collides with a key in the paste
+    — under UPDATE strategy it must move from `skipped` to `updated` and
+    `skipped` must be empty.
+    """
+    new_key = f"BULK_NEW_{uuid.uuid4().hex[:8]}"
+    resp = await api_client.post(
+        "/api/v1/app-info/bulk",
+        json={
+            "product_id": str(test_product.id),
+            "entries": [
+                {"key": new_key, "value": "v1"},
+                {"key": test_app_info_entry.key, "value": "rewritten"},
+            ],
+            "conflict_strategy": "update",
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert len(data["created"]) == 1
+    assert data["created"][0]["key"] == new_key
+    assert len(data["updated"]) == 1
+    assert data["updated"][0]["key"] == test_app_info_entry.key
+    assert data["skipped"] == []

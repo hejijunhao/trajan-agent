@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.domain.organization_operations import organization_ops
 from app.domain.subscription_operations import subscription_ops
 from app.models.organization import Organization
+from app.models.product import Product
 from app.models.subscription import Subscription, SubscriptionStatus
 
 from .organization import get_current_organization
@@ -27,7 +28,23 @@ class SubscriptionContext:
     organization: Organization
     subscription: Subscription
     plan: PlanConfig
-    product: object | None = None  # Product when resolved via product-scoped context
+    product: Product | None = None  # Product when resolved via product-scoped context
+
+    def require_product(self) -> Product:
+        """Return the product, asserting it was resolved via the product-scoped path.
+
+        Use this from any endpoint that obtains its context via
+        ``require_product_subscription()`` / ``get_subscription_context_for_product()``
+        — those always populate ``product``. The check exists to catch programmer
+        error (e.g., accidentally using the org-scoped context on a product endpoint),
+        not user-input edge cases.
+        """
+        if self.product is None:
+            raise RuntimeError(
+                "SubscriptionContext.require_product() called but product is None. "
+                "Use require_product_subscription() to resolve product-scoped context."
+            )
+        return self.product
 
 
 async def get_subscription_context(

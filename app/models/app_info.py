@@ -1,4 +1,5 @@
 import uuid as uuid_pkg
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Column, ForeignKey, Index, String
@@ -7,6 +8,14 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.base import TimestampMixin, UserOwnedMixin, UUIDMixin
+
+
+class ConflictStrategy(str, Enum):
+    """How `bulk_create` resolves keys that already exist for the product."""
+
+    SKIP = "skip"  # legacy behaviour — incoming entry is dropped, key reported in `skipped`
+    UPDATE = "update"  # rewrite value (and selectively other fields per merge rules)
+
 
 if TYPE_CHECKING:
     from app.models.product import Product
@@ -70,13 +79,15 @@ class AppInfoBulkCreate(SQLModel):
     product_id: uuid_pkg.UUID
     entries: list[AppInfoBulkEntry]
     default_tags: list[str] = []  # Tags to apply to all entries without their own tags
+    conflict_strategy: ConflictStrategy = ConflictStrategy.SKIP
 
 
 class AppInfoBulkResponse(SQLModel):
     """Response schema for bulk create operation."""
 
-    created: list[dict[str, Any]]  # Created entries
-    skipped: list[str]  # Keys that were skipped (duplicates)
+    created: list[dict[str, Any]]  # Newly inserted entries
+    updated: list[dict[str, Any]]  # Entries that already existed and were rewritten
+    skipped: list[str]  # Keys that were left untouched (duplicates under SKIP strategy)
 
 
 class AppInfoExportEntry(SQLModel):
