@@ -11,7 +11,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.app_info_operations import app_info_ops, normalize_tags
-from app.models.app_info import AppInfoBulkEntry
+from app.models.app_info import AppInfoBulkEntry, ConflictStrategy
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Create with tag normalization
@@ -184,12 +184,13 @@ class TestAppInfoKeyOps:
             AppInfoBulkEntry(key="EXISTING", value="new-value"),
             AppInfoBulkEntry(key="BRAND_NEW", value="fresh-value"),
         ]
-        created, skipped = await app_info_ops.bulk_create(
+        created, updated, skipped = await app_info_ops.bulk_create(
             db_session, test_user.id, test_product.id, entries
         )
 
         assert len(created) == 1
         assert created[0].key == "BRAND_NEW"
+        assert updated == []
         assert skipped == ["EXISTING"]
 
         # Verify original value unchanged
@@ -207,7 +208,7 @@ class TestAppInfoKeyOps:
             AppInfoBulkEntry(key="NO_TAGS", value="v1"),
             AppInfoBulkEntry(key="OWN_TAGS", value="v2", tags=["custom"]),
         ]
-        created, _ = await app_info_ops.bulk_create(
+        created, _updated, _skipped = await app_info_ops.bulk_create(
             db_session,
             test_user.id,
             test_product.id,
@@ -218,3 +219,124 @@ class TestAppInfoKeyOps:
         by_key = {e.key: e for e in created}
         assert by_key["NO_TAGS"].tags == ["imported"]
         assert by_key["OWN_TAGS"].tags == ["custom"]
+
+    async def test_bulk_create_update_strategy_rewrites_secret_value_with_reencryption(
+        self, db_session: AsyncSession, test_user, test_product
+    ):
+        """UPDATE strategy on a secret row re-encrypts the new value end-to-end.
+
+        This is the integration-level guarantee that Phase 1's "delegate to
+        self.update()" choice exercises the canonical encryption path. If a
+        future change short-circuits update() with a raw SQL write, this test
+        breaks because the stored ciphertext won't decrypt to the new value.
+        """
+        existing = await app_info_ops.create(
+            db_session,
+            obj_in={
+                "key": "ROTATED_SECRET",
+                "value": "old-secret-123",
+                "category": "credential",
+                "is_secret": True,
+                "product_id": test_product.id,
+            },
+            user_id=test_user.id,
+        )
+        # Sanity: the original round-trips
+        assert app_info_ops.decrypt_entry_value(existing) == "old-secret-123"
+
+        entries = [AppInfoBulkEntry(key="ROTATED_SECRET", value="new-secret-456")]
+        created, updated, skipped = await app_info_ops.bulk_create(
+            db_session,
+            test_user.id,
+            test_product.id,
+            entries,
+            conflict_strategy=ConflictStrategy.UPDATE,
+        )
+
+        assert created == []
+        assert skipped == []
+        assert len(updated) == 1
+        # Re-fetch from the DB to confirm the row's ciphertext was rewritten
+        refetched = await app_info_ops.get_by_key(
+            db_session, test_user.id, test_product.id, "ROTATED_SECRET"
+        )
+        assert refetched is not None
+        assert refetched.is_secret is True
+        assert app_info_ops.decrypt_entry_value(refetched) == "new-secret-456"
+
+    async def test_bulk_create_update_strategy_preserves_is_secret_flag(
+        self, db_session: AsyncSession, test_user, test_product
+    ):
+        """Pasting `is_secret=False` over a secret row must not flip the flag.
+
+        The new value still gets re-encrypted because update() reads is_secret
+        from the existing row, which is the contract that prevents accidental
+        plaintext-storage of a value the operator believed was a secret.
+        """
+        existing = await app_info_ops.create(
+            db_session,
+            obj_in={
+                "key": "STAYS_SECRET",
+                "value": "original",
+                "category": "credential",
+                "is_secret": True,
+                "product_id": test_product.id,
+            },
+            user_id=test_user.id,
+        )
+        assert existing.is_secret is True
+
+        # Paste tries to flip is_secret=False; bulk_create must ignore it.
+        entries = [AppInfoBulkEntry(key="STAYS_SECRET", value="rotated", is_secret=False)]
+        await app_info_ops.bulk_create(
+            db_session,
+            test_user.id,
+            test_product.id,
+            entries,
+            conflict_strategy=ConflictStrategy.UPDATE,
+        )
+
+        refetched = await app_info_ops.get_by_key(
+            db_session, test_user.id, test_product.id, "STAYS_SECRET"
+        )
+        assert refetched is not None
+        assert refetched.is_secret is True
+        assert app_info_ops.decrypt_entry_value(refetched) == "rotated"
+
+    async def test_bulk_create_update_strategy_preserves_non_secret_flag(
+        self, db_session: AsyncSession, test_user, test_product
+    ):
+        """Inverse guard: paste `is_secret=True` over a non-secret row keeps it non-secret.
+
+        Without this rule, a stray paste annotation could silently re-encrypt
+        a row whose value was previously cleartext-readable via export, making
+        operator audits inconsistent.
+        """
+        await app_info_ops.create(
+            db_session,
+            obj_in={
+                "key": "STAYS_PLAIN",
+                "value": "v1",
+                "category": "env_var",
+                "is_secret": False,
+                "product_id": test_product.id,
+            },
+            user_id=test_user.id,
+        )
+
+        entries = [AppInfoBulkEntry(key="STAYS_PLAIN", value="v2", is_secret=True)]
+        await app_info_ops.bulk_create(
+            db_session,
+            test_user.id,
+            test_product.id,
+            entries,
+            conflict_strategy=ConflictStrategy.UPDATE,
+        )
+
+        refetched = await app_info_ops.get_by_key(
+            db_session, test_user.id, test_product.id, "STAYS_PLAIN"
+        )
+        assert refetched is not None
+        assert refetched.is_secret is False
+        # Stored as plaintext (not encrypted), so the raw value matches
+        assert refetched.value == "v2"

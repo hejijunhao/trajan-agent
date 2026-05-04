@@ -15,6 +15,7 @@ from app.domain.organization_operations import organization_ops
 from app.domain.product_access_operations import product_access_ops
 from app.domain.product_operations import product_ops
 from app.models.app_info import (
+    AppInfo,
     AppInfoBulkCreate,
     AppInfoBulkResponse,
     AppInfoCreate,
@@ -390,7 +391,13 @@ async def bulk_create_app_info(
     """
     Bulk create app info entries from parsed .env content.
 
-    Entries with duplicate keys (already existing in the product) are skipped.
+    Conflict handling is governed by `conflict_strategy` on the request body:
+    - `"skip"` (default, back-compat): keys already present in the product are
+      dropped and reported under `skipped`.
+    - `"update"`: existing rows are rewritten in place. Value is overwritten;
+      `is_secret`, description, category, and tags-without-explicit-paste are
+      preserved (see `AppInfoOperations.bulk_create` for the full merge rules).
+
     Duplicate keys within the request take the last occurrence.
 
     **Validation limits:**
@@ -447,30 +454,32 @@ async def bulk_create_app_info(
             ),
         )
 
-    created, skipped = await app_info_ops.bulk_create(
+    created, updated, skipped = await app_info_ops.bulk_create(
         db,
         user_id=current_user.id,
         product_id=data.product_id,
         entries=data.entries,
         default_tags=data.default_tags,
+        conflict_strategy=data.conflict_strategy,
     )
 
+    def _serialize(e: AppInfo) -> dict[str, object]:
+        return {
+            "id": str(e.id),
+            "key": e.key,
+            "value": "********" if e.is_secret else e.value,
+            "category": e.category,
+            "is_secret": e.is_secret,
+            "description": e.description,
+            "target_file": e.target_file,
+            "tags": e.tags or [],
+            "product_id": str(e.product_id) if e.product_id else None,
+            "created_at": e.created_at.isoformat(),
+            "updated_at": e.updated_at.isoformat(),
+        }
+
     return AppInfoBulkResponse(
-        created=[
-            {
-                "id": str(e.id),
-                "key": e.key,
-                "value": "********" if e.is_secret else e.value,
-                "category": e.category,
-                "is_secret": e.is_secret,
-                "description": e.description,
-                "target_file": e.target_file,
-                "tags": e.tags or [],
-                "product_id": str(e.product_id) if e.product_id else None,
-                "created_at": e.created_at.isoformat(),
-                "updated_at": e.updated_at.isoformat(),
-            }
-            for e in created
-        ],
+        created=[_serialize(e) for e in created],
+        updated=[_serialize(e) for e in updated],
         skipped=skipped,
     )

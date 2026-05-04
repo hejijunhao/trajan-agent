@@ -89,7 +89,7 @@ class FeedbackOperations(BaseOperations[Feedback]):
 
         feedback.ai_summary = ai_summary
         feedback.ai_processed_at = datetime.now(UTC)
-        await db.commit()
+        await db.flush()
         await db.refresh(feedback)
         return feedback
 
@@ -109,7 +109,7 @@ class FeedbackOperations(BaseOperations[Feedback]):
         if admin_notes is not None:
             feedback.admin_notes = admin_notes
         feedback.updated_at = datetime.now(UTC)
-        await db.commit()
+        await db.flush()
         await db.refresh(feedback)
         return feedback
 

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import token_encryption
 from app.domain.base_operations import BaseOperations
-from app.models.app_info import AppInfo, AppInfoBulkEntry
+from app.models.app_info import AppInfo, AppInfoBulkEntry, ConflictStrategy
 
 # Tag validation constants
 MAX_TAGS_PER_ENTRY = 10
@@ -323,21 +323,27 @@ class AppInfoOperations(BaseOperations[AppInfo]):
         result = await db.execute(statement)
         return result.scalar_one_or_none()
 
-    async def get_existing_keys(
+    async def get_existing_rows_by_keys(
         self,
         db: AsyncSession,
-        user_id: uuid_pkg.UUID,
         product_id: uuid_pkg.UUID,
         keys: list[str],
-    ) -> set[str]:
-        """Get set of keys that already exist for a product."""
-        statement = select(AppInfo.key).where(  # type: ignore[call-overload]
-            AppInfo.user_id == user_id,
-            AppInfo.product_id == product_id,
+    ) -> dict[str, AppInfo]:
+        """Fetch existing rows for a product keyed by `key`.
+
+        Org-scoped (no user_id filter): app_info is shared across an org, so a
+        bulk import must spot collisions against any teammate's row, not just
+        the importing user's. Returns a dict keyed by `key` for O(1) lookup
+        during bulk_create.
+        """
+        if not keys:
+            return {}
+        statement = select(AppInfo).where(
+            AppInfo.product_id == product_id,  # type: ignore[arg-type]
             AppInfo.key.in_(keys),  # type: ignore[union-attr]
         )
         result = await db.execute(statement)
-        return set(result.scalars().all())
+        return {row.key: row for row in result.scalars().all() if row.key}
 
     async def bulk_create(
         self,
@@ -346,43 +352,79 @@ class AppInfoOperations(BaseOperations[AppInfo]):
         product_id: uuid_pkg.UUID,
         entries: list[AppInfoBulkEntry],
         default_tags: list[str] | None = None,
-    ) -> tuple[list[AppInfo], list[str]]:
-        """
-        Create multiple app info entries, skipping duplicates.
+        conflict_strategy: ConflictStrategy = ConflictStrategy.SKIP,
+    ) -> tuple[list[AppInfo], list[AppInfo], list[str]]:
+        """Create or update app info entries from a bulk paste.
+
+        Conflict handling is driven by `conflict_strategy`:
+        - SKIP (default, legacy behaviour): incoming entries whose key already
+          exists are dropped and reported in `skipped`.
+        - UPDATE: existing rows are rewritten. Merge rules are intentionally
+          conservative to avoid surprise side-effects on a paste:
+            * value: always overwrite.
+            * is_secret: keep existing flag — pasting cannot flip a row from
+              non-secret to secret or vice versa, which would otherwise
+              re-encrypt or expose values silently.
+            * tags: replace only if the pasted entry carries explicit tags;
+              otherwise preserve existing tags. `default_tags` is *not* used
+              to clobber existing tags.
+            * target_file: adopt the pasted value only if the existing row
+              has none; otherwise keep existing.
+            * description / category: preserve existing.
+
+        Updates run through `self.update()` so re-encryption, `updated_at`,
+        and tag normalization all flow through the canonical write path.
 
         Args:
-            default_tags: Optional tags to apply to all entries that don't have their own tags.
+            default_tags: Tags applied to *new* entries that don't have their
+                own tags. Existing-row updates ignore this parameter.
+            conflict_strategy: see above.
 
         Returns:
-            Tuple of (created entries, skipped keys)
+            Tuple of (created, updated, skipped_keys).
         """
         if not entries:
-            return [], []
+            return [], [], []
 
-        # Normalize default tags once
+        # Normalize default tags once (only used on new-row inserts)
         normalized_default_tags = normalize_tags(default_tags) if default_tags else []
 
-        # Get existing keys to skip duplicates
-        incoming_keys = [e.key for e in entries]
-        existing_keys = await self.get_existing_keys(db, user_id, product_id, incoming_keys)
-
-        # Also handle duplicates within the incoming batch (take last occurrence)
+        # Dedupe within the incoming batch (last occurrence wins)
         seen_keys: dict[str, AppInfoBulkEntry] = {}
         for entry in entries:
             seen_keys[entry.key] = entry
 
+        # Fetch existing rows once, keyed by key — single round trip for the whole batch
+        existing_rows = await self.get_existing_rows_by_keys(db, product_id, list(seen_keys.keys()))
+
         created: list[AppInfo] = []
+        updated: list[AppInfo] = []
         skipped: list[str] = []
 
         for key, entry in seen_keys.items():
-            if key in existing_keys:
-                skipped.append(key)
+            existing = existing_rows.get(key)
+
+            if existing is not None:
+                if conflict_strategy == ConflictStrategy.SKIP:
+                    skipped.append(key)
+                    continue
+
+                # UPDATE strategy — build a partial payload per merge rules.
+                # Omitting `is_secret` makes update() fall back to the existing
+                # flag, which both preserves the rule and drives re-encryption
+                # correctly without us reaching for token_encryption here.
+                update_payload: dict[str, object] = {"value": entry.value}
+                if entry.tags:
+                    update_payload["tags"] = entry.tags
+                if entry.target_file is not None and not existing.target_file:
+                    update_payload["target_file"] = entry.target_file
+
+                updated_obj = await self.update(db, db_obj=existing, obj_in=update_payload)
+                updated.append(updated_obj)
                 continue
 
-            # Encrypt value if marked as secret
+            # New key — insert path (unchanged from legacy behaviour)
             encrypted_value = self._encrypt_value(entry.value, entry.is_secret)
-
-            # Use entry tags if provided, otherwise use default tags
             entry_tags = normalize_tags(entry.tags) if entry.tags else normalized_default_tags
 
             db_obj = AppInfo(
@@ -404,7 +446,7 @@ class AppInfoOperations(BaseOperations[AppInfo]):
             for obj in created:
                 await db.refresh(obj)
 
-        return created, skipped
+        return created, updated, skipped
 
 
 app_info_ops = AppInfoOperations()
