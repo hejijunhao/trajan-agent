@@ -25,6 +25,7 @@ from app.api.v1.organizations.schemas import (
     TeamMemberStats,
 )
 from app.api.v1.progress.commit_fetcher import fetch_commit_stats, fetch_product_commits
+from app.core.database import rls_scoped_session
 from app.domain import org_member_ops, product_ops
 from app.models.user import User
 from app.services.github.timeline_types import TimelineEvent
@@ -127,23 +128,34 @@ async def get_team_activity(
         return await _build_empty_response(db, org_id, days)
 
     # 2. Fetch contributor data per product (in parallel)
+    #
+    # Each task opens its own AsyncSession via ``rls_scoped_session``. Sharing
+    # the request-scoped ``db`` across the gather raises asyncpg's "another
+    # operation is in progress" the moment two tasks issue overlapping
+    # queries — see commit_fetcher's ``handle_repo_rename`` writes and
+    # ``commit_stats_cache_ops.bulk_upsert`` for the DB-resident steps that
+    # collide. RLS context is set per task; the v0.31.3 ``after_begin``
+    # listener re-arms it across any mid-task commit.
     async def fetch_for_product(product: Any) -> tuple[str, str, list[TimelineEvent]]:
         """Fetch and enrich commits for a single product."""
         product_name = product.name or "Unknown"
         product_id_str = str(product.id)
         try:
-            result = await fetch_product_commits(
-                db=db,
-                product_id=product.id,
-                current_user=user,
-                period=period,
-                fetch_limit=200,
-            )
-            if not result:
-                return (product_id_str, product_name, [])
+            async with rls_scoped_session(user.id) as task_db:
+                result = await fetch_product_commits(
+                    db=task_db,
+                    product_id=product.id,
+                    current_user=user,
+                    period=period,
+                    fetch_limit=200,
+                )
+                if not result:
+                    return (product_id_str, product_name, [])
 
-            events = await fetch_commit_stats(db, result.github, result.repos, result.events)
-            return (product_id_str, product_name, events)
+                events = await fetch_commit_stats(
+                    task_db, result.github, result.repos, result.events
+                )
+                return (product_id_str, product_name, events)
         except Exception:
             logger.exception(f"Failed to fetch commits for product {product.id}")
             return (product_id_str, product_name, [])

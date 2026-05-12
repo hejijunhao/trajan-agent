@@ -289,7 +289,7 @@ async def update_product(
     """Update a product. Requires Editor or Admin access."""
     await check_product_editor_access(db, product_id, current_user.id)
     sub_ctx = await require_product_subscription(db, product_id)
-    product = sub_ctx.product
+    product = sub_ctx.require_product()
 
     updated = await product_ops.update(
         db, db_obj=product, obj_in=data.model_dump(exclude_unset=True)
@@ -314,7 +314,7 @@ async def delete_product(
     """Delete a product and all related entities. Requires Admin access."""
     await check_product_admin_access(db, product_id, current_user.id)
     sub_ctx = await require_product_subscription(db, product_id)
-    product = sub_ctx.product
+    product = sub_ctx.require_product()
 
     # Delete dependent records not covered by SA cascade relationships
     await db.execute(
