@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config.settings import settings
+from app.core.database import cron_session_maker
 from app.models.organization import MemberRole, OrganizationMember
 from app.models.user import User
 from app.services.email.postmark import postmark_service
@@ -246,7 +247,7 @@ class OrgMemberOperations:
                 # User exists in Supabase but not locally - fetch and sync
                 if not resolved_user:
                     try:
-                        resolved_user = await self._sync_user_from_supabase(db, email)
+                        resolved_user = await self._sync_user_from_supabase(email)
                     except Exception as sync_error:
                         logger.error(f"Failed to sync Supabase user {email}: {sync_error}")
 
@@ -275,28 +276,37 @@ class OrgMemberOperations:
             logger.error(f"Supabase invite failed for {email}: {e}")
             raise SupabaseInviteError("Failed to send invite email. Please try again later.") from e
 
-        # Return existing public.users record if present (e.g. Supabase
-        # reactivated a soft-deleted auth user with the same UUID)
-        existing = await db.get(User, supabase_user_id)
-        if existing:
-            return existing
+        # Insert the public.users row through the BYPASSRLS cron engine.
+        # The inviter's session runs under `trajan_app` with `app.current_user_id`
+        # set to the inviter; the only INSERT policy on `users` is
+        # `users_insert_self` (id = current_user_id), which rejects an invitee
+        # row whose UUID belongs to the new auth user. Same bypass-then-scope
+        # pattern as the v0.31.5 / v0.31.6 cron + webhook bootstraps.
+        async with cron_session_maker() as cron_db:
+            existing: User | None = await cron_db.get(User, supabase_user_id)
+            if existing:
+                cron_db.expunge(existing)
+                return existing
 
-        # Create public.users record
-        user = User(id=supabase_user_id, email=email)
-        db.add(user)
-        await db.flush()
-        await db.refresh(user)
+            user = User(id=supabase_user_id, email=email)
+            cron_db.add(user)
+            await cron_db.commit()
+            await cron_db.refresh(user)
+            cron_db.expunge(user)
         return user
 
     async def _sync_user_from_supabase(
         self,
-        db: AsyncSession,
         email: str,
     ) -> User | None:
         """
         Fetch a user from Supabase admin API and create local record.
 
         Used for recovery when user exists in Supabase auth but not in public.users.
+
+        Runs entirely under the BYPASSRLS cron engine: the existing-row check
+        also has to bypass RLS, since `users_select_own` / `users_select_org_members`
+        won't see a freshly-recovered invitee from the inviter's scoped session.
         """
         supabase = get_supabase_admin_client()
 
@@ -308,18 +318,20 @@ class OrgMemberOperations:
         if not supabase_user:
             return None
 
-        # Check if user already exists locally by ID (email case mismatch)
         supabase_id = uuid_pkg.UUID(supabase_user.id)
-        existing = await db.get(User, supabase_id)
-        if existing:
-            logger.info(f"User {email} already exists locally (id={supabase_id})")
-            return existing
 
-        # Create local record
-        user = User(id=supabase_id, email=email)
-        db.add(user)
-        await db.flush()
-        await db.refresh(user)
+        async with cron_session_maker() as cron_db:
+            existing: User | None = await cron_db.get(User, supabase_id)
+            if existing:
+                logger.info(f"User {email} already exists locally (id={supabase_id})")
+                cron_db.expunge(existing)
+                return existing
+
+            user = User(id=supabase_id, email=email)
+            cron_db.add(user)
+            await cron_db.commit()
+            await cron_db.refresh(user)
+            cron_db.expunge(user)
         logger.info(f"Synced Supabase user {email} to local database")
         return user
 
